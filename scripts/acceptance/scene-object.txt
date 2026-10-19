@@ -1,0 +1,121 @@
+# Acceptance 1-4 on a temp copy of the site
+appearance dark
+open scene:hero-island
+# 1. every scene and object is listed
+expect scenes 15
+expect objects 161
+expect doc scene:hero-island
+# 2. crisp at 1x-4x and Fit
+zoom 1
+expect zoom 1
+zoom 2
+expect zoom 2
+zoom 3
+expect zoom 3
+zoom 4
+expect zoom 4
+zoom fit
+# night appearance: the island's drop shadow takes the page color
+expect theme dark
+expect scenepixel 240,72 #1C1712
+snapshot @OUT@/a2-fit-dark.png
+appearance light
+expect theme light
+expect scenepixel 240,72 #C9B79A
+appearance dark
+expect theme dark
+# library -> place on a tile
+library pine
+hover 4 -1 1
+place 4 -1 1
+expect object pine
+expect at 4,-1,1
+expect dirty true
+# move by column, row, level
+move 1 0
+expect at 5,-1,1
+move 0 1
+expect at 5,0,1
+move 0 0 1
+expect at 5,0,2
+key shift+down
+expect at 5,0,1
+# edits to one item within a second merge into one undo step (a held key); wait to make a new one
+wait 1100
+key left
+expect at 4,0,1
+undo
+expect at 5,0,1
+redo
+expect at 4,0,1
+# raise, lower, duplicate, remove
+lower
+raise
+duplicate
+expect object pine
+remove
+# select by clicking (the house)
+select none
+click -57 38
+expect object house
+# move a pixel-placed item by x, y; snap; undo all of it
+set x -58
+expect at px -58,59
+nudge 1 0
+expect at px -57,59
+snap
+undo
+undo
+undo
+expect at px -59,59
+# play and scrub the timeline
+time 9400
+expect time 9400
+play
+wait 1200
+pause
+time 0
+# 4. checks, save, build art
+expect problems 0
+save
+expect dirty false
+build
+expect build ok
+expect hint none
+done
+# 3. object mode: paint, erase, fill, pick, layers, frames, preview
+open object:house
+expect mode object
+tool pencil
+color ink
+px 23 20
+expect pixel 23,20 ink
+tool picker
+pick 23 20
+expect color ink
+tool eraser
+erase 23,20
+expect pixel 23,20 empty
+undo
+expect pixel 23,20 ink
+tool fill
+color water-1
+fill 0 0
+expect pixel 0,0 water-1
+undo
+expect pixel 0,0 empty
+layer add
+expect layers 2
+layer 0
+expect layer 0
+animate ff
+expect frames 4
+frame next
+expect frame 1
+snapshot @OUT@/a3-object-frames-dark.png
+undo
+undo
+expect layers 1
+expect frames 1
+save
+expect dirty false
