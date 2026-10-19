@@ -155,7 +155,7 @@ describe('registry', () => {
     const mutating = [
       'doc.merge', 'doc.redo', 'doc.reload', 'doc.revert', 'doc.save', 'doc.undo', 'document.copy', 'document.new',
       'object.animate', 'object.erase', 'object.fill', 'object.frame.add', 'object.frame.delete', 'object.frame.duplicate', 'object.frame.move',
-      'object.layer.add', 'object.layer.delete', 'object.layer.duplicate', 'object.layer.move', 'object.new', 'object.paint', 'object.resize', 'object.still',
+      'object.layer.add', 'object.layer.delete', 'object.layer.duplicate', 'object.layer.move', 'object.map.set', 'object.new', 'object.paint', 'object.resize', 'object.still',
       'proposal.apply', 'proposal.reject',
       'scene.duplicate', 'scene.group.set', 'scene.key.delete', 'scene.key.move', 'scene.key.set', 'scene.lower', 'scene.motion.path', 'scene.motion.set', 'scene.move',
       'scene.new', 'scene.place', 'scene.raise', 'scene.remove', 'scene.set', 'scene.snap', 'scene.track.add', 'scene.track.remove',

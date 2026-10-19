@@ -44,6 +44,7 @@
 | [`object layer duplicate`](#objectlayerduplicate) | Duplicate a layer, just above it | edit |
 | [`object layer move`](#objectlayermove) | Move a layer up (--by 1, raise) or down (--by -1, lower) | edit |
 | [`object list`](#objectlist) | List every object with its kind, size, layers, frames and colors | read |
+| [`object map set`](#objectmapset) | Replace a whole map of a sprite's layer (or frame of a loop) from rows, in one undo step | edit |
 | [`object new`](#objectnew) | Make a new object from a starter: a blank sprite, a block, or one that extends another | edit |
 | [`object paint`](#objectpaint) | Paint pixels of an object a palette color, on a layer and frame | edit |
 | [`object pick`](#objectpick) | The color at a pixel of an object, on a layer and frame (the Picker) | read |
@@ -693,6 +694,31 @@ read-only · MCP tool `object_list`
 | param | type | | description |
 | --- | --- | --- | --- |
 | `--kind` | `sprite` \| `block` |  | only objects of this kind |
+
+#### object.map.set
+
+Replace a whole map of a sprite's layer (or frame of a loop) from rows, in one undo step.
+
+```
+pixellab object map set <name> <rows…> [--keys <json>] [--layer <n>] [--frame <n>] [--resize]
+```
+
+Rows are strings of one character per pixel, top to bottom, '.' transparent. With --keys (a legend, { char: color }), each legend character becomes the object's key for that color, made if it has none, so a generated map can use any characters; without, the characters are the object's own keys. Checks the palette, outfit colors (only for objects that extend character), the 12-color cap and the 64×64 size cap. A size other than the object's is refused unless --resize, which pads or crops every map first (as object.resize). On an object that extends another, a still layer's rows become row overrides. Blocks are refused: paint their surface and sides.
+
+edits docs · MCP tool `object_map_set`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | object name (or objects/<name>) |
+| `rows` (positional) | list of string | required | the map's rows, top to bottom; on the command line each row a positional or the flag repeated |
+| `--keys` | object |  | a legend: character → palette color, as JSON on the command line |
+| `--layer` | integer | default `0` | the layer, from 0 at the bottom (at least 0) |
+| `--frame` | integer | default `0` | the frame of a frame loop (a block: of its surface loop) (at least 0) |
+| `--resize` | boolean | default `false` | resize the object to the rows' size first |
+
+```sh
+pixellab object map set pebble .gg. gwwg gwwg .gg. --keys '{"g": "grass-2", "w": "ink"}'
+```
 
 #### object.new
 

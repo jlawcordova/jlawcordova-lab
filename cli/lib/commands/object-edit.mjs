@@ -1,5 +1,6 @@
 // Object edit commands: paint, erase, fill and pick pixels, layers, frames,
-// loops, resize and new. Every change goes through the engine's edit.mjs, as
+// loops, resize, new and whole maps (object.map.set,
+// docs/intents/2026-10-mcp-gaps/spec.md D9). Every change goes through the engine's edit.mjs, as
 // the web lab's Object mode does (src/components/lab/object-mode.ts,
 // layers-panel.ts, frames-panel.ts, palette-panel.ts), so the source stays
 // in the shape a person would write by hand.
@@ -491,4 +492,127 @@ const create = {
   format: formatChange,
 };
 
-export default [paint, erase, fill, pick, ...layerCommands, ...frameCommands, animate, still, resize, create];
+/**
+ * Rows → the object's own keys: legend characters become the object's key
+ * for their color (made as painting makes one), the rest must be its keys.
+ * @param {any} ctx
+ * @param {any} sources
+ * @param {any} r  resolved
+ * @param {any} doc
+ * @param {string[]} rows
+ * @param {Record<string, string>} legend
+ */
+function rekey(ctx, sources, r, doc, rows, legend) {
+  const { engine, edit } = ctx.site;
+  /** @type {Record<string, string>} */
+  const to = {};
+  /** @type {string[]} */
+  const added = [];
+  for (const [ch, color] of Object.entries(legend)) {
+    if (!engine.isKey(ch)) throw new UsageError(`object.map.set: legend key ${JSON.stringify(ch)} must be one printable character, not space or '.'`);
+    if (typeof color !== 'string') throw new UsageError(`object.map.set: legend key ${ch} must name a palette color`);
+    const entry = sources.colors.get(color);
+    if (!entry) throw new UsageError(`object.map.set: no palette color named ${color} (pixellab palette get)`);
+    if (entry.tier === 'outfit' && !r.character) throw new CommandError(`${color} is an outfit color; only objects that extend character may use it`, { code: 'color_not_allowed' });
+    const known = { ...r.keys, ...(doc.keys ?? {}) };
+    const key = edit.keyFor(doc, known, color);
+    if (!(key in known)) added.push(`${key}: ${color}`);
+    to[ch] = key;
+  }
+  const own = { ...r.keys, ...(doc.keys ?? {}) };
+  const unknown = new Set();
+  const out = rows.map((row) =>
+    [...row]
+      .map((ch) => {
+        if (ch === '.') return ch;
+        if (ch in to) return to[ch];
+        if (ch in own) return ch;
+        unknown.add(ch);
+        return ch;
+      })
+      .join(''),
+  );
+  if (unknown.size) {
+    throw new UsageError(`object.map.set: ${[...unknown].map((c) => JSON.stringify(c)).join(', ')} ${unknown.size === 1 ? "isn't a key" : "aren't keys"} of ${'this object'} or the legend; give them in --keys (char → color)`);
+  }
+  return { rows: out, added };
+}
+
+/** @type {import('../registry.mjs').Command} */
+const setMap = {
+  name: 'object.map.set',
+  summary: "Replace a whole map of a sprite's layer (or frame of a loop) from rows, in one undo step",
+  description:
+    "Rows are strings of one character per pixel, top to bottom, '.' transparent. With --keys (a legend, { char: color }), each legend character " +
+    "becomes the object's key for that color, made if it has none, so a generated map can use any characters; without, the characters are the object's own keys. " +
+    'Checks the palette, outfit colors (only for objects that extend character), the 12-color cap and the 64×64 size cap. A size other than the object\'s ' +
+    'is refused unless --resize, which pads or crops every map first (as object.resize). On an object that extends another, a still layer\'s rows become ' +
+    'row overrides. Blocks are refused: paint their surface and sides.',
+  params: {
+    type: 'object',
+    properties: {
+      name: NAME,
+      rows: { type: 'array', items: { type: 'string' }, minItems: 1, description: "the map's rows, top to bottom; on the command line each row a positional or the flag repeated" },
+      keys: { type: 'object', description: 'a legend: character → palette color, as JSON on the command line' },
+      layer: LAYER,
+      frame: FRAME,
+      resize: { type: 'boolean', default: false, description: "resize the object to the rows' size first" },
+    },
+    required: ['name', 'rows'],
+  },
+  args: ['name', 'rows'],
+  mutates: true,
+  examples: ["pixellab object map set pebble .gg. gwwg gwwg .gg. --keys '{\"g\": \"grass-2\", \"w\": \"ink\"}'"],
+  async run(ctx, params) {
+    const name = await objectAt(ctx, params.name);
+    const { rows, layer, frame } = params;
+    const width = rows[0].length;
+    const bad = rows.findIndex((/** @type {string} */ row) => row.length !== width);
+    if (width === 0) throw new UsageError('object.map.set: rows are empty');
+    if (bad >= 0) throw new UsageError(`object.map.set: row ${bad} is ${rows[bad].length} wide; every row must be ${width}, like row 0`);
+    const { engine, edit } = ctx.site;
+    if (width > engine.CAPS.size || rows.length > engine.CAPS.size) {
+      throw new CommandError(`${width}×${rows.length} is over the size cap, ${engine.CAPS.size}×${engine.CAPS.size}`, { code: 'size_cap' });
+    }
+    return editOf(ctx)({ kind: 'object', name }, async (/** @type {any} */ doc) => {
+      if (doc.kind === 'block') throw new CommandError(`${name} is a block; its maps are its surface and sides, which object.paint paints`, { code: 'not_editable' });
+      let { sources } = await ctx.sources();
+      let r = resolved(ctx, sources, name);
+      const blocked = paintBlocked(doc, r, layer);
+      if (blocked) throw new CommandError(blocked, { code: 'paint_blocked' });
+      const source = r.layers[layer];
+      const loop = 'frames' in source;
+      if (loop && !source.frames[frame]) throw new UsageError(`there's no frame ${frame}; the loop has ${source.frames.length}`);
+      if (!loop && frame > 0) throw new UsageError(`layer ${layer} is a still map, so it has only frame 0`);
+      if (width !== r.width || rows.length !== r.height) {
+        if (doc.extends) throw new CommandError(`${name} extends ${doc.extends} and takes its size (${r.width}×${r.height}) from it`, { code: 'size_mismatch' });
+        if (!params.resize) {
+          throw new CommandError(`${name} is ${r.width}×${r.height}; these rows are ${width}×${rows.length}. Give --resize to resize every map first.`, { code: 'size_mismatch' });
+        }
+        edit.resize(doc, width, rows.length);
+        ctx.invalidate();
+        ({ sources } = await ctx.sources());
+        r = resolved(ctx, sources, name);
+      }
+      const { rows: keyed, added } = rekey(ctx, sources, r, doc, rows, params.keys ?? {});
+      if (doc.extends) {
+        const baseMap = edit.mapAt(engine.resolve(sources, doc.extends).layers[layer], 0);
+        const mine = Object.fromEntries(keyed.map((row, y) => [y, row]).filter(([y, row]) => row !== baseMap[/** @type {number} */ (y)]));
+        const overrides = { ...(doc.rows ?? {}) };
+        if (Object.keys(mine).length) overrides[layer] = mine;
+        else delete overrides[layer];
+        doc.rows = Object.fromEntries(Object.keys(overrides).map(Number).sort((a, b) => a - b).map((l) => [l, overrides[l]]));
+      } else if (loop) doc.layers[layer].frames[frame] = keyed;
+      else doc.layers[layer].map = keyed;
+      ctx.invalidate();
+      ({ sources } = await ctx.sources());
+      const colors = engine.usedColors(sources, resolved(ctx, sources, name)).length;
+      if (colors > engine.CAPS.colors) throw new CommandError(`That map gives ${name} ${colors} colors; an object paints at most ${engine.CAPS.colors}`, { code: 'color_cap' });
+      const where = `layer ${layer}${loop ? `, frame ${frame}` : ''}`;
+      return { message: `Set the map of ${where}: ${width}×${rows.length}, ${colors} color${colors === 1 ? '' : 's'} in the object`, size: [width, rows.length], colors, keysAdded: added };
+    });
+  },
+  format: formatChange,
+};
+
+export default [paint, erase, fill, pick, ...layerCommands, ...frameCommands, animate, still, resize, create, setMap];
