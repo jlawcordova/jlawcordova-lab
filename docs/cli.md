@@ -58,6 +58,7 @@
 | [`proposal render`](#proposalrender) | Render a proposal's doc as it would be once applied, without writing anything | read |
 | [`proposal show`](#proposalshow) | Show a proposal: its edits, the source, and a diff from the file as it is now | read |
 | [`scene duplicate`](#sceneduplicate) | Duplicate an item one column over, right after it in paint order | edit |
+| [`scene group set`](#scenegroupset) | Set or remove a group's class and data attributes, or set its data-x and data-y to its first item's foot | edit |
 | [`scene items`](#sceneitems) | List a scene's items in paint order, with stable paths | read |
 | [`scene list`](#scenelist) | List every scene | read |
 | [`scene lower`](#scenelower) | Lower an item: paint it one earlier, behind the item before it | edit |
@@ -945,6 +946,30 @@ edits docs · MCP tool `scene_duplicate`
 | `name` (positional) | string | required | scene name (or scenes/<name>) |
 | `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id |
 
+#### scene.group.set
+
+Set or remove a group's class and data attributes, or set its data-x and data-y to its first item's foot.
+
+```
+pixellab scene group set <name> <group> [--attrs <json>] [--foot]
+```
+
+--group is the group's path (scene items lists groups), or an item (path or id) inside it. --attrs is an object of attribute values ({"data-enter": "object", "data-x": "96"}); '' removes one. --foot sets data-x and data-y to the foot of the group's first item: an item on a tile stands on its tile's center, a sprite placed by pixel on the center of its bottom row. One undo step.
+
+edits docs · MCP tool `scene_group_set`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `group` (positional) | string | required | the group: its path, or an item (path or id) inside it |
+| `--attrs` | object |  | attribute values; '' removes one (JSON on the command line) |
+| `--foot` | boolean | default `false` | set data-x and data-y to the first item's foot |
+
+```sh
+pixellab scene group set hero-island 42 --foot
+pixellab scene group set hero-island truck-a --attrs '{"data-enter": "object"}'
+```
+
 #### scene.items
 
 List a scene's items in paint order, with stable paths.
@@ -993,10 +1018,10 @@ edits docs · MCP tool `scene_lower`
 Move an item by tiles and levels (--by) or by pixels (--nudge).
 
 ```
-pixellab scene move <name> <item> [--by <n,…>] [--nudge <n,…>] [--time <n>]
+pixellab scene move <name> <item> [--keep-group] [--by <n,…>] [--nudge <n,…>] [--time <n>]
 ```
 
-As the lab's arrow keys: --by col,row[,level] moves an item on a tile by whole tiles (a pixel-placed item moves by the same screen offset); --nudge x,y moves it by pixels, and an item on a tile is then placed by pixel. With --time past 0, an animated item (one with an id and a motion track) moves at that time instead: the key there, made if needed, takes the move. Rapid repeats coalesce into one undo step.
+As the lab's arrow keys: --by col,row[,level] moves an item on a tile by whole tiles (a pixel-placed item moves by the same screen offset); --nudge x,y moves it by pixels, and an item on a tile is then placed by pixel. With --time past 0, an animated item (one with an id and a motion track) moves at that time instead: the key there, made if needed, takes the move. Rapid repeats coalesce into one undo step. A move at rest keeps the item's group in step: data-x/data-y that were its placement point or foot, and data-col/data-row that were its tile, follow it (--no-keep-group leaves them); the result has the group when they did.
 
 edits docs · MCP tool `scene_move`
 
@@ -1004,6 +1029,7 @@ edits docs · MCP tool `scene_move`
 | --- | --- | --- | --- |
 | `name` (positional) | string | required | scene name (or scenes/<name>) |
 | `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id |
+| `--keep-group` | boolean | default `true` | keep the item's group in step: data-x/data-y that were its placement point or foot, and data-col/data-row that were its tile, follow it |
 | `--by` | list of integer |  | tiles to move: col,row[,level] |
 | `--nudge` | list of integer |  | pixels to move: x,y |
 | `--time` | integer | default `0` | ms into the scene's motion; past 0 an animated item's key moves (at least 0) |
@@ -1032,10 +1058,10 @@ edits docs · MCP tool `scene_new`
 Place an object on a tile (or at a pixel point) in a scene.
 
 ```
-pixellab scene place <name> <object> [--at <n,…>] [--px <n,…>] [--class <text>] [--id <text>]
+pixellab scene place <name> <object> [--at <n,…>] [--px <n,…>] [--class <text>] [--id <text>] [--group <text>] [--new-group <json>] [--foot] [--index <n>]
 ```
 
-Like the lab's Place tool: an item on a tile goes in back-to-front order (by row + col, then level, among the items on tiles), so it paints in front of what's behind it. A pixel placement goes last, in front of everything. With neither --at nor --px, it goes on the level-0 tile at the middle of the view, where the lab's cursor starts. Returns the new item's path.
+Like the lab's Place tool: an item on a tile goes in back-to-front order (by row + col, then level, among the items on tiles), so it paints in front of what's behind it. A pixel placement goes last, in front of everything. With neither --at nor --px, it goes on the level-0 tile at the middle of the view, where the lab's cursor starts. --group puts it inside an existing group (the group's path, or an item inside it); --new-group wraps it in a new group with those attributes (class and data-*, like {"class": "enter", "data-enter": "object"}), and --foot sets that group's data-x and data-y to the item's foot. --index is its position in the list it goes into (0 is the back); by default an item on a tile goes back to front there (a new group judged by its first item on a tile) and one placed by pixel goes last. Returns the new item's path, and its group's.
 
 edits docs · MCP tool `scene_place`
 
@@ -1047,10 +1073,15 @@ edits docs · MCP tool `scene_place`
 | `--px` | list of integer |  | a point in scene pixels: x,y |
 | `--class` | string |  | a class list for the item |
 | `--id` | string |  | an id for the item (lowercase kebab-case, unique in the scene) |
+| `--group` | string |  | an existing group to place it in: its path, or an item (path or id) inside it |
+| `--new-group` | object |  | attributes of a new group around the item (class, data-*), as JSON on the command line |
+| `--foot` | boolean | default `false` | with --new-group: set its data-x and data-y to the item's foot |
+| `--index` | integer |  | its position in the list it goes into (0 is the back) (at least 0) |
 
 ```sh
 pixellab scene place hero-island pine --at 14,6,1
 pixellab scene place range-sprite boxes --px 40,12 --dry-run
+pixellab scene place hero-island crate --at 3,1,1 --new-group '{"class": "enter", "data-enter": "object"}' --foot
 ```
 
 #### scene.raise
@@ -1116,10 +1147,10 @@ pixellab scene render hero-island --theme dark --out /tmp/hero-dark.png
 Set an item's tile or pixel point, one coordinate, its class or its id.
 
 ```
-pixellab scene set <name> <item> [--tile <n,…>] [--px <n,…>] [--col <n>] [--row <n>] [--level <n>] [--x <n>] [--y <n>] [--class <text>] [--id <text>]
+pixellab scene set <name> <item> [--keep-group] [--tile <n,…>] [--px <n,…>] [--col <n>] [--row <n>] [--level <n>] [--x <n>] [--y <n>] [--class <text>] [--id <text>]
 ```
 
---tile col,row,level or --px x,y place the item there (changing how it's placed if need be); --col, --row, --level (an item on a tile) and --x, --y (a pixel-placed item) set one coordinate, like the lab's Selected fields. --class sets the class list and --id the id; an empty value removes it. An id's motion track follows it when it's renamed and goes with it when it's removed. All in one undo step.
+--tile col,row,level or --px x,y place the item there (changing how it's placed if need be); --col, --row, --level (an item on a tile) and --x, --y (a pixel-placed item) set one coordinate, like the lab's Selected fields. --class sets the class list and --id the id; an empty value removes it. An id's motion track follows it when it's renamed and goes with it when it's removed. All in one undo step. Moving it keeps its group's data-x/data-y and data-col/data-row in step, as scene.move does (--no-keep-group leaves them).
 
 edits docs · MCP tool `scene_set`
 
@@ -1127,6 +1158,7 @@ edits docs · MCP tool `scene_set`
 | --- | --- | --- | --- |
 | `name` (positional) | string | required | scene name (or scenes/<name>) |
 | `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id |
+| `--keep-group` | boolean | default `true` | keep the item's group in step: data-x/data-y that were its placement point or foot, and data-col/data-row that were its tile, follow it |
 | `--tile` | list of integer |  | a tile: col,row,level |
 | `--px` | list of integer |  | a point in scene pixels: x,y |
 | `--col` | integer |  |  |
@@ -1162,8 +1194,10 @@ read-only · MCP tool `scene_show`
 Snap a pixel-placed item to the level-0 tile under its placement point.
 
 ```
-pixellab scene snap <name> <item>
+pixellab scene snap <name> <item> [--keep-group]
 ```
+
+Its group's data-x/data-y and data-col/data-row follow it, as scene.move keeps them (--no-keep-group leaves them).
 
 edits docs · MCP tool `scene_snap`
 
@@ -1171,3 +1205,4 @@ edits docs · MCP tool `scene_snap`
 | --- | --- | --- | --- |
 | `name` (positional) | string | required | scene name (or scenes/<name>) |
 | `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id |
+| `--keep-group` | boolean | default `true` | keep the item's group in step: data-x/data-y that were its placement point or foot, and data-col/data-row that were its tile, follow it |
