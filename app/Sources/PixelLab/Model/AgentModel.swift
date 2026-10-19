@@ -10,7 +10,9 @@ import Observation
 final class AgentModel {
     @ObservationIgnored weak var app: AppModel?
 
-    var proposals: [ProposalSummary] = []
+    var proposals: [ProposalSummary] = [] {
+        didSet { if proposals.count != oldValue.count { updateDockBadge() } }
+    }
     /// Activity rows, oldest first (at most `activityLimit`).
     var activity: [ActivityRow] = []
     /// Clear (view only) hides the rows up to this id.
@@ -31,6 +33,9 @@ final class AgentModel {
     @ObservationIgnored private var loading = 0
     @ObservationIgnored private var ghostLoading = false
     @ObservationIgnored private var ghostAgain = false
+    /// Rendered ghosts by key (proposal version, doc, time or frame, theme), so
+    /// a playing timeline's ghost keeps up once a loop has been rendered.
+    @ObservationIgnored private var ghostCache: [String: ProposalGhost] = [:]
     @ObservationIgnored private var memo: (key: String, changes: [GhostChange], pixels: [PixelPoint])?
 
     // Scripts (PIXELLAB_SCRIPT) answer the questions an alert would ask.
@@ -57,6 +62,11 @@ final class AgentModel {
 
     var selected: ProposalSummary? { selectedID.flatMap { id in proposals.first { $0.id == id } } }
     var pendingCount: Int { proposals.count }
+
+    /// The Dock icon shows how many proposals wait for review (none: no badge).
+    func updateDockBadge() {
+        NSApp?.dockTile.badgeLabel = pendingCount > 0 ? String(pendingCount) : nil
+    }
 
     var visibleActivity: [ActivityRow] {
         activity.filter { $0.id > clearedThrough && (!errorsOnly || !$0.entry.ok) }
@@ -191,7 +201,8 @@ final class AgentModel {
         if ref.kind == .scene {
             let t = app.timeline.hasMotion ? app.timeline.renderTime : 0
             params["time"] = JSONValue(t)
-            at = "t\(t)"
+            params["theme"] = app.stageTheme
+            at = "t\(t)\(app.stageDark ? "d" : "l")"
         } else {
             params.merge(app.objectEditor.renderParams(frame: app.objectEditor.frame)) { _, b in b }
             at = "f" + app.objectEditor.cacheKey(frame: app.objectEditor.frame)
@@ -207,8 +218,13 @@ final class AgentModel {
             return
         }
         if ghost?.key == wanted.key { return }
-        // While the timeline plays, keep the last ghost rather than render every frame.
-        if ghost != nil, app?.timeline.playing == true || app?.objectEditor.playing == true { return }
+        if let hit = ghostCache[wanted.key] {
+            ghost = hit
+            memo = nil
+            return
+        }
+        // While the timeline plays, the ghost follows it: one render in flight
+        // at a time (the latest time wins), cached per step for the next loop.
         if ghostLoading {
             ghostAgain = true
             return
@@ -226,7 +242,10 @@ final class AgentModel {
                         let stage = StageImage(image: image, viewBox: viewBox, scale: r.scale, items: r.items,
                                                anchor: r.anchor.map { CGPoint(x: $0[0], y: $0[1]) }, time: r.time)
                         let colors = w.ref.kind == .object ? PixelColors(cgImage: image.cgImage, scale: r.scale) : nil
-                        ghost = ProposalGhost(key: w.key, proposalID: r.id, ref: w.ref, image: stage, colors: colors)
+                        let made = ProposalGhost(key: w.key, proposalID: r.id, ref: w.ref, image: stage, colors: colors)
+                        if ghostCache.count > 400 { ghostCache = [:] }
+                        ghostCache[w.key] = made
+                        ghost = made
                         ghostError = nil
                         memo = nil
                     }

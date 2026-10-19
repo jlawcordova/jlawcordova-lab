@@ -27,7 +27,22 @@ struct StageOverlay: View {
         }
         .frame(width: geometry.contentSize.width, height: geometry.contentSize.height, alignment: .topLeading)
         .allowsHitTesting(false)
-        .accessibilityHidden(true)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilitySummary(editor: model.editor))
+        .accessibilityHidden(accessibilitySummary(editor: model.editor).isEmpty)
+    }
+
+    /// What VoiceOver reads for the overlay: the selection and where the Place tool would put its object.
+    private func accessibilitySummary(editor: SceneEditor) -> String {
+        var parts: [String] = []
+        if let item = doc.selectedItem {
+            parts.append("Selected \(item.id.map { "\(item.object) (\($0))" } ?? item.object) at \(item.at.spoken)")
+        }
+        if let object = editor.dropObject ?? (editor.effectiveTool == .place ? editor.placeObject : nil),
+           let tile = editor.hoverTile ?? editor.cursorTile {
+            parts.append("Place \(object) at column \(tile.col), row \(tile.row), level \(tile.level)")
+        }
+        return parts.joined(separator: ". ")
     }
 
     /// The library object, half see-through, where a click would place it.
@@ -192,10 +207,16 @@ struct ProposalGhostLayer: View {
         return geometry.viewRect(fromScene: CGRect(x: image.viewBox.minX + b[0] / s, y: image.viewBox.minY + b[1] / s, width: b[2] / s, height: b[3] / s))
     }
 
+    /// VoiceOver: what the ghost changes, with the objects named (the tags' text).
     private var summary: String {
-        if ghost.ref.kind == .object { return "Proposal ghost: \(changes.pixels.count) pixels change" }
-        let n = { (k: GhostChange.Kind) in changes.items.filter { $0.kind == k }.count }
-        return "Proposal ghost: \(n(.added)) added, \(n(.moved)) moved, \(n(.removed)) removed"
+        if ghost.ref.kind == .object { return "Proposal ghost: \(changes.pixels.count) pixel\(changes.pixels.count == 1 ? "" : "s") change" }
+        let parts = [GhostChange.Kind.added, .moved, .removed].compactMap { k -> String? in
+            let objects = changes.items.filter { $0.kind == k }.map(\.object)
+            guard !objects.isEmpty else { return nil }
+            let names = objects.prefix(5).joined(separator: ", ") + (objects.count > 5 ? " and \(objects.count - 5) more" : "")
+            return "\(objects.count) \(k.rawValue): \(names)"
+        }
+        return "Proposal ghost: " + (parts.isEmpty ? "no item changes" : parts.joined(separator: "; "))
     }
 }
 

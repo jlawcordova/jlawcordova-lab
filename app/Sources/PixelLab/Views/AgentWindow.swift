@@ -91,7 +91,7 @@ struct AgentHeader: View {
                 }
                 GridRow {
                     SectionLabel(title: "State")
-                    CodeChip(text: AgentModel.abbreviate(agent.stateDir))
+                    CodeChip(text: AgentModel.abbreviate(agent.stateDir), full: agent.stateDir)
                     Button {
                         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: agent.stateDir)])
                     } label: {
@@ -112,17 +112,29 @@ struct AgentHeader: View {
     }
 }
 
-/// A line of code on the card: SF Mono, selectable.
+/// A line of code on the card: SF Mono, one line truncated in the middle
+/// (long paths keep their start and end), the whole text in the tooltip, the
+/// accessibility value and Copy (context menu).
 struct CodeChip: View {
     var text: String
+    /// What the tooltip shows and Copy copies, when the chip shows a shorter form.
+    var full: String?
 
     var body: some View {
+        let whole = full ?? text
         Text(text)
             .font(Theme.monoFont(11))
             .foregroundStyle(Theme.ink)
-            .textSelection(.enabled)
-            .lineLimit(2)
+            .lineLimit(1)
             .truncationMode(.middle)
+            .help(whole)
+            .contextMenu {
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(whole, forType: .string)
+                }
+            }
+            .accessibilityLabel(whole)
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .frame(maxWidth: .infinity, alignment: .leading)

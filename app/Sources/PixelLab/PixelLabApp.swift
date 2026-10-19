@@ -99,6 +99,8 @@ struct PixelLabCommands: Commands {
                 if model.mode == .object { model.objectEditor.pixelGrid.toggle() } else { model.showGrid.toggle() }
             }
                 .keyboardShortcut("'")
+            Button(model.showInspector ? "Hide Inspector" : "Show Inspector") { model.showInspector.toggle() }
+                .keyboardShortcut("i", modifiers: [.command, .option])
             Divider()
             Button(model.agent.pendingCount > 0 ? "Show Agent (\(model.agent.pendingCount) to review)" : "Show Agent") { openWindow(id: WindowID.agent) }
                 .keyboardShortcut("a", modifiers: [.command, .option])
@@ -130,6 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Fonts.register()
         let model = AppModel.shared
         model.applyAppearance()
+        model.watchAppearance()
         if let request = model.snapshot {
             Snapshotter.start(request, model: model)
         } else if let script = model.script {
