@@ -20,7 +20,7 @@ Status: draft (reviewed with its intent, plan and code in one PR, at the owner's
 - **R10. `scene.group.set` edits a group's attributes.** Set or remove any `class` or `data-*` attribute, or set `data-x` and `data-y` to the foot of the group's first item. The group is named by its path or by an item inside it.
 - **R11. `scene.place` places inside groups.** Into an existing group (by its path or an item in it), or into a new group with given attributes (optionally with its foot), at a given index or where back-to-front order puts it.
 - **R12. Motion tracks and keys are commands.** `scene.track.add` and `scene.track.remove`; `scene.key.set` (a key's `move`, `show` and `pose`, or clearing any of them), `scene.key.move` and `scene.key.delete`; `scene.motion.set` for the loop's length.
-- **R13. Off-grid moves are warned about.** `check` lists a warning (not a problem) for every key-to-key move, including the loop back to the first key, whose steps aren't 1 px straight, 1:1 or 2:1, with the jump it makes. The key commands return the warnings of the track they changed.
+- **R13. Off-grid moves are warned about.** `check` lists a warning (not a problem) for every key-to-key move the item makes while it shows, including the loop back to the first key, whose steps aren't 1 px straight, 1:1 or 2:1, with the jump it makes. A jump while it's hidden (a reset) isn't seen, so it isn't listed. The key commands return the warnings of the track they changed.
 - **R14. `scene.motion.path` turns a polyline into on-grid keys** at a steady speed (px per second) or between two times, keeping any show and pose keys on the way.
 
 **Object edits**

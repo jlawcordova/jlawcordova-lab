@@ -60,8 +60,13 @@
 | [`scene duplicate`](#sceneduplicate) | Duplicate an item one column over, right after it in paint order | edit |
 | [`scene group set`](#scenegroupset) | Set or remove a group's class and data attributes, or set its data-x and data-y to its first item's foot | edit |
 | [`scene items`](#sceneitems) | List a scene's items in paint order, with stable paths | read |
+| [`scene key delete`](#scenekeydelete) | Delete a key of an item's track (not the one at 0: remove the track for that) | edit |
+| [`scene key move`](#scenekeymove) | Move a key of an item's track to another time | edit |
+| [`scene key set`](#scenekeyset) | Set a key of an item's track: its move, show and pose at a time (made if there's no key there) | edit |
 | [`scene list`](#scenelist) | List every scene | read |
 | [`scene lower`](#scenelower) | Lower an item: paint it one earlier, behind the item before it | edit |
+| [`scene motion path`](#scenemotionpath) | Key an item along a polyline on the grid, at a steady speed or between two times | edit |
+| [`scene motion set`](#scenemotionset) | Set the length of a scene's motion loop (making the motion if it has none) | edit |
 | [`scene move`](#scenemove) | Move an item by tiles and levels (--by) or by pixels (--nudge) | edit |
 | [`scene new`](#scenenew) | Make a new, empty scene (the starter: a 128×128 view around tile 0,0,0) | edit |
 | [`scene place`](#sceneplace) | Place an object on a tile (or at a pixel point) in a scene | edit |
@@ -71,6 +76,8 @@
 | [`scene set`](#sceneset) | Set an item's tile or pixel point, one coordinate, its class or its id | edit |
 | [`scene show`](#sceneshow) | Show a scene's settings, size, objects and motion | read |
 | [`scene snap`](#scenesnap) | Snap a pixel-placed item to the level-0 tile under its placement point | edit |
+| [`scene track add`](#scenetrackadd) | Add a motion track for an item (it needs an id): one key at 0, the rest frame | edit |
+| [`scene track remove`](#scenetrackremove) | Remove an item's motion track, with all its keys | edit |
 
 ## The command line
 
@@ -274,7 +281,7 @@ Validate the sources with the engine, all of them or one doc.
 pixellab check [name] [--kind <object|scene>]
 ```
 
-Problems are the engine's "<file>: <where>: <rule>" lines. With a name, only the problems in that doc and the files it uses (palette.mjs, the objects it places or extends) are listed. On the command line, the exit code is 1 when there are problems.
+Problems are the engine's "<file>: <where>: <rule>" lines. With a name, only the problems in that doc and the files it uses (palette.mjs, the objects it places or extends) are listed. On the command line, the exit code is 1 when there are problems. Warnings don't fail the check: a scene's key-to-key moves (the loop back to the first key included) whose steps aren't 1 px straight, 1:1 or 2:1, so the item jumps instead of walking the grid; scene.motion.path makes on-grid keys.
 
 read-only · MCP tool `check`
 
@@ -986,6 +993,69 @@ read-only · MCP tool `scene_items`
 | --- | --- | --- | --- |
 | `name` (positional) | string | required | scene name (or scenes/<name>) |
 
+#### scene.key.delete
+
+Delete a key of an item's track (not the one at 0: remove the track for that).
+
+```
+pixellab scene key delete <name> <item> --time <n>
+```
+
+edits docs · MCP tool `scene_key_delete`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id; an item needs an id to have a track (scene.set --id) |
+| `--time` | integer | required | ms into the loop (at least 0) |
+
+#### scene.key.move
+
+Move a key of an item's track to another time.
+
+```
+pixellab scene key move <name> <item> --time <n> --to <n>
+```
+
+The key at 0 (the rest frame) stays; a key can't land on another.
+
+edits docs · MCP tool `scene_key_move`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id; an item needs an id to have a track (scene.set --id) |
+| `--time` | integer | required | ms into the loop (at least 0) |
+| `--to` | integer | required | its new time, ms into the loop (at least 0) |
+
+#### scene.key.set
+
+Set a key of an item's track: its move, show and pose at a time (made if there's no key there).
+
+```
+pixellab scene key set <name> <item> --time <n> [--move <n,…>] [--show] [--pose <text>] [--clear <move|show|pose,…>]
+```
+
+--move x,y is pixels from where the scene places the item; --show false hides it from that key on; --pose <object> draws another object from that key on. --clear move,show,pose removes those values from the key, so they carry on from the key before. Returns the key and the track's off-grid warnings (moves whose steps aren't 1 px straight, 1:1 or 2:1).
+
+edits docs · MCP tool `scene_key_set`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id; an item needs an id to have a track (scene.set --id) |
+| `--time` | integer | required | ms into the loop (at least 0) |
+| `--move` | list of integer |  | pixels from where the scene places the item: x,y |
+| `--show` | boolean |  | whether the item shows from this key on |
+| `--pose` | string |  | the object the item draws from this key on |
+| `--clear` | list of string |  | values to remove from the key |
+
+```sh
+pixellab scene key set hero-island truck-a --time 4200 --move 32,16
+pixellab scene key set hero-island crane-hook --time 9000 --pose crane-hook-down
+pixellab scene key set hero-island parcel --time 12000 --no-show
+```
+
 #### scene.list
 
 List every scene.
@@ -1012,6 +1082,48 @@ edits docs · MCP tool `scene_lower`
 | --- | --- | --- | --- |
 | `name` (positional) | string | required | scene name (or scenes/<name>) |
 | `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id |
+
+#### scene.motion.path
+
+Key an item along a polyline on the grid, at a steady speed or between two times.
+
+```
+pixellab scene motion path <name> <item> <points…> [--start <n>] [--speed <n>] [--end <n>]
+```
+
+--points are moves (pixels from where the scene places the item), the first at --start. Each segment is split into runs that step 1 px straight, 1:1 or 2:1, each ending in a key; times follow the distance at --speed px per second, or spread from --start to --end. Keys inside the path lose their move (and go, if that leaves nothing); a key there with show or pose keeps its place on the path. Makes the track if the item (with an id) has none. Returns the keys written and the track's remaining off-grid warnings (such as the step from the path's end to the next key).
+
+edits docs · MCP tool `scene_motion_path`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id; an item needs an id to have a track (scene.set --id) |
+| `points` (positional) | list of [integer, …] | required | x,y moves along the path; on the command line x,y pairs separated by spaces |
+| `--start` | integer | default `0` | when the path starts, ms into the loop (at least 0) |
+| `--speed` | number |  | pixels per second along the path |
+| `--end` | integer |  | when the path ends, ms into the loop (instead of --speed) (at least 0) |
+
+```sh
+pixellab scene motion path hero-island truck-a 0,0 16,-3 48,-3 --start 2000 --speed 20
+```
+
+#### scene.motion.set
+
+Set the length of a scene's motion loop (making the motion if it has none).
+
+```
+pixellab scene motion set <name> --duration <n>
+```
+
+Refuses a length that would cut off keys.
+
+edits docs · MCP tool `scene_motion_set`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `--duration` | integer | required | the loop's length in ms (at least 100) |
 
 #### scene.move
 
@@ -1206,3 +1318,41 @@ edits docs · MCP tool `scene_snap`
 | `name` (positional) | string | required | scene name (or scenes/<name>) |
 | `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id |
 | `--keep-group` | boolean | default `true` | keep the item's group in step: data-x/data-y that were its placement point or foot, and data-col/data-row that were its tile, follow it |
+
+#### scene.track.add
+
+Add a motion track for an item (it needs an id): one key at 0, the rest frame.
+
+```
+pixellab scene track add <name> <item> [--duration <n>]
+```
+
+Makes the scene's motion (one loop of --duration ms) when it has none. Then scene.key.set or scene.motion.path keys it.
+
+edits docs · MCP tool `scene_track_add`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id; an item needs an id to have a track (scene.set --id) |
+| `--duration` | integer |  | the loop's length in ms, when the scene has no motion yet (at least 100) |
+
+```sh
+pixellab scene track add hero-island truck-a
+pixellab scene track add meadow bird --duration 4000
+```
+
+#### scene.track.remove
+
+Remove an item's motion track, with all its keys.
+
+```
+pixellab scene track remove <name> <item>
+```
+
+edits docs · MCP tool `scene_track_remove`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id; an item needs an id to have a track (scene.set --id) |
