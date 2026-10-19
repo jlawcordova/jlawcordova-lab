@@ -18,12 +18,11 @@ struct AgentWindow: View {
                 VStack(spacing: 0) {
                     AgentHeader(agent: agent)
                     Rectangle().fill(Theme.border).frame(height: 1)
-                    VSplitView {
-                        ProposalsSection(agent: agent)
-                            .frame(minHeight: 300, idealHeight: 460, maxHeight: .infinity)
-                        ActivitySection(agent: agent)
-                            .frame(minHeight: 140, idealHeight: 220, maxHeight: .infinity)
-                    }
+                    ProposalsSection(agent: agent)
+                        .frame(maxHeight: .infinity)
+                    Rectangle().fill(Theme.border).frame(height: 1)
+                    ActivitySection(agent: agent)
+                        .frame(height: 190)
                 }
                 .background(keys(agent))
             } else {
@@ -39,8 +38,8 @@ struct AgentWindow: View {
         .background(Theme.page)
         .tint(Theme.accent)
         .background(WindowAccessor { window in
+            // SwiftUI saves the Window scene's frame itself (autosave name "agent").
             model.agent.window = window
-            if window.frameAutosaveName.isEmpty { window.setFrameAutosaveName("PixelLabAgent") }
         })
     }
 
@@ -298,7 +297,7 @@ struct ProposalDetailView: View {
     }
 
     private func stageStatus(_ p: ProposalSummary) -> String {
-        if !agent.previewing { return "Open it in the editor to preview it on the stage" }
+        if !agent.previewing { return "Not open on the stage" }
         if !agent.ghostShown { return "Ghost hidden" }
         if let e = agent.ghostError { return "Couldn't render: \(e)" }
         return agent.visibleGhost != nil ? "Ghosted on the stage" : "Rendering the ghost…"
@@ -332,7 +331,6 @@ struct ProposalDetailView: View {
             } label: {
                 Text("Reject")
             }
-            .keyboardShortcut(.delete, modifiers: [])
             .disabled(agent.working != nil)
             .help("Reject: delete the proposal and leave the site as it is (⌫)")
             Button {
@@ -369,6 +367,9 @@ struct DiffView: View {
 
     var body: some View {
         let shown = lines.prefix(Self.maxLines)
+        // Scrolled so the first change shows, a few context lines above it.
+        let first = lines.first { $0.kind == .added || $0.kind == .removed }.map { max($0.id - 2, 0) }
+        ScrollViewReader { proxy in
         ScrollView([.vertical, .horizontal]) {
             VStack(alignment: .leading, spacing: 0) {
                 if lines.isEmpty {
@@ -376,6 +377,7 @@ struct DiffView: View {
                 }
                 ForEach(shown) { line in
                     Text(line.text.isEmpty ? " " : line.text)
+                        .id(line.id)
                         .foregroundStyle(color(line.kind))
                         .fixedSize()
                         .padding(.horizontal, 12)
@@ -389,6 +391,13 @@ struct DiffView: View {
             .font(Theme.monoFont(11))
             .padding(.vertical, 8)
             .textSelection(.enabled)
+        }
+        .defaultScrollAnchor(.topLeading)
+        .task(id: lines) {
+            // After the first layout, or there's nothing to scroll yet.
+            try? await Task.sleep(for: .milliseconds(60))
+            if let first { proxy.scrollTo(first, anchor: .topLeading) }
+        }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Code.ground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -461,7 +470,7 @@ struct ActivitySection: View {
                         .padding(.horizontal, 8)
                         .padding(.bottom, 8)
                     }
-                    .defaultScrollAnchor(.bottom)
+                    .onAppear { if let id = rows.last?.id { proxy.scrollTo(id, anchor: .bottom) } }
                     .onChange(of: agent.activity.last?.id) { _, id in
                         if let id { proxy.scrollTo(id, anchor: .bottom) }
                     }

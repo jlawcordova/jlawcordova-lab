@@ -40,6 +40,7 @@ import Foundation
 ///
 ///     agent open|close|size <w>x<h>   proposal select <n>|<id>|none   proposal next|prev|open
 ///     approve [force]   reject   ghost on|off   answer proceed|force|reject|cancel (the next question)
+///     agentkey up|down|esc|cmd+return|delete (a key into the Agent window)
 ///     snapshot agent <file.png>   menus (logs the View and Window menus)
 ///     expect proposals|ghost|ghostchanges|base|activity|question|proposal <value>
 ///
@@ -87,7 +88,7 @@ final class ScriptRunner {
             log("refusing to run: set PIXELLAB_SITE to a temp copy of the site (not \(real))")
             exit(2)
         }
-        guard !lines.isEmpty else {
+        guard lines.contains(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty && !$0.hasPrefix("#") }) else {
             log("no script at \(url.path)")
             exit(2)
         }
@@ -382,7 +383,7 @@ final class ScriptRunner {
             let window = agentWindow ? model.agent.window.flatMap { $0.isVisible ? $0 : nil } : Snapshotter.mainWindow()
             guard let window, Snapshotter.capture(window, to: out) else { throw Failure(agentWindow ? "no Agent window (agent open first)" : "couldn't capture") }
             return out.path
-        case "agent", "proposal", "approve", "reject", "ghost", "answer", "menus":
+        case "agent", "proposal", "approve", "reject", "ghost", "answer", "menus", "agentkey":
             return try await performAgent(words, model: model)
         case "expect":
             return try expect(words, model: model)
@@ -534,7 +535,7 @@ final class ScriptRunner {
                 let started = Date()
                 while agent.window?.isVisible != true, Date().timeIntervalSince(started) < 5 { try? await Task.sleep(for: .milliseconds(50)) }
                 guard let w = agent.window, w.isVisible else { throw Failure("the Agent window didn't open") }
-                w.setFrame(NSRect(origin: w.frame.origin, size: CGSize(width: 860, height: 760)), display: true)
+                w.setFrame(NSRect(origin: w.frame.origin, size: CGSize(width: 880, height: 820)), display: true)
                 return "Agent window \(Int(w.frame.width))×\(Int(w.frame.height)), autosave \(w.frameAutosaveName.isEmpty ? "none" : w.frameAutosaveName)"
             case "close":
                 agent.window?.performClose(nil)
@@ -582,6 +583,24 @@ final class ScriptRunner {
             guard let a = AgentAnswer(rawValue: try arg(words, 1)) else { throw Failure("answer proceed|force|reject|cancel") }
             agent.scriptAnswer = a
             return nil
+        case "agentkey":
+            // A real key down into the Agent window's key equivalents: up, down, esc, cmd+return, delete.
+            guard let w = agent.window, w.isVisible else { throw Failure("agent open first") }
+            let spec = try arg(words, 1)
+            let keys: [String: (String, UInt16, NSEvent.ModifierFlags)] = [
+                "up": (String(UnicodeScalar(0xF700)!), 126, [.numericPad, .function]), "down": (String(UnicodeScalar(0xF701)!), 125, [.numericPad, .function]),
+                "esc": ("\u{1b}", 53, []), "cmd+return": ("\r", 36, [.command]), "delete": ("\u{7f}", 51, []), "backspace": ("\u{8}", 51, []),
+            ]
+            guard let (chars, code, flags) = keys[spec] else { throw Failure("agentkey up|down|esc|cmd+return|delete") }
+            w.makeKeyAndOrderFront(nil)
+            guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
+                                               windowNumber: w.windowNumber, context: nil, characters: chars, charactersIgnoringModifiers: chars,
+                                               isARepeat: false, keyCode: code) else { throw Failure("no event") }
+            agent.lastQuestion = nil
+            let used = agent.handleKeyDown(event) || w.performKeyEquivalent(with: event)
+            try? await Task.sleep(for: .milliseconds(150))
+            guard used else { throw Failure("the Agent window didn't use \(spec)") }
+            return result() ?? agent.selected.map { "selected \($0.doc)" } ?? "none selected"
         case "menus":
             for title in ["View", "Window"] {
                 guard let menu = NSApp.mainMenu?.items.first(where: { $0.title == title })?.submenu else { continue }

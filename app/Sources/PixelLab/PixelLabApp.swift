@@ -23,7 +23,7 @@ struct PixelLabApp: App {
         Window("Agent", id: WindowID.agent) {
             AgentWindow().environment(model)
         }
-        .defaultSize(width: 860, height: 760)
+        .defaultSize(width: 880, height: 820)
         .defaultPosition(.trailing)
 
         Settings {

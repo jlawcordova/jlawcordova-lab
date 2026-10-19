@@ -39,7 +39,10 @@ final class AgentModel {
 
     /// Opens the Agent window (set by the main window, which has openWindow).
     @ObservationIgnored var openWindowAction: (@MainActor () -> Void)?
-    @ObservationIgnored weak var window: NSWindow?
+    @ObservationIgnored weak var window: NSWindow? {
+        didSet { installKeyMonitor() }
+    }
+    @ObservationIgnored private var keyMonitor: Any?
 
     static let activityLimit = 500
 
@@ -257,6 +260,30 @@ final class AgentModel {
     }
 
     // MARK: Window
+
+    /// ⌫ in the Agent window rejects the selected proposal (after a
+    /// confirmation). A local monitor rather than a button shortcut: the Delete
+    /// key's characters ("\u{7f}") don't match SwiftUI's `.delete` key equivalent.
+    private func installKeyMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            nonisolated(unsafe) let e = event
+            let used = MainActor.assumeIsolated { AgentModel.shared?.handleKeyDown(e) == true }
+            return used ? nil : event
+        }
+    }
+
+    /// The model the key monitor talks to (the app's one).
+    static var shared: AgentModel? { AppModel.shared.agent }
+
+    /// Returns whether the Agent window used the key.
+    func handleKeyDown(_ event: NSEvent) -> Bool {
+        guard let window, event.window === window, window.isKeyWindow, window.attachedSheet == nil else { return false }
+        let mods = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        guard event.keyCode == 51, mods.isEmpty, !(window.firstResponder is NSTextView), selected != nil, working == nil else { return false }
+        Task { await reject() }
+        return true
+    }
 
     func showWindow() {
         if let window, window.isVisible {
