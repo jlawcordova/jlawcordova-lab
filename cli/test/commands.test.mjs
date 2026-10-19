@@ -2,11 +2,12 @@
 // the CLI door (a spawned process), against a temp copy of the site.
 
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 
 import { createContext } from '../lib/context.mjs';
 import { registry } from '../lib/registry.mjs';
-import { openSite } from '../lib/site.mjs';
+import { openSite } from '../lib/document.mjs';
 import { makeSite, needsSite, spawnCli } from './helpers.mjs';
 
 /** A scene that breaks two rules, and an object that breaks one. */
@@ -52,18 +53,22 @@ describe('commands', needsSite, () => {
     return JSON.parse(r.stdout);
   };
 
-  test('site.info', async () => {
-    const r = await call('site.info');
-    assert.equal(r.root, site.root);
+  test('document.info (spec R3, R4): a site checkout resolves to its legacy source folder', async () => {
+    const r = await call('document.info');
+    assert.equal(r.root, join(site.root, 'src/assets/pixel-art/source'));
+    assert.equal(r.siteRoot, site.root);
+    assert.equal(r.kind, 'legacy-site');
     assert.equal(r.from, 'flag');
+    assert.equal(r.via, 'site');
+    assert.equal(r.publishDir, join(site.root, 'src/assets/pixel-art'));
     assert.ok(r.scenes >= 10);
     assert.ok(r.objects >= 100);
     assert.equal(r.colors.world, 32);
     assert.equal(r.problems, 0);
     assert.equal(r.branch, null, 'the temp copy is not a git checkout');
-    assert.deepEqual(await cliJson(['site', 'info']), r);
-    const human = await cli(['site', 'info']);
-    assert.match(human.stdout, /^site {6}.* \(from flag\)\n/);
+    assert.deepEqual(await cliJson(['document', 'info']), r);
+    const human = await cli(['document', 'info']);
+    assert.match(human.stdout, /^document {2}.*source \(a legacy source folder, from the site checkout given by --site\)\n/);
     assert.match(human.stdout, /problems  0\n$/);
   });
 

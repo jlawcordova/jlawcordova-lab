@@ -26,7 +26,7 @@ import objectCommands from './commands/object.mjs';
 import proposalCommands from './commands/proposal.mjs';
 import sceneEditCommands from './commands/scene-edit.mjs';
 import sceneCommands from './commands/scene.mjs';
-import siteCommands from './commands/site.mjs';
+import documentCommands from './commands/document.mjs';
 import { NotFoundError } from './errors.mjs';
 import { checkParams, suggest } from './params.mjs';
 
@@ -122,7 +122,7 @@ export function createRegistry(list) {
 
 /** The built-in commands. */
 export const registry = createRegistry([
-  ...siteCommands,
+  ...documentCommands,
   ...sceneCommands,
   ...sceneEditCommands,
   ...objectCommands,

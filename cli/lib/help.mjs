@@ -60,16 +60,16 @@ export function overviewHelp(/** @type {import('./registry.mjs').Registry} */ re
   });
   const w = Math.max(...rows.map(([a]) => a.length));
   return [
-    'pixellab: read and edit the pixel art of jlawcordova.github.io',
+    'pixellab: read and edit the pixel art in a .pixellab document, and publish it for a site',
     '',
-    'Usage: pixellab <group> <verb> [args] [--flags] [--json] [--site <path>]',
+    'Usage: pixellab <group> <verb> [args] [--flags] [--json] [--document <path.pixellab>]',
     '',
     'Commands:',
     ...rows.map(([a, b]) => `  ${pad(a, w)}  ${b}`),
     '',
     'Servers (pixellab serve --help):',
     '  serve --stdio            the Mac app\'s JSON-RPC server: a session with undo, saved by doc.save',
-    '  serve --mcp [--direct]   an MCP server for agents; doc_save writes a proposal (--direct: the site)',
+    '  serve --mcp [--direct]   an MCP server for agents; doc_save writes a proposal (--direct: the document)',
     '',
     'Edit commands save as soon as they run, after validating (--force writes despite problems or a',
     'changed file); --dry-run shows the diff instead. doc.* commands need a session (pixellab serve).',
@@ -101,7 +101,7 @@ export function groupHelp(/** @type {import('./registry.mjs').Registry} */ regis
     '',
     ...cmds.flatMap((cmd) => [`  ${usageLine(cmd)}`, `      ${cmd.summary}`]),
     '',
-    `Run pixellab ${group} <verb> --help for a command's params. Global flags: --json, --site <path>, -h.`,
+    `Run pixellab ${group} <verb> --help for a command's params. Global flags: --json, --document <path>, --site <checkout>, -h.`,
   ].join('\n');
 }
 
@@ -136,7 +136,7 @@ export function commandHelp(/** @type {import('./registry.mjs').Command} */ cmd)
   lines.push('', `Command: ${cmd.name}${cmd.mutates ? ' (mutates)' : ' (read-only)'}`);
   if (rows.length) lines.push('', 'Params:', ...rows.map(([a, b]) => `  ${pad(a, w)}  ${b}`));
   if (cmd.examples?.length) lines.push('', 'Examples:', ...cmd.examples.map((e) => `  ${e}`));
-  lines.push('', 'Global flags: --json (the result as JSON), --site <path>, -h. Run pixellab help for how args and flags map to params.');
+  lines.push('', 'Global flags: --json (the result as JSON), --document <path>, --site <checkout>, -h. Run pixellab help for how args and flags map to params.');
   return lines.join('\n');
 }
 

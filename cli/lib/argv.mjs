@@ -23,7 +23,8 @@ import { suggest } from './params.mjs';
 
 export const GLOBAL_FLAGS = {
   json: { value: false, help: "print the command's result as JSON" },
-  site: { value: true, help: 'the site checkout (else $PIXELLAB_SITE, ~/.config/pixellab/config.json, ~/Projects/jlawcordova.github.io)' },
+  document: { value: true, help: 'the .pixellab document (else $PIXELLAB_DOC, ~/.config/pixellab/config.json, or the document in --site)' },
+  site: { value: true, help: 'a site checkout holding the document (else $PIXELLAB_SITE, the config file, ~/Projects/jlawcordova.github.io)' },
   out: { value: true, help: 'write the PNG of a render command to this file' },
   'dry-run': { value: false, help: 'an edit command shows what it would write (a diff) and writes nothing' },
   force: { value: false, help: 'an edit command writes despite validation problems or a file changed on disk' },

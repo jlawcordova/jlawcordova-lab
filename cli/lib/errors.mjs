@@ -38,11 +38,14 @@ export class NotFoundError extends CommandError {
   }
 }
 
-/** The site checkout can't be found or doesn't look like the site. */
-export class SiteError extends CommandError {
+/** The document (or the site checkout holding it) can't be found or isn't one. */
+export class DocumentError extends CommandError {
   /** @param {string} message */
   constructor(message) {
-    super(message, { code: 'site' });
-    this.name = 'SiteError';
+    super(message, { code: 'document' });
+    this.name = 'DocumentError';
   }
 }
+
+/** The old name of DocumentError, for callers that still say site. */
+export const SiteError = DocumentError;

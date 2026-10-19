@@ -1,11 +1,13 @@
-// Test helpers. Tests never touch the real site checkout: makeSite() copies
-// the parts the CLI needs (the engine, the preview helpers, variables.css,
-// the art sources and package.json) into a temp folder, and every test points
-// --site at that copy, with HOME set to a temp folder so no real config file
-// is read.
+// Test helpers. makeDocument() copies the sample document under
+// cli/test/fixtures/ into a temp folder, so the core suites run without a
+// site checkout. Tests of the owner's art never touch the real site
+// checkout: makeSite() copies the parts the CLI needs (the art sources,
+// variables.css and package.json) into a temp folder laid out like a site,
+// and points --site at that copy. Both set HOME to a temp folder so no real
+// config file is read.
 
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -17,29 +19,50 @@ import { main } from '../lib/cli.mjs';
 export const REPO = fileURLToPath(new URL('../..', import.meta.url));
 export const BIN = join(REPO, 'cli', 'bin', 'pixellab.mjs');
 
+/** The sample document the core suites run on: two objects, two scenes, a manifest. */
+export const FIXTURE_DOC = join(REPO, 'cli', 'test', 'fixtures', 'sample.pixellab');
+
 /** The site checkout the copies are made from (read only). */
 export const SITE_SOURCE = process.env.PIXELLAB_TEST_SITE ?? join(homedir(), 'Projects', 'jlawcordova.github.io');
-export const HAVE_SITE = existsSync(join(SITE_SOURCE, 'src', 'lib', 'pixel-art', 'engine.mjs'));
+/** The site's art: its document (a *.pixellab under src/assets/pixel-art/) or its legacy source/ folder. */
+export const SITE_ART = siteArt(SITE_SOURCE);
+export const HAVE_SITE = SITE_ART !== null;
 /** node:test's skip option: the suites need a site checkout to copy. */
-export const needsSite = HAVE_SITE ? {} : { skip: `no site checkout at ${SITE_SOURCE} (set PIXELLAB_TEST_SITE)` };
+export const needsSite = HAVE_SITE ? {} : { skip: `no site checkout with art at ${SITE_SOURCE} (set PIXELLAB_TEST_SITE)` };
 
-export const SITE_PARTS = [
-  'src/lib/pixel-art',
-  'scripts/pixel-art-preview.mjs',
-  'scripts/optimize-pixel-art.mjs',
-  'src/styles/variables.css',
-  'src/assets/pixel-art/source',
-  'package.json',
-];
+/** @returns {string | null} the path of the site's art folder, or null */
+function siteArt(/** @type {string} */ root) {
+  const artDir = join(root, 'src', 'assets', 'pixel-art');
+  try {
+    const bundle = readdirSync(artDir).filter((f) => f.endsWith('.pixellab')).sort()[0];
+    if (bundle && existsSync(join(artDir, bundle, 'palette.mjs'))) return join(artDir, bundle);
+  } catch {
+    return null;
+  }
+  return existsSync(join(artDir, 'source', 'palette.mjs')) ? join(artDir, 'source') : null;
+}
+
+/** What makeSite() copies besides the art: the theme tokens a legacy site's colors come from, and package.json. */
+export const SITE_PARTS = ['src/styles/variables.css', 'package.json'];
 
 /** A temp folder, removed by cleanup(). */
 export async function tempDir(prefix = 'pixellab-test-') {
   return mkdtemp(join(tmpdir(), prefix));
 }
 
+/** An env for the CLI: HOME is a temp home; PIXELLAB_SITE and PIXELLAB_DOC unset unless given. */
+const envFor = (/** @type {string} */ home) => (/** @type {Record<string, string>} */ extra = {}) => {
+  const env = { ...process.env, HOME: home, ...extra };
+  if (!('PIXELLAB_SITE' in extra)) delete env.PIXELLAB_SITE;
+  if (!('PIXELLAB_DOC' in extra)) delete env.PIXELLAB_DOC;
+  return env;
+};
+
 /**
- * A copy of the site's needed parts in a temp folder, with an empty HOME
- * next to it.
+ * A temp copy of the site, laid out as a site checkout with its art in the
+ * legacy src/assets/pixel-art/source/ folder (whatever layout the real
+ * checkout has), plus variables.css and package.json, with an empty HOME
+ * next to it. Tests point --site at it.
  * @param {Record<string, string>} [files]  extra or replaced files, by path under the site root
  */
 export async function makeSite(files = {}) {
@@ -50,6 +73,10 @@ export async function makeSite(files = {}) {
   for (const part of SITE_PARTS) {
     await cp(join(SITE_SOURCE, part), join(root, part), { recursive: true });
   }
+  const sourceDir = join(root, 'src/assets/pixel-art/source');
+  await cp(/** @type {string} */ (SITE_ART), sourceDir, { recursive: true });
+  // A legacy folder has no manifest: the site's budgets and colors come from the checkout.
+  await rm(join(sourceDir, 'manifest.json'), { force: true });
   const write = async (/** @type {string} */ file, /** @type {string} */ text) => {
     await mkdir(dirname(join(root, file)), { recursive: true });
     await writeFile(join(root, file), text);
@@ -59,16 +86,38 @@ export async function makeSite(files = {}) {
     base,
     root,
     home,
-    sourceDir: join(root, 'src/assets/pixel-art/source'),
+    sourceDir,
     write,
-    /** An env for the CLI: HOME is the temp home; PIXELLAB_SITE unset. */
-    env: (/** @type {Record<string, string>} */ extra = {}) => {
-      const env = { ...process.env, HOME: home, ...extra };
-      if (!('PIXELLAB_SITE' in extra)) delete env.PIXELLAB_SITE;
-      return env;
-    },
+    env: envFor(home),
     cleanup: () => rm(base, { recursive: true, force: true }),
   };
+}
+
+/**
+ * A temp copy of a document (the sample fixture by default, or the site's
+ * art as a .pixellab with the site's manifest), with an empty HOME next to
+ * it. Tests point --document at `root`.
+ * @param {{ art?: 'sample' | 'site', files?: Record<string, string>, manifest?: Record<string, unknown> | null }} [options]
+ *   files: extra or replaced files, by path under the document; manifest: replaces manifest.json (null removes it)
+ */
+export async function makeDocument({ art = 'sample', files = {}, manifest } = {}) {
+  const base = await tempDir();
+  const root = join(base, `${art}.pixellab`);
+  const home = join(base, 'home');
+  await mkdir(home, { recursive: true });
+  await cp(art === 'sample' ? FIXTURE_DOC : /** @type {string} */ (SITE_ART), root, { recursive: true });
+  if (art === 'site' && !existsSync(join(root, 'manifest.json'))) {
+    const budgets = { 'hero-island.svg': { raw: 768000, gzip: 153600 }, 'range-sprite.svg': { raw: 204800, gzip: 51200 } };
+    await writeFile(join(root, 'manifest.json'), `${JSON.stringify({ format: 1, name: 'site', publish: { dir: '../out', budgets } }, null, 2)}\n`);
+  }
+  if (manifest === null) await rm(join(root, 'manifest.json'), { force: true });
+  else if (manifest) await writeFile(join(root, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  const write = async (/** @type {string} */ file, /** @type {string} */ text) => {
+    await mkdir(dirname(join(root, file)), { recursive: true });
+    await writeFile(join(root, file), text);
+  };
+  for (const [file, text] of Object.entries(files)) await write(file, text);
+  return { base, root, home, sourceDir: root, write, env: envFor(home), cleanup: () => rm(base, { recursive: true, force: true }) };
 }
 
 /**

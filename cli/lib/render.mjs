@@ -216,7 +216,7 @@ export function renderSceneImage(site, sources, name, { scale = 1, time = 0, sho
     const local = { ...sources, scenes: new Map([[name, view]]) };
     const { root } = engine.renderScene(local, name);
     if (theme === 'dark') darkTheme(root);
-    const image = toImage(sources, engine.composite(root, { time }), viewBox, theme === 'dark' ? { [PAGE]: darkPageColor(site.root) } : {});
+    const image = toImage(sources, engine.composite(root, { time }), viewBox, theme === 'dark' ? { [PAGE]: site.theme.darkPage } : {});
     /** @type {Map<string, ReturnType<typeof objectPixels>>} */
     const arts = new Map();
     const art = (/** @type {string} */ object) => {

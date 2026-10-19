@@ -16,7 +16,9 @@
 | command | summary | kind |
 | --- | --- | --- |
 | [`activity list`](#activitylist) | The last MCP tool calls agents made, oldest first | read |
-| [`art build`](#artbuild) | Run the site's npm run art: validate every source and write the generated SVGs | writes files |
+| [`art build`](#artbuild) | Publish: validate every source, compile each scene with an output and write the SVGs | writes files |
+| [`art preview`](#artpreview) | Render the review PNG of an object (standing on a tile) or a scene, on the card color; `palette` for the swatch sheet | read |
+| [`art sizes`](#artsizes) | Bytes each object and each color adds to a compiled scene, against the document's git HEAD | read |
 | [`check`](#check) | Validate the sources with the engine, all of them or one doc | read |
 | [`doc close`](#docclose) | Close an open doc (refused with unsaved changes unless --force) | session |
 | [`doc open`](#docopen) | Open a scene or object as a working copy, with undo and redo | session |
@@ -25,6 +27,9 @@
 | [`doc save`](#docsave) | Save an open doc: validate, serialize with the engine and write its source (MCP: write a proposal) | edit, session |
 | [`doc status`](#docstatus) | Whether open docs have unsaved changes, and can undo or redo | session |
 | [`doc undo`](#docundo) | Undo the last edit to an open doc | edit, session |
+| [`document copy`](#documentcopy) | Save a copy of the open document at another path (Save As) | writes files |
+| [`document info`](#documentinfo) | Show the document in use: where it came from, its publish folder and what it holds | read |
+| [`document new`](#documentnew) | Make a new, empty .pixellab document with the starter palette | writes files |
 | [`object animate`](#objectanimate) | Turn a still layer into one of the site's frame loops, or switch a loop's kind | edit |
 | [`object erase`](#objecterase) | Erase pixels of an object (make them transparent), on a layer and frame | edit |
 | [`object fill`](#objectfill) | Flood-fill from a pixel with a palette color, on a layer and frame | edit |
@@ -63,7 +68,6 @@
 | [`scene set`](#sceneset) | Set an item's tile or pixel point, one coordinate, its class or its id | edit |
 | [`scene show`](#sceneshow) | Show a scene's settings, size, objects and motion | read |
 | [`scene snap`](#scenesnap) | Snap a pixel-placed item to the level-0 tile under its placement point | edit |
-| [`site info`](#siteinfo) | Show the site checkout in use and what it holds | read |
 
 ## The command line
 
@@ -76,7 +80,8 @@ The leading words name the command (`scene place` is `scene.place`; the longest 
 | global flag | |
 | --- | --- |
 | `--json` | print the command's result as JSON |
-| `--site` | the site checkout (else $PIXELLAB_SITE, ~/.config/pixellab/config.json, ~/Projects/jlawcordova.github.io) |
+| `--document` | the .pixellab document (else $PIXELLAB_DOC, ~/.config/pixellab/config.json, or the document in --site) |
+| `--site` | a site checkout holding the document (else $PIXELLAB_SITE, the config file, ~/Projects/jlawcordova.github.io) |
 | `--out` | write the PNG of a render command to this file |
 | `--dry-run` | an edit command shows what it would write (a diff) and writes nothing |
 | `--force` | an edit command writes despite validation problems or a file changed on disk |
@@ -143,7 +148,7 @@ An open doc without unsaved changes reloads from disk when its file changes; one
 
 `pixellab serve --mcp [--direct] [--site <path>]` is an MCP server over stdio (protocol `2025-06-18`, hand-written: `initialize`, `notifications/initialized`, `ping`, `tools/list`, `tools/call`). Tools are the commands with `.` → `_` (`scene.place` → `scene_place`), each with its params as `inputSchema`. A tool's result is `content: [{ type: "text", text: <the result as JSON> }]` plus `structuredContent` (the result); render tools return the PNG as an `image` content block first, so agents can see the art. A failed command is a result with `isError: true` and `structuredContent: { error: { code, message, details? } }`; an unknown tool is a JSON-RPC error.
 
-**Agents propose, people approve.** Edits stay in the server's session. `doc_save` validates the doc (refusing one with problems unless `force`) and writes a **proposal** to the state dir instead of the site; a person approves it in Pixel Lab's Agent window or with `pixellab proposal apply`. With `--direct`, `doc_save` writes the site instead. Left out of the tools: `proposal_apply` (approving a proposal is for a person, in Pixel Lab or with pixellab proposal apply); `proposal_reject` (rejecting a proposal is for a person); `art_build` (it writes the site's generated SVGs; a person builds the art after approving). With `--direct`, `art_build` is a tool.
+**Agents propose, people approve.** Edits stay in the server's session. `doc_save` validates the doc (refusing one with problems unless `force`) and writes a **proposal** to the state dir instead of the site; a person approves it in Pixel Lab's Agent window or with `pixellab proposal apply`. With `--direct`, `doc_save` writes the site instead. Left out of the tools: `proposal_apply` (approving a proposal is for a person, in Pixel Lab or with pixellab proposal apply); `proposal_reject` (rejecting a proposal is for a person); `art_build` (it publishes the SVGs a site inlines; a person publishes after approving); `document_copy` (saving a copy of the document is for a person). With `--direct`, `art_build` is a tool.
 
 ### Setup for Claude Code
 
@@ -194,15 +199,67 @@ read-only · MCP tool `activity_list`
 
 #### art.build
 
-Run the site's npm run art: validate every source and write the generated SVGs.
+Publish: validate every source, compile each scene with an output and write the SVGs.
 
 ```
-pixellab art build
+pixellab art build [--dir <text>]
 ```
 
-Runs `npm run art --silent` in the site checkout (timeout 5 minutes) and returns { ok, code, report: [stdout lines], errors: [stderr lines], hint, ms, unsaved }. hint (or null) says what to do when the build failed for a known setup reason (npm not found, the site's node_modules missing). It builds the files on disk; unsaved lists the open docs with changes it leaves out.
+Validates the document's files on disk (unsaved working copies aren't in it; unsaved lists them), renders each scene with an `output` to a rect SVG, merges each color group into one <path>, checks the result lossless and within its budget (100 KB raw / 25 KB gzip, or the manifest's), and writes <publish dir>/<output>. The publish folder is the manifest's publish.dir (relative to the document), or --dir; with neither it refuses. Nothing is written when any source has a problem. Returns { ok, publishDir, outputs: [{ file, scene, raw, gzip, over, report }], previewOnly: [{ scene, raw, gzip, over, report }], problems, ms, unsaved }.
 
 read-only · writes files directly · not an MCP tool
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `--dir` | string |  | the folder to write the SVGs to (else the manifest's publish.dir) |
+
+```sh
+pixellab art build
+pixellab art build --dir ~/Desktop/art
+```
+
+#### art.preview
+
+Render the review PNG of an object (standing on a tile) or a scene, on the card color; `palette` for the swatch sheet.
+
+```
+pixellab art preview <name> [--scale <n>] [--kind <object|scene>] [--out <file.png>]
+```
+
+The picture an agent or a person checks art by: an object on one 32×16 tile outline, a scene at its viewBox (first variant, frame 0), both on the document's card color (manifest preview.card). Refuses (code invalid) when the doc or what it uses has problems. Returns { name, kind, scale, width, height, png } with the PNG as base64; --out writes it.
+
+read-only · MCP tool `art_preview`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | an object or scene (or objects/<name>, scenes/<name>), or palette |
+| `--scale` | integer | default `1` | whole-pixel zoom of the PNG (1 to 16) |
+| `--kind` | `object` \| `scene` |  | which kind name is, when both exist |
+
+```sh
+pixellab art preview pine --scale 4 --out /tmp/pine@4x.png
+pixellab art preview palette --out /tmp/palette.png
+```
+
+#### art.sizes
+
+Bytes each object and each color adds to a compiled scene, against the document's git HEAD.
+
+```
+pixellab art sizes <name>
+```
+
+The bytes a compiled scene loses, raw and gzip, when an object's items are left out or a color's paths are dropped (costs overlap a little), now and as committed at HEAD of the repository the document is in. Returns { scene, output, now: { raw, gzip }, head: { raw, gzip } | { reason }, objects: [{ object, placed, raw, gzip, headRaw, headGzip }], colors: [{ color, raw, gzip, headRaw, headGzip }] }.
+
+read-only · MCP tool `art_sizes`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | a scene (or scenes/<name>) |
+
+```sh
+pixellab art sizes hero-island
+```
 
 ### check
 
@@ -338,6 +395,61 @@ edits docs · session only (`serve`) · MCP tool `doc_undo`
 | param | type | | description |
 | --- | --- | --- | --- |
 | `doc` (positional) | string | required | the doc: scene:<name>, object:<name>, or a name (scenes/<name>, objects/<name>) |
+
+### document
+
+#### document.copy
+
+Save a copy of the open document at another path (Save As).
+
+```
+pixellab document copy --to <text>
+```
+
+Copies the whole .pixellab folder (manifest, palette, objects, scenes) to --to. Refuses an existing path. The copy keeps its publish.dir, so a relative one now points next to the copy.
+
+edits docs · writes files directly · not an MCP tool
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `--to` | string | required | the new path (.pixellab is added when missing) |
+
+```sh
+pixellab document copy --to ~/Art/meadow-v2.pixellab
+```
+
+#### document.info
+
+Show the document in use: where it came from, its publish folder and what it holds.
+
+```
+pixellab document info
+```
+
+root is the .pixellab folder (or a legacy source/ folder in a site checkout, kind legacy-site); from says how it was named (--document, --site, PIXELLAB_DOC, PIXELLAB_SITE, the config file or the default); publishDir is where art build writes (null when the manifest names none); then the git branch, and how many scenes, objects and colors it has, with the count of validation problems.
+
+read-only · MCP tool `document_info`
+
+#### document.new
+
+Make a new, empty .pixellab document with the starter palette.
+
+```
+pixellab document new <path> [--name <text>]
+```
+
+Writes manifest.json, palette.mjs and empty objects/ and scenes/ folders at path (.pixellab is added when missing). Refuses an existing path. The new document is not opened: name it with --document.
+
+edits docs · writes files directly · MCP tool `document_new`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `path` (positional) | string | required | where to make it, e.g. ~/Art/meadow.pixellab |
+| `--name` | string |  | the document's name (the folder's, by default) |
+
+```sh
+pixellab document new ~/Art/meadow.pixellab
+```
 
 ### object
 
@@ -1025,17 +1137,3 @@ edits docs · MCP tool `scene_snap`
 | --- | --- | --- | --- |
 | `name` (positional) | string | required | scene name (or scenes/<name>) |
 | `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id |
-
-### site
-
-#### site.info
-
-Show the site checkout in use and what it holds.
-
-```
-pixellab site info
-```
-
-Where the site root came from (--site, PIXELLAB_SITE, the config file or the default), its branch, and how many scenes, objects and colors it has, with the count of validation problems.
-
-read-only · MCP tool `site_info`

@@ -47,6 +47,7 @@ export async function startStdioServer({ site, env = process.env, input = proces
         version: VERSION,
         protocol: PROTOCOL_VERSION,
         pid: process.pid,
+        document: { root: site.root, name: site.name, kind: site.kind, publishDir: site.publishDir, siteRoot: site.siteRoot },
         site: site.root,
         sourceDir: site.sourceDir,
         stateDir: session.state.dir,

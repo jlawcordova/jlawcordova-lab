@@ -17,7 +17,7 @@ import { checkParams } from './params.mjs';
 import { registry as defaultRegistry } from './registry.mjs';
 import { serve } from './serve.mjs';
 import { Session } from './session.mjs';
-import { openSite } from './site.mjs';
+import { openDocument } from './document.mjs';
 
 /**
  * @typedef {{ write: (text: string) => unknown }} Writable
@@ -67,7 +67,7 @@ export async function main(argv, io = {}) {
     if (globals.force && command.params.properties?.force) params.force = 'true';
     // Params are checked before the site is read, so a usage error is always exit 2.
     const checked = checkParams(command.params, params, { coerce: true, command: command.name });
-    const site = await openSite({ site: globals.site, env, cwd });
+    const site = await openDocument({ doc: globals.document, site: globals.site, env, cwd });
     const session = new Session(site, { env });
     const ctx = session.context();
     let result = await registry.call(ctx, command.name, checked);

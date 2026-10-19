@@ -8,7 +8,7 @@ import { after, before, describe, test } from 'node:test';
 
 import { createContext } from '../lib/context.mjs';
 import { registry } from '../lib/registry.mjs';
-import { openSite } from '../lib/site.mjs';
+import { openSite } from '../lib/document.mjs';
 import { decodePng, makeSite, needsSite, spawnCli } from './helpers.mjs';
 
 const scene = (/** @type {string} */ items, viewBox = '[-40, -40, 80, 80]', extra = '') =>

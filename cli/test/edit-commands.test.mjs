@@ -5,15 +5,14 @@
 // every real source through the engine's serializer.
 
 import assert from 'node:assert/strict';
-import { readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 
-import { buildHint } from '../lib/commands/art.mjs';
 import { registry } from '../lib/registry.mjs';
 import { readSource, Session } from '../lib/session.mjs';
-import { openSite } from '../lib/site.mjs';
-import { makeSite, needsSite, readDoc, runCli, tempDir } from './helpers.mjs';
+import { openSite } from '../lib/document.mjs';
+import { makeSite, needsSite, readDoc, runCli, SITE_SOURCE, tempDir } from './helpers.mjs';
 
 const SRC = 'src/assets/pixel-art/source';
 
@@ -541,35 +540,79 @@ describe('round trip', needsSite, () => {
   });
 });
 
-describe('art.build', needsSite, () => {
-  test("runs the site's npm run art and returns its report", async () => {
+
+describe('art.build (spec R7)', needsSite, () => {
+  test("R7: publishes the site's art byte-identical to the committed SVGs, into the legacy publish folder", async () => {
     const site = await makeSite();
     try {
       const r = await runCli(['art', 'build', '--site', site.root, '--json'], { env: site.env() });
       assert.equal(r.code, 0, r.stderr);
       const out = JSON.parse(r.stdout);
       assert.equal(out.ok, true);
-      assert.ok(out.report.some((/** @type {string} */ l) => /^hero-island\.svg: /.test(l)), out.report.join('\n'));
+      assert.equal(out.publishDir, join(site.root, 'src/assets/pixel-art'));
+      assert.deepEqual(out.problems, []);
       assert.deepEqual(out.unsaved, []);
-      assert.equal(out.hint, null);
-      assert.ok((await stat(join(site.root, 'src/assets/pixel-art/hero-island.svg'))).size > 0);
+      const files = out.outputs.map((/** @type {any} */ o) => o.file).sort();
+      assert.ok(files.includes('hero-island.svg'), files.join(', '));
+      assert.ok(out.outputs.every((/** @type {any} */ o) => /lossless$/.test(o.report) && o.over === false), out.outputs.map((/** @type {any} */ o) => o.report).join('\n'));
+      assert.ok(out.previewOnly.length > 0, 'preview-only scenes are compiled and reported, not written');
+      for (const file of files) {
+        const built = await readFile(join(out.publishDir, file));
+        const committed = await readFile(join(SITE_SOURCE, 'src/assets/pixel-art', file));
+        assert.ok(built.equals(committed), `${file} differs from the committed SVG`);
+      }
     } finally {
       await site.cleanup();
     }
   });
-});
 
-describe('art.build hints', () => {
-  test('explain a missing npm or a site without node_modules', async () => {
-    const dir = await tempDir();
+  test('R7: --dir publishes elsewhere, and a document without a publish folder refuses without it', async () => {
+    const site = await makeSite();
+    const out = await tempDir();
     try {
-      assert.equal(buildHint({ code: 0, stderr: '' }, dir), null);
-      assert.match(buildHint({ code: null, stderr: '', error: 'spawn npm ENOENT' }, dir) ?? '', /npm wasn't found/);
-      const missing = "Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'astro' imported from /x/scripts/y.mjs";
-      assert.match(buildHint({ code: 1, stderr: missing }, dir) ?? '', /no node_modules\. Run npm install in /);
-      assert.equal(buildHint({ code: 1, stderr: 'site.mjs: problem' }, dir), null);
+      const r = await runCli(['art', 'build', '--site', site.root, '--dir', out, '--json'], { env: site.env() });
+      assert.equal(r.code, 0, r.stderr);
+      assert.equal(JSON.parse(r.stdout).publishDir, out);
+      assert.ok((await stat(join(out, 'footer-dirt.svg'))).size > 0);
+      // The same sources as a document whose manifest names no publish folder.
+      const doc = join(out, 'bare.pixellab');
+      await cp(site.sourceDir, doc, { recursive: true });
+      await writeFile(join(doc, 'manifest.json'), '{ "format": 1 }\n');
+      const refused = await runCli(['art', 'build', '--document', doc, '--json'], { env: site.env() });
+      assert.equal(refused.code, 1);
+      assert.equal(JSON.parse(refused.stderr).error.code, 'no_publish_dir');
+      // Without the manifest's budgets, the engine's 100 KB / 25 KB apply: the island is over, and still written.
+      const over = await runCli(['art', 'build', '--document', doc, '--dir', join(out, 'bare-out'), '--json'], { env: site.env() });
+      assert.equal(over.code, 1);
+      const res = JSON.parse(over.stdout);
+      assert.equal(res.ok, false);
+      assert.equal(res.outputs.find((/** @type {any} */ o) => o.file === 'hero-island.svg').over, true);
+      assert.ok((await stat(join(out, 'bare-out', 'hero-island.svg'))).size > 0);
+      const budgets = { 'hero-island.svg': { raw: 768000, gzip: 153600 }, 'range-sprite.svg': { raw: 204800, gzip: 51200 } };
+      await writeFile(join(doc, 'manifest.json'), `${JSON.stringify({ format: 1, publish: { budgets } })}\n`);
+      const given = await runCli(['art', 'build', '--document', doc, '--dir', join(out, 'bare-out')], { env: site.env() });
+      assert.equal(given.code, 0, given.stderr);
+      assert.match(given.stdout, /published 6 files to .*bare-out/);
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(out, { recursive: true, force: true });
+      await site.cleanup();
+    }
+  });
+
+  test('R7: nothing is written when a source has a problem', async () => {
+    const site = await makeSite({ 'src/assets/pixel-art/source/objects/zz-bad.mjs': "export default { kind: 'sprite', keys: { a: 'no-such-color' }, layers: [{ map: ['a'] }] };\n" });
+    const out = await tempDir();
+    try {
+      const r = await runCli(['art', 'build', '--site', site.root, '--dir', out, '--json'], { env: site.env() });
+      assert.equal(r.code, 1);
+      const res = JSON.parse(r.stdout);
+      assert.equal(res.ok, false);
+      assert.deepEqual(res.outputs, []);
+      assert.ok(res.problems.some((/** @type {string} */ p) => p.startsWith('objects/zz-bad.mjs: ')), res.problems.join('\n'));
+      await assert.rejects(stat(join(out, 'footer-dirt.svg')));
+    } finally {
+      await rm(out, { recursive: true, force: true });
+      await site.cleanup();
     }
   });
 });
