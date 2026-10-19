@@ -18,9 +18,12 @@ npm test                                    # the suites in cli/test/, must show
 | `lib/argv.mjs` | Parses the command line against the registry: the longest run of words that names a command, positionals into the command's `args`, every param as a `--kebab-case` flag, the global flags (`GLOBAL_FLAGS`). |
 | `lib/params.mjs` | `checkParams()`: the JSON Schema subset every door checks params with (type, enum, pattern, minimum, maximum, minItems, maxItems, items, required, default). Refuses unknown params; with `coerce`, turns command-line strings into the declared types. |
 | `lib/registry.mjs` | The registry: `createRegistry()` checks each definition (`checkDefinition()`), sorts by name, and `call(ctx, name, params)` checks params and runs. `registry` is the built-in list. |
-| `lib/commands/*.mjs` | The commands, one file per area: `document` (document.info, document.new, document.copy, palette.get), `scene` (read), `scene-edit`, `object` (read), `object-edit`, `check`, `art` (art.build, art.preview, art.sizes), `doc` (session commands), `proposal` (proposals, activity.list). `common.mjs` holds shared params and helpers. |
+| `lib/commands/*.mjs` | The commands, one file per area: `document` (document.info, document.new, document.copy, palette.get), `scene` (read), `scene-edit` (with groups), `scene-motion` (tracks, keys, paths), `object` (read), `object-edit` (with `object.map.set`), `check`, `art` (art.build, art.preview, art.sizes), `doc` (session commands), `proposal` (proposals, activity.list). `common.mjs` holds shared params and helpers. |
 | `lib/context.mjs` | `createContext(site, { overlay })`: what a command runs against. `ctx.sources()`, `ctx.doc(kind, name)`, `ctx.names(kind)`, `ctx.find(query)`; memoized per call, `ctx.invalidate()` after an edit. Commands never read the disk themselves. |
-| `lib/session.mjs` | `Session`: open docs as in-memory working copies with undo and redo, plugged into the ctx as its overlay, plus `ctx.edit()`. Saving: validate, serialize, conflict check by hash, atomic write; in `'propose'` mode (MCP) a save writes a proposal. |
+| `lib/session.mjs` | `Session`: open docs as in-memory working copies with undo and redo, plugged into the ctx as its overlay, plus `ctx.edit()`. Saving: validate, serialize, conflict check by hash, atomic write; in `'propose'` mode (MCP) a save writes a proposal. `sync()` settles applied or rejected proposals and reloads clean docs whose files changed; `reload()` and `merge()` are `doc.reload` and `doc.merge`. |
+| `lib/merge.mjs` | `merge3()`: the three-way line merge `doc.merge` and `proposal.apply` use. |
+| `lib/open-docs.mjs` | `open/<pid>.json` in the state dir: the app's open docs, for `doc.status`'s `unsavedInApp`. |
+| `lib/motion-ops.mjs` | Motion edits: tracks, keys, the loop's length, `offGridMoves()` (check's warnings) and `motionPath()`. |
 | `lib/document.mjs` | Finds the `.pixellab` document (or the one inside a site checkout, legacy `source/` folders included), reads and checks its manifest, carries the engine modules, and loads the art sources. |
 | `lib/engine/` | The pixel-art engine: `engine`, `iso`, `motion`, `serialize`, `edit`, `starter`, `svg` (from the site, verbatim), `compile` (rect SVG → paths, the lossless check, budgets, `compileScene`, `compileAll`, `sceneSizes`), `preview` (the review PNGs), `starter-palette`. Exported from the package as `pixellab/engine`, `pixellab/compile`, … |
 | `lib/scene-ops.mjs` | The scene edits, ported from the site's web lab (`src/components/lab/scene-mode.ts`); each function names the lab function it follows. |
@@ -30,7 +33,7 @@ npm test                                    # the suites in cli/test/, must show
 | `lib/serve.mjs` | `pixellab serve --stdio \| --mcp [--direct]`. |
 | `lib/jsonrpc.mjs` | Newline-delimited JSON-RPC 2.0 over two streams, shared by both servers; maps errors to JSON-RPC codes. |
 | `lib/server-stdio.mjs` | The app's server: one session, the commands as methods plus `session.info` and `shutdown`, and the notifications. `VERSION` here is the app's and the MCP server's version. |
-| `lib/server-mcp.mjs` | The MCP server: `initialize`, `ping`, `tools/list`, `tools/call`; tool names, `LEFT_OUT` (commands agents don't get), the activity log. |
+| `lib/server-mcp.mjs` | The MCP server: `initialize`, `ping`, `tools/list`, `tools/call`; tool names, `LEFT_OUT` (commands agents don't get), the annotations, the activity log, and `session.sync()` before each call. |
 | `lib/state.mjs` | The state dir: proposals and `activity.jsonl`; `writeAtomic()`. |
 | `lib/watch.mjs` | File watching for the stdio server: the art sources and the state dir, debounced. |
 | `lib/activity-summary.mjs` | A few words per MCP tool call for the activity feed ("listed 15 scenes"). |
@@ -84,7 +87,7 @@ async run(ctx, params) {
 ## Sessions, undo and saving
 
 - A **session** (`Session` in `lib/session.mjs`) holds open docs, each with an undo and a redo stack. A step is a snapshot of the doc before the edit; at most `UNDO_LIMIT` (200) are kept. Edits with the same `key` within `COALESCE_MS` (1 s) merge into one step: a held arrow key, one paint stroke sent as many `object.paint` calls.
-- **Saving** validates with the engine and refuses a doc with problems (`invalid`), serializes with the engine, and refuses (`conflict`) if the file's hash on disk changed since the doc was opened; `force` overrides both. The write is atomic. In `'propose'` mode it writes `proposals/<id>.json` to the state dir instead.
+- **Saving** validates with the engine and refuses a doc with problems (`invalid`), serializes with the engine, and refuses (`conflict`) if the file's hash on disk changed since the doc was opened; `force` overrides both. The write is atomic. In `'propose'` mode it writes `proposals/<id>.json` to the state dir instead, listing the edits since the doc last matched its file (each undo step has a sequence number; the entry's `baseSeq` marks the last one on disk).
 - The stdio server watches the sources: a clean open doc reloads when its file changes; one with unsaved changes stays and is reported `stale`.
 
 ## Errors and exit codes

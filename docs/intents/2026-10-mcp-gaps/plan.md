@@ -26,7 +26,7 @@ App:
 - `app/Sources/PixelLab/Views/StaleBanner.swift` (new), `app/Sources/PixelLab/Views/MainWindow.swift` (shows it).
 - `app/Sources/PixelLab/Support/ScriptRunner.swift`: `cli`, `stale`, `expect stale`.
 - `app/Tests/PixelLabTests/`: the banner's text and state (pure logic).
-- `scripts/acceptance/stale.txt` (new), `scripts/acceptance/stale-agent.mjs` (new), `scripts/acceptance.sh`, and `scripts/acceptance/agent.txt` if its dirty-approve wording changes.
+- `scripts/acceptance/stale.txt` (new), `scripts/acceptance/stale-agent.mjs` (new), `scripts/acceptance.sh`, and the other acceptance scripts' pins (`agent.txt`, `scene-object.txt`, `document.txt`).
 
 Docs:
 - `scripts/docs-cli.mjs` (`doc.stale`, `open/`, the summary rule), `docs/cli.md` (generated), `README.md`, `docs/architecture.md`, `docs/testing.md`, `cli/README.md`, `app/README.md`, `CLAUDE.md` (script-hook list).
@@ -45,6 +45,8 @@ One slice, on `feat/mcp-gaps`, straight to a PR into `main`: the main session do
 7. The app: the banner, the approve merge, the script hook, unit tests, the acceptance script (R5, R6 in the app).
 8. Docs, `npm run docs:cli`, the MCP instructions, the site notes (R16, R17).
 9. The full verification (Proof), pasted into the PR.
+
+**As built.** Steps 2 and 3 landed as one commit: settling and `doc.reload` share `session.mjs` with the merge, and the tests for both needed the whole of it. Step 7 also re-pinned the acceptance scripts to the site's art of 2026-10-20 (164 objects, one more hero-island item, and the site now opening as its `jlawcordova.pixellab` document rather than a legacy folder), since the art changed under them; and the save-conflict alert gained a Merge button, so Keep Mine never strands the owner without one. The real art's `check` shows 15 off-grid warnings; they're listed in `site-notes.md`, not fixed here (the site's art is the site's change).
 
 ## Workflow and reviews
 

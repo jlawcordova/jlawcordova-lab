@@ -112,9 +112,10 @@ The server holds a **session**: docs open as in-memory working copies with undo 
 
 - \`scene.render\` / \`object.render\`: \`{ png, scale, viewBox: [x, y, w, h], width, height, time | frame, items: [{ path, object, at, id?, pose?, bounds: [x, y, w, h] }] }\`. \`png\` is a base64 PNG with a transparent background at an integer \`scale\`; \`bounds\` are in output pixels (scale included), for hit-testing; \`path\` is the item's dotted path (\`"5.2"\`). An object render's item has \`path: null\` and the result has its \`anchor\`.
 - Edits: \`{ doc: "scene:<name>" | "object:<name>", changed, summary, ... }\`; scene item edits add \`path\` (the item's path after the edit) and \`item\`; paint edits add \`pixels\` (how many changed).
-- \`DocStatus\` (in \`doc.changed\`, \`session.info\` and \`doc.status\` without a doc): \`{ doc, dirty, canUndo, canRedo }\`. \`doc.status\` with a doc adds \`file, exists, stale\` (the file changed on disk since it was opened), \`undo: [edit summaries]\`, \`redo: [...]\` and \`proposal?\`.
+- \`DocStatus\` (in \`doc.changed\`, \`session.info\` and \`doc.status\` without a doc): \`{ doc, dirty, canUndo, canRedo }\`. \`doc.status\` with a doc adds \`file, exists, stale\` (the file changed on disk since the doc was opened or last matched it), \`undo: [edit summaries]\`, \`redo: [...]\`, \`edits\` (the edits since the doc last matched its file: what a proposal would list), \`proposal?\`, \`synced?\` and \`unsavedInApp\` (see MCP).
 - \`doc.save\`: \`{ doc, file, wrote, hash, bytes, diff, dirty, canUndo, canRedo }\` (\`wrote\` is false when the file already held exactly this text).
-- \`doc.undo\` / \`doc.redo\` / \`doc.revert\`: \`{ doc, changed, summary, dirty, canUndo, canRedo }\`.
+- \`doc.undo\` / \`doc.redo\` / \`doc.revert\`: \`{ doc, changed, summary, dirty, canUndo, canRedo }\`; \`doc.reload\` adds \`reloaded\`, \`doc.merge\` adds \`merged\`.
+- \`proposal.apply\`: \`{ id, doc, file, wrote, reloaded, merged?, conflict?, diff, summary }\`: an open copy with no unsaved edits reloads; one with unsaved edits has the proposal merged in (\`merged\`), or, when both changed the same lines, is left as it is and reported with \`doc.stale\` (\`conflict\`).
 
 **Errors** are JSON-RPC errors with a stable \`data.code\`:
 
@@ -135,18 +136,23 @@ The server holds a **session**: docs open as in-memory working copies with undo 
 
 | method | params | when |
 | --- | --- | --- |
-| \`doc.changed\` | \`{ doc, dirty, canUndo, canRedo }\` | after each edit, undo, redo, save, revert, and when a clean open doc reloads because its file changed. Sent before the request's response. |
+| \`doc.changed\` | \`{ doc, dirty, canUndo, canRedo }\` | after each edit, undo, redo, save, revert, merge or reload, and when a clean open doc reloads because its file changed. Sent before the request's response. |
+| \`doc.stale\` | \`{ doc, file }\` | an open doc with unsaved edits whose file changed on disk (the app shows Merge, Reload, Keep Mine), and after an applied proposal whose merge into the open copy clashed |
 | \`files.changed\` | \`{ files: ["scenes/hero-island.mjs", …] }\` | sources changed on disk (another editor, git, an applied proposal, a save), debounced 150 ms |
 | \`proposals.changed\` | \`{ proposals: [ProposalSummary] }\` (as \`proposal.list\`) | a proposal was written, applied or rejected |
 | \`activity.appended\` | \`{ entries: [{ time, tool, args, ok, summary }] }\` | an MCP server logged tool calls |
 
-An open doc without unsaved changes reloads from disk when its file changes; one with unsaved changes stays as it is, \`doc.status\` reports it \`stale\`, and its \`doc.save\` fails with \`conflict\` until it's reverted or saved with \`force\`.
+An open doc without unsaved changes reloads from disk when its file changes; one with unsaved changes stays as it is, the server sends \`doc.stale\`, \`doc.status\` reports it \`stale\`, and its \`doc.save\` fails with \`conflict\` until it's merged (\`doc.merge\`: a three-way line merge of the file into the working copy, keeping its edits; it refuses with \`merge_conflict\` when both changed the same lines), reverted, or saved with \`force\`. The server also keeps \`open/<pid>.json\` in the state dir (see below), so agents can see what the app has open with unsaved edits.
 
 ## MCP
 
 \`pixellab serve --mcp [--direct] [--document <path> | --site <checkout>]\` is an MCP server over stdio (protocol \`${MCP_VERSION}\`, hand-written: \`initialize\`, \`notifications/initialized\`, \`ping\`, \`tools/list\`, \`tools/call\`). Tools are the commands with \`.\` → \`_\` (\`scene.place\` → \`scene_place\`), each with its params as \`inputSchema\`. A tool's result is \`content: [{ type: "text", text: <the result as JSON> }]\` plus \`structuredContent\` (the result); render tools return the PNG as an \`image\` content block first, so agents can see the art. A failed command is a result with \`isError: true\` and \`structuredContent: { error: { code, message, details? } }\`; an unknown tool is a JSON-RPC error.
 
-**Agents propose, people approve.** Edits stay in the server's session. \`doc_save\` validates the doc (refusing one with problems unless \`force\`) and writes a **proposal** to the state dir instead of the document; a person approves it in Pixel Lab's Agent window or with \`pixellab proposal apply\`. With \`--direct\`, \`doc_save\` writes the document instead. Left out of the tools: ${Object.entries(LEFT_OUT)
+**Agents propose, people approve.** Edits stay in the server's session. \`doc_save\` validates the doc (refusing one with problems unless \`force\`) and writes a **proposal** to the state dir instead of the document; a person approves it in Pixel Lab's Agent window or with \`pixellab proposal apply\`. With \`--direct\`, \`doc_save\` writes the document instead.
+
+**The session follows disk.** Before every \`tools/call\`, the session brings its open docs in line with disk where nothing is lost. A doc whose proposal was applied or rejected is settled: marked clean if it matches the file; reloaded if it has no edits since the proposal; rebased onto the file, keeping the later edits, if the proposal was applied; left as it is only when a rejected proposal has edits on top. \`doc_status\` reports it as \`synced: { proposal, outcome: applied | rejected, action: clean | reloaded | rebased | kept }\` (\`settled\`, without a doc, lists the latest, including a new doc discarded after its proposal was rejected). A clean doc whose file changed reloads. So the next edit starts from the file, with no revert. \`doc_reload\` reloads a doc only when nothing unsaved is lost (code \`dirty\` with the edits otherwise, \`proposed\` while its proposal waits); \`doc_revert\`, which drops edits, is annotated destructive.
+
+**What the app has open.** \`doc_status\` lists \`unsavedInApp\`: the docs Pixel Lab has open with unsaved edits (from \`open/<pid>.json\`). A proposal for one of them comes back with \`warnings\`: approving it will merge it into the owner's unsaved edits, and lines both changed will clash. Left out of the tools: ${Object.entries(LEFT_OUT)
     .map(([name, why]) => `\`${toolName(name)}\` (${why})`)
     .join('; ')}. With \`--direct\`, \`art_build\` is a tool.
 
@@ -170,8 +176,9 @@ Add \`--document <path.pixellab>\` (or \`--site <checkout>\`) after \`--mcp\` fo
 
 The state dir is \`$PIXELLAB_STATE\`, else \`~/Library/Application Support/Pixel Lab/\`.
 
-- \`proposals/<id>.json\`: \`{ id, doc: "scene:<name>" | "object:<name>", baseHash, source, summary, createdAt, agent }\`. \`id\` is \`YYYYMMDD-HHMMSS-xxxxxx\` (UTC, sortable). \`baseHash\` is the sha256 (hex) of the file the agent opened, or null for a new doc. \`source\` is the full new file, serialized by the engine. \`summary\` lists the edits since the doc was opened. \`agent\` is the MCP client's name and version. Saving the same doc again in one MCP session rewrites its proposal.
+- \`proposals/<id>.json\`: \`{ id, doc: "scene:<name>" | "object:<name>", baseHash, source, summary, createdAt, agent }\`. \`id\` is \`YYYYMMDD-HHMMSS-xxxxxx\` (UTC, sortable). \`baseHash\` is the sha256 (hex) of the file the agent opened, or null for a new doc. \`source\` is the full new file, serialized by the engine. \`summary\` lists the edits since the doc last matched its file (opened, saved, reloaded, or its last proposal settled), so a proposal made after an earlier one was applied lists only its own edits. \`agent\` is the MCP client's name and version. Saving the same doc again in one MCP session rewrites its proposal.
 - \`activity.jsonl\`: one line per MCP \`tools/call\`: \`{ time, tool, args, ok, summary }\` (\`tool\` is the MCP tool name).
+- \`open/<pid>.json\`: written by Pixel Lab's server (\`serve --stdio\`) whenever its open docs change, removed when it stops: \`{ pid, document, updatedAt, docs: [{ doc, dirty }] }\`. Readers skip a file whose process is gone or whose \`document\` isn't theirs.
 
 \`proposal.apply\` refuses (\`conflict\`) when the file no longer has \`baseHash\`, and (\`invalid\`) when the proposed doc has validation problems, unless forced; then it writes \`source\`, deletes the proposal, and reloads an open, unchanged working copy. \`proposal.reject\` deletes it. \`proposal.render\` renders the proposed doc over the files on disk (the shape of \`scene.render\` or \`object.render\`) without writing, for the Agent window's ghost preview.
 

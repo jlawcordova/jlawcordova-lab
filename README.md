@@ -68,13 +68,15 @@ It reopens the last scene or object you had open, else the hero island. The wind
 
 **Checks.** The inspector's CHECKS section validates the open doc with the engine after every edit; a problem that names an item selects it when clicked. Save (⌘S) refuses a doc with problems and explains why, and asks before overwriting a file that changed on disk.
 
+**Changed on disk.** A doc you have open without unsaved edits reloads when its file changes (git, another editor, an approved proposal). One with unsaved edits shows a bar over the stage instead: **Merge** brings the change into your copy and keeps your edits (a three-way merge against the file as you opened it; if you both changed the same lines it says so and changes nothing), **Reload** loads the file and drops your edits (Undo brings them back), **Keep Mine** hides the bar (saving later still asks before it overwrites the file). Approving a proposal for a doc with unsaved edits merges it the same way.
+
 **Publish.** ⌘B or the toolbar's share button compiles every scene that has an `output` into the SVGs a site inlines (merging each color's pixels into one path, checking the result is lossless and within its budget) and writes them into the document's publish folder, the one its `manifest.json` names (the site's document publishes next to itself, so `astro dev` picks the change up at once). The sheet shows each output's size, problems or over-budget files, and the docs it left out because they're unsaved. File › Publish to Folder… (or Publish Elsewhere… in the sheet) writes anywhere else; a document whose manifest names no folder asks for one.
 
 **Documents.** File › New Document… makes an empty `.pixellab` with the starter palette; Open Document… (⌘O) opens another; Save As… (⇧⌘S) copies the whole document (palette, objects, scenes, manifest) to a new place and reopens it there. A document is a plain folder, so git, Finder and backups see it as one.
 
 ![The Publish sheet](docs/screenshots/document-publish-dark.png)
 
-**Agent window.** Window › Agent or View › Show Agent (⌥⌘A). It shows the `claude mcp add` command to copy, the live activity feed of every MCP tool call ("listed 15 scenes", "rendered hero-island at 2×", "pine placed at x -48, y 92"), and the agents' **proposals**. Select one to see its edits and a diff against the file as it is now, ghosted on the stage (added and moved items outlined in gold, following the timeline when it plays). Approve (⌘↩) writes it; Reject (⌫) deletes it. The Dock icon and the toolbar's sparkle show how many proposals wait.
+**Agent window.** Window › Agent or View › Show Agent (⌥⌘A). It shows the `claude mcp add` command to copy, the live activity feed of every MCP tool call ("listed 15 scenes", "rendered hero-island at 2×", "pine placed at x -48, y 92"), and the agents' **proposals**. Select one to see its edits and a diff against the file as it is now, ghosted on the stage (added and moved items outlined in gold, following the timeline when it plays). Approve (⌘↩) writes it, and merges it into your open copy if it has unsaved edits; Reject (⌫) deletes it. The Dock icon and the toolbar's sparkle show how many proposals wait.
 
 ![The Agent window](docs/screenshots/final-agent-dark.png)
 
@@ -138,12 +140,13 @@ claude mcp add pixellab -- node "$HOME/Applications/Pixel Lab.app/Contents/Resou
 
 (The Agent window's Copy button gives the same command for the running app. Add `--document <path.pixellab>` or `--site <checkout>` after `--mcp` for another document.)
 
-Tools are the commands with `.` → `_` (`scene_place`, `object_paint`, `scene_render` returns the PNG so the agent can see it, …). **How proposals work:**
+Tools are the commands with `.` → `_` (`scene_place`, `object_paint`, `scene_render` returns the PNG so the agent can see it, …). Besides placing and painting, agents can place into groups and edit a group's attributes (`scene_group_set`), key motion (`scene_track_add`, `scene_key_set` for move, show and pose keys, `scene_motion_path` for on-grid keys along a polyline), and set a whole map in one call (`object_map_set`). **How proposals work:**
 
 1. The agent's edits stay in its MCP server's memory, with undo.
-2. `doc_save` validates the doc and writes a proposal to `~/Library/Application Support/Pixel Lab/proposals/<id>.json` (the full new source, the edits, the hash of the file it started from, the agent's name). Nothing in the document changes.
+2. `doc_save` validates the doc and writes a proposal to `~/Library/Application Support/Pixel Lab/proposals/<id>.json` (the full new source, the edits since the doc last matched its file, the hash of the file it started from, the agent's name). Nothing in the document changes. If you have that doc open with unsaved edits, the agent is told (`doc_status` lists them as `unsavedInApp`).
 3. Pixel Lab shows it in the Agent window, ghosted on the stage. **Approve** checks the file still matches the hash (if it changed, it asks: apply anyway or reject), validates, and writes the source into the document; **Reject** deletes the proposal. From a terminal: `pixellab proposal show <id>`, `pixellab proposal apply <id>`, `pixellab proposal reject <id>`.
-4. After approving, Publish (⌘B) compiles the document into the SVGs. Agents can't approve, reject, publish or save a copy; `pixellab serve --mcp --direct` lets an agent write the document directly (off by default).
+4. Before its next call, the agent's server brings the doc back in line with the file on its own (clean if it matches, reloaded if there's nothing else in it), so it carries on from what you approved without a revert.
+5. After approving, Publish (⌘B) compiles the document into the SVGs. Agents can't approve, reject, publish or save a copy; `pixellab serve --mcp --direct` lets an agent write the document directly (off by default).
 
 Every tool call is logged to `activity.jsonl` in the same folder and shown in the Agent window. `PIXELLAB_STATE` moves the state folder.
 
@@ -152,7 +155,7 @@ Every tool call is logged to `activity.jsonl` in the same folder and shown in th
 - **"Pixel Lab needs Node.js 22…" / node not found.** The app looks in Settings, then your login shell's `command -v node`, then `/opt/homebrew/bin` and `/usr/local/bin`. Install Node 22+ (e.g. `brew install node`), or set its path in Settings › Node.js and Try Again.
 - **Document not found.** The setup screen names the path it tried and what's wrong (no folder there, or no `palette.mjs` in it). Choose a `.pixellab`, a site checkout holding one, or make a new one. The CLI resolves the document from `--document`, `PIXELLAB_DOC`, `~/.config/pixellab/config.json` (`{"document": "…"}`), then `--site` / `PIXELLAB_SITE` / `{"site": "…"}`, then `~/Projects/jlawcordova.github.io`.
 - **Publish fails or is refused.** Nothing is written when a source has a problem: the sheet lists them (so does the Checks panel), fix them and publish again. An output over its budget is written and flagged; make the art smaller or raise its budget in `manifest.json`. A document whose manifest names no publish folder asks for one. Unsaved docs aren't in a publish; save first.
-- **"The file changed on disk" when saving.** Someone (git, another editor, an approved proposal) changed the source while you had unsaved edits. Revert loads the file; Save Anyway overwrites it.
+- **"The file changed on disk" when saving.** Someone (git, another editor, an approved proposal) changed the source while you had unsaved edits, and you chose Keep Mine (or hadn't seen the bar). Merge brings the file's change into your copy and keeps your edits; Revert loads the file; Save Anyway overwrites it.
 - **A proposal's base changed.** The file changed since the agent opened it. Approve asks whether to apply anyway (overwriting those changes) or reject; the diff shows what would change against the file as it is now.
 - **The app won't open the first time.** It's ad-hoc signed; Control-click › Open, or allow it in System Settings › Privacy & Security (Open Anyway, which a downloaded release always needs).
 

@@ -36,7 +36,12 @@ Other helpers: `runCli()` and `spawnCli()` run the real binary, `startServer()` 
 | `render.test.mjs` | PNGs, item bounds, poses, the night theme |
 | `scene-ops.test.mjs` | the scene edits ported from the lab |
 | `edit-commands.test.mjs` | one-shot edits, dry runs, conflicts, sessions and undo, `art build` (publishing) |
-| `servers.test.mjs` | `serve --stdio`, `serve --mcp` (proposals, activity), `--direct` |
+| `servers.test.mjs` | `serve --stdio`, `serve --mcp` (proposals, activity), `--direct`, `doc.stale`, `open/<pid>.json`, settling over MCP |
+| `sync.test.mjs` | settling proposals, `doc.reload`, edits since disk, the app's open docs, `doc.merge` and the merge in `proposal.apply` |
+| `merge.test.mjs` | the three-way line merge |
+| `groups.test.mjs` | group attributes following moves, `scene.group.set`, placing into groups |
+| `motion-commands.test.mjs` | tracks and keys, `check`'s off-grid warnings, `scene.motion.path` |
+| `map-set.test.mjs` | `object.map.set` |
 | `activity-and-proposals.test.mjs` | activity summaries, proposal order |
 | `docs-site.test.mjs` | the docs site: Markdown rendering, anchors, links, the full build |
 
@@ -85,7 +90,7 @@ appearance light
 snapshot /tmp/shots/placed-light.png
 ```
 
-There are actions for scene mode (`select`, `click`, `hover`, `place`, `drag`, `key`, `move`, `nudge`, `set`, `raise`, `undo`, `save`, `build`, `time`, …), object mode (`mode object`, `color`, `stroke`, `mousepath`, `erase`, `px`, `fill`, `pick`, `layer`, `frame`, `animate`, `onion`, `new object`, …) and the Agent window (`agent open`, `proposal select`, `approve`, `reject`, `answer`, `ghost`, `agentkey`, …), and `expect`s for each (`expect pixel 7,7 roof-1`, `expect scenepixel x,y #RRGGBB`, `expect proposals 2`, …). The full list is the comment at the top of `app/Sources/PixelLab/Support/ScriptRunner.swift`; add to it when a feature needs a new action.
+There are actions for scene mode (`select`, `click`, `hover`, `place`, `drag`, `key`, `move`, `nudge`, `set`, `raise`, `undo`, `save`, `build`, `time`, …), object mode (`mode object`, `color`, `stroke`, `mousepath`, `erase`, `px`, `fill`, `pick`, `layer`, `frame`, `animate`, `onion`, `new object`, …), the Agent window (`agent open`, `proposal select`, `approve`, `reject`, `answer`, `ghost`, `agentkey`, …) and files changing on disk (`cli <args…>` runs the bundled CLI on the script's document, as an outside editor; `stale merge|reload|keep` presses the changed-on-disk bar's buttons), and `expect`s for each (`expect pixel 7,7 roof-1`, `expect scenepixel x,y #RRGGBB`, `expect proposals 2`, `expect stale true`, …). The full list is the comment at the top of `app/Sources/PixelLab/Support/ScriptRunner.swift`; add to it when a feature needs a new action.
 
 ## Snapshots
 
@@ -102,7 +107,7 @@ Snapshots draw the window with `cacheDisplay`, so pixel art stays nearest-neighb
 scripts/build-app.sh && scripts/acceptance.sh
 ```
 
-End to end on a temp copy of the site: scene edits, save and publish (six SVGs into the temp site); object painting and save; an agent saving two proposals over MCP through the bundled CLI; the Agent window ghosting, approving and rejecting them; Save As to a copy, reopening it and publishing from it into a folder. Run it whenever `app/`, `cli/` or `scripts/acceptance/` changed. Its `expect` lines pin the art as it was on 2026-10-19: after the site's art changes, update the scripts in `scripts/acceptance/`.
+End to end on a temp copy of the site: scene edits, save and publish (six SVGs into the temp site); object painting and save; an agent saving two proposals over MCP through the bundled CLI; the Agent window ghosting, approving and rejecting them; a doc with unsaved edits changed on disk and merged, reloaded and kept, and another proposal approved into an unsaved copy (`stale.txt`); Save As to a copy, reopening it and publishing from it into a folder. Run it whenever `app/`, `cli/` or `scripts/acceptance/` changed. Its `expect` lines pin the art as it was on 2026-10-20: after the site's art changes, update the scripts in `scripts/acceptance/`.
 
 ## CI
 
