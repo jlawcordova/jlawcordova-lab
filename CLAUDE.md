@@ -7,6 +7,9 @@ Pixel Lab for Mac: a `pixellab` CLI and MCP server (Node, zero dependencies) and
 - Test: `npm test` (node:test; must show `# fail 0`)
 - CLI: `node cli/bin/pixellab.mjs help`
 - App: `swift build --package-path app`, then `scripts/build-app.sh` → `build/Pixel Lab.app`
+- App snapshot (no screen recording needed; read-only): `scripts/snapshot.sh <out.png> [scene:hero-island] [dark|light] [zoom]`
+- App icon: `node scripts/make-icon.mjs` rewrites `app/Sources/PixelLab/Resources/AppIcon.png` (build-app.sh makes the .icns)
+- The app builds with the Command Line Tools, which lack the SwiftUI macro plugin: don't use `@State` (keep view state in `AppModel`); `@Observable`, `@Environment`, `@AppStorage`, `@FocusState` are fine.
 
 ## Rules
 
