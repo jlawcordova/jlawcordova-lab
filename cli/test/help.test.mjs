@@ -107,3 +107,16 @@ describe('exit codes', needsSite, () => {
     assert.equal(/** @type {any} */ (code).stderr, '');
   });
 });
+
+describe('docs/cli.md', () => {
+  test('is generated from the registry and up to date (npm run docs:cli)', async () => {
+    const { spawn } = await import('node:child_process');
+    const { join } = await import('node:path');
+    const { REPO } = await import('./helpers.mjs');
+    const code = await new Promise((resolve) => {
+      const child = spawn(process.execPath, [join(REPO, 'scripts', 'docs-cli.mjs'), '--check'], { stdio: 'inherit' });
+      child.on('close', resolve);
+    });
+    assert.equal(code, 0, 'docs/cli.md is out of date: run npm run docs:cli');
+  });
+});

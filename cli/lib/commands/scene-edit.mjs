@@ -69,7 +69,7 @@ const place = {
   },
   args: ['name', 'object'],
   mutates: true,
-  examples: ['pixellab scene place hero-island pine --at 14,6,1', 'pixellab scene place range-sprite crate --px 40,12 --dry-run'],
+  examples: ['pixellab scene place hero-island pine --at 14,6,1', 'pixellab scene place range-sprite boxes --px 40,12 --dry-run'],
   async run(ctx, params) {
     atMostOne(params, ['at', 'px'], 'scene.place');
     const name = await sceneName(ctx, params.name);
@@ -105,7 +105,7 @@ const move = {
   }),
   args: ['name', 'item'],
   mutates: true,
-  examples: ['pixellab scene move hero-island 12 --by 1,0', 'pixellab scene move hero-island crane --nudge 0,-1'],
+  examples: ['pixellab scene move hero-island 0.0 --by 1,0', 'pixellab scene move hero-island jib --nudge 0,-1 --dry-run'],
   async run(ctx, params) {
     needOne(params, ['by', 'nudge'], 'scene.move');
     atMostOne(params, ['by', 'nudge'], 'scene.move');
@@ -141,7 +141,7 @@ const set = {
   }),
   args: ['name', 'item'],
   mutates: true,
-  examples: ['pixellab scene set hero-island 12 --tile 3,4,0', "pixellab scene set hero-island 12 --class 'sway slow'"],
+  examples: ['pixellab scene set hero-island 0.0 --tile 3,4,0', "pixellab scene set hero-island 0.0 --class 'sway slow'"],
   async run(ctx, params) {
     const fields = /** @type {const} */ (['col', 'row', 'level', 'x', 'y']);
     needOne(params, ['tile', 'px', ...fields, 'class', 'id'], 'scene.set');
