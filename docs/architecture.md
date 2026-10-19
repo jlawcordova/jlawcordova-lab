@@ -7,11 +7,11 @@ How Pixel Lab fits together today. The design record, [`2026-10-mac-app/plan.md`
 Every action Pixel Lab can take is a **command** in one registry (`cli/lib/registry.mjs`, the commands in `cli/lib/commands/`). A command is a dotted name, a summary, its params as a JSON Schema object, whether it mutates, and `run(ctx, params)`, which returns plain JSON. Three doors call it:
 
 ```
- a terminal     ── argv ─────────────▶ cli.mjs ──────────┐
- Pixel Lab.app  ── JSON-RPC (stdio) ─▶ server-stdio.mjs ─┼─▶ registry ─▶ command.run(ctx) ─▶ the site's engine
- an agent       ── MCP (stdio) ──────▶ server-mcp.mjs ───┘                     │
-                                                                          session.mjs
-                                                                (working copies, undo, save)
+a terminal ───── argv ─────────────▶ cli.mjs ──────────┐
+Pixel Lab.app ── JSON-RPC (stdio) ─▶ server-stdio.mjs ─┼─▶ registry ─▶ command.run(ctx)
+an agent ─────── MCP (stdio) ──────▶ server-mcp.mjs ───┘                    │
+                                                        session.mjs (working copies, undo,
+                                                        save) and the site's engine
 ```
 
 - **The command line** (`pixellab scene place hero-island pine --at 14,6,1`): `argv.mjs` turns words and flags into a command and params from the command's schema; `cli.mjs` runs it in a fresh session and saves right away (one-shot edits), or prints a diff with `--dry-run`.
@@ -34,16 +34,17 @@ The one piece of editing logic that isn't in the engine, the scene edits of the 
 ## An edit in the app, end to end
 
 ```
- StageInputView (click)                          pixellab serve --stdio
-   └▶ SceneEditor.place(…)                         │
-        └▶ ServerConnection.call("scene.place") ──▶ registry.call → scene.place.run(ctx)
-                                                   │   ctx.edit(scene) → Session.edit: snapshot for undo,
-                                                   │   apply scene-ops.place to the working copy
-           AppModel.handle(.docChanged) ◀───────── │ notification doc.changed { dirty, canUndo, … }
-             └▶ requestRender, requestCheck ──────▶ scene.render (PNG + item bounds), check
-           StageView draws the PNG, nearest-neighbor, at a whole zoom
- ⌘S → AppModel.save ──────────────────────────────▶ doc.save: validate, serialize, check the file's
-                                                     hash on disk, write atomically
+StageInputView (a click)                   pixellab serve --stdio
+ └▶ SceneEditor.place(…)
+     └▶ connection.call("scene.place") ───▶ scene.place.run(ctx)
+                                             └▶ ctx.edit: snapshot for undo, then
+                                                scene-ops place on the working copy
+AppModel.handle(.docChanged) ◀────────────── doc.changed { dirty, canUndo, … }
+ └▶ requestRender, requestCheck ──────────▶ scene.render (PNG + item bounds), check
+StageView draws the PNG, nearest-neighbor, at a whole zoom
+
+⌘S → AppModel.save ───────────────────────▶ doc.save: validate, serialize, compare the
+                                             file's hash on disk, write atomically
 ```
 
 The app never reads or writes the art itself. It renders what the server sends (a transparent PNG at scale 1, with each item's bounds for hit-testing) and keeps view state (selection, zoom, tool) in its model.
@@ -51,15 +52,17 @@ The app never reads or writes the art itself. It renders what the server sends (
 ## An agent's edit: proposals
 
 ```
- agent ── tools/call scene_place ──▶ serve --mcp (session, mode 'propose')
- agent ── tools/call doc_save ─────▶ validate → write proposals/<id>.json   (nothing in the site changes)
-                                              { id, doc, baseHash, source, summary, createdAt, agent }
-                                     append activity.jsonl                    (every tools/call)
+agent ── tools/call scene_place ──▶ serve --mcp (a session in 'propose' mode)
+agent ── tools/call doc_save ────▶ validate, then write proposals/<id>.json
+                                   { id, doc, baseHash, source, summary, createdAt, agent }
+                                   (nothing in the site changes)
+       every tools/call ─────────▶ a line in activity.jsonl
 
- Pixel Lab (serve --stdio) watches the state dir ──▶ proposals.changed, activity.appended
-   Agent window: list, diff (proposal.show), ghost on the stage (proposal.render)
-   Approve → proposal.apply: the file must still hash to baseHash (else ask), validate, write
-   Reject  → proposal.reject: delete the proposal
+Pixel Lab's serve --stdio watches the state dir ─▶ proposals.changed, activity.appended
+  Agent window: the list, a diff (proposal.show), a ghost on the stage (proposal.render)
+  Approve → proposal.apply: the file must still hash to baseHash (else it asks),
+            validate, write
+  Reject  → proposal.reject: delete the proposal
 ```
 
 Agents can't approve, reject or build: those commands are left out of the MCP tools (`LEFT_OUT` in `cli/lib/server-mcp.mjs`). `serve --mcp --direct` lets an agent write the site directly; it's off by default.
