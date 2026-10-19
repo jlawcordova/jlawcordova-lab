@@ -26,12 +26,20 @@ enum Theme {
     static let gold = dynamic(night: 0xD8B66A, day: 0xD8B66A)
     /// The iso grid: ink at 6% (night), rgba(90,62,43,.10) (day).
     static let grid = dynamic(night: 0xF1E8D8, nightAlpha: 0.07, day: 0x5A3E2B, dayAlpha: 0.12)
+    /// The object stage's checkerboard cells, over the card.
+    static let checker = dynamic(night: 0xF1E8D8, nightAlpha: 0.07, day: 0x5A3E2B, dayAlpha: 0.07)
     /// The lattice's origin lines, a little stronger.
     static let gridStrong = dynamic(night: 0xF1E8D8, nightAlpha: 0.13, day: 0x5A3E2B, dayAlpha: 0.2)
     /// Under the stage's dashed outlines, so they read over any art.
     static let halo = dynamic(night: 0x1C1712, nightAlpha: 0.7, day: 0xF4EDE0, dayAlpha: 0.8)
     /// A selected row: the accent, faint.
     static let selection = dynamic(night: 0x8CBC86, nightAlpha: 0.18, day: 0x3F6B45, dayAlpha: 0.16)
+
+    /// A palette color, "#RRGGBB".
+    static func hexColor(_ hex: String) -> Color {
+        let v = UInt32(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) ?? 0
+        return Color(nsColor: NSColor(hex: v))
+    }
 
     static func dynamic(night: UInt32, nightAlpha: CGFloat = 1, day: UInt32, dayAlpha: CGFloat = 1) -> Color {
         Color(nsColor: dynamicNS(night: night, nightAlpha: nightAlpha, day: day, dayAlpha: dayAlpha))

@@ -8,12 +8,16 @@ import SwiftUI
 struct StageInput: NSViewRepresentable {
     var geometry: StageGeometry
     var editor: SceneEditor
+    var objects: ObjectEditor
     var tool: StageTool
+    /// Object mode's tool (the cursor follows it).
+    var paintTool: PaintTool
     var isScene: Bool
 
     func makeNSView(context: Context) -> StageInputView {
         let v = StageInputView()
         v.editor = editor
+        v.objects = objects
         editor.stageView = v
         return v
     }
@@ -21,7 +25,12 @@ struct StageInput: NSViewRepresentable {
     func updateNSView(_ v: StageInputView, context: Context) {
         v.geometry = geometry
         v.editor = editor
-        v.isScene = isScene
+        v.objects = objects
+        if v.isScene != isScene || v.paintTool != paintTool {
+            v.isScene = isScene
+            v.paintTool = paintTool
+            v.window?.invalidateCursorRects(for: v)
+        }
         if editor.stageView !== v { editor.stageView = v }
         if v.tool != tool {
             v.tool = tool
@@ -33,7 +42,9 @@ struct StageInput: NSViewRepresentable {
 final class StageInputView: NSView {
     var geometry: StageGeometry?
     weak var editor: SceneEditor?
+    weak var objects: ObjectEditor?
     var tool: StageTool = .select
+    var paintTool: PaintTool = .pencil
     var isScene = true
     private var panStart: (window: CGPoint, origin: CGPoint)?
     private var tracking: NSTrackingArea?
@@ -48,7 +59,7 @@ final class StageInputView: NSView {
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityLabel("Stage")
-        setAccessibilityHelp("V select, A place, H pan. Arrows move the selection by a tile, Option-arrows by a pixel, Shift-up and down by a level. Return places the library object at the cursor.")
+        setAccessibilityHelp("Scenes: V select, A place, H pan. Arrows move the selection by a tile, Option-arrows by a pixel, Shift-up and down by a level. Return places the library object at the cursor. Objects: B pencil, E eraser, G fill, I picker; arrows move the pixel cursor, Return paints at it, Delete erases it, [ and ] change layer, Page Up and Page Down change frame.")
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
@@ -77,8 +88,9 @@ final class StageInputView: NSView {
     }
 
     private var cursor: NSCursor {
-        guard isScene, let editor else { return .arrow }
+        guard let editor else { return .arrow }
         if editor.panning { return .closedHand }
+        if !isScene { return editor.spaceHeld ? .openHand : .crosshair }
         switch editor.effectiveTool {
         case .pan: return .openHand
         case .place: return .crosshair
@@ -95,12 +107,17 @@ final class StageInputView: NSView {
     private func point(_ event: NSEvent) -> CGPoint { convert(event.locationInWindow, from: nil) }
 
     override func mouseMoved(with event: NSEvent) {
+        if !isScene, let geometry, let objects {
+            objects.pointerMoved(point(event), geometry: geometry)
+            return
+        }
         guard isScene, let geometry, let editor else { return }
         editor.pointerMoved(point(event), geometry: geometry, option: event.modifierFlags.contains(.option))
     }
 
     override func mouseExited(with event: NSEvent) {
         editor?.pointerExited()
+        objects?.pointerExited()
     }
 
     override func flagsChanged(with event: NSEvent) {
@@ -112,6 +129,16 @@ final class StageInputView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        if !isScene, let geometry, let editor, let objects {
+            if editor.spaceHeld, let clip = enclosingScrollView?.contentView {
+                editor.panning = true
+                panStart = (event.locationInWindow, clip.bounds.origin)
+                NSCursor.closedHand.set()
+                return
+            }
+            objects.mouseDown(point(event), geometry: geometry, option: event.modifierFlags.contains(.option), shift: event.modifierFlags.contains(.shift))
+            return
+        }
         guard isScene, let geometry, let editor else { return }
         editor.mouseDown(point(event), geometry: geometry, option: event.modifierFlags.contains(.option), clickCount: event.clickCount)
         if editor.panning, let clip = enclosingScrollView?.contentView {
@@ -133,11 +160,16 @@ final class StageInputView: NSView {
             return
         }
         guard let geometry else { return }
+        if !isScene {
+            objects?.mouseDragged(point(event), geometry: geometry)
+            return
+        }
         editor.mouseDragged(point(event), geometry: geometry, option: event.modifierFlags.contains(.option))
     }
 
     override func mouseUp(with event: NSEvent) {
         panStart = nil
+        if !isScene { objects?.mouseUp() }
         editor?.mouseUp()
         window?.invalidateCursorRects(for: self)
     }
@@ -174,12 +206,7 @@ final class StageInputView: NSView {
             }
         }
         if !isScene {
-            // Objects: only zoom keys on the stage (object tools come in slice 5).
-            if case .char(let c) = input.key, let n = c.wholeNumberValue, !input.option, !input.command {
-                if n == 0 { editor.app?.zoom = .fit; return }
-                if n <= 4 { editor.app?.setZoomLevel(index: n - 1); return }
-            }
-            super.keyDown(with: event)
+            if objects?.handleKey(input) != true { super.keyDown(with: event) }
             return
         }
         if !editor.handleKey(input) { super.keyDown(with: event) }

@@ -19,6 +19,23 @@ import Foundation
 ///     search <text>   wait <ms>   snapshot <file.png>   log <text>
 ///     expect dirty|selected|object|at|items|problems|build|tool|time <value>
 ///
+/// Object mode (pixels are object.render pixels at scale 1: a sprite's map
+/// column and row, a block's render pixel):
+///
+///     mode scene|object           tool pencil|eraser|fill|picker   color <name>
+///     stroke x,y x,y …            (a pencil or eraser stroke through the points, gaps filled)
+///     erase x,y …                 px <x> <y> [opt] [shift]  (a click with the tool)
+///     fill <x> <y>   pick <x> <y>   grid on|off   onion on|off   resize <w> <h>
+///     layer <n>|add|duplicate|delete|up|down|hide <n>|show <n>
+///     frame <n>|next|prev|add|duplicate|delete|earlier|later
+///     animate [ff|wf|hf]   still   play   pause   sidebar palette|library|items
+///     new scene <name>   new object <name> [block|<w>x<h>|extends]
+///     newdialog scene|object [<name>] [block|<w>x<h>|extends]   newcancel   newsubmit
+///     mouse down|drag|up <x> <y> [opt] [shift]   (object pixels in object mode)
+///     mousepath x,y x,y …         (a fast real drag: down, a drag every 4 ms, up)
+///     expect color|layer|frame|layers|frames|doc|mode|hidden|calls <value>
+///     expect pixel <x>,<y> <color name|empty>   (the rendered pixel)
+///
 /// Each action waits until renders, checks and edits settle. The app logs
 /// each step to stderr and quits at the end: exit 0 if every step and
 /// expectation passed, 1 if any failed, 2 if it couldn't start.
@@ -139,9 +156,16 @@ final class ScriptRunner {
             window.center()
             return nil
         case "tool":
-            guard let t = StageTool(rawValue: try arg(words, 1)) else { throw Failure("tool select|place|pan") }
+            if let t = PaintTool(rawValue: try arg(words, 1)) {
+                model.objectEditor.setTool(t)
+                return nil
+            }
+            guard let t = StageTool(rawValue: try arg(words, 1)) else { throw Failure("tool select|place|pan|pencil|eraser|fill|picker") }
             editor.setTool(t)
             return nil
+        case "mode", "color", "stroke", "erase", "px", "fill", "pick", "grid", "onion", "resize", "layer", "frame", "animate", "still",
+             "new", "newdialog", "newcancel", "newsubmit":
+            return try await performObject(words, model: model)
         case "library":
             editor.choosePlaceObject(try arg(words, 1))
             _ = await model.thumbnails.art(try arg(words, 1))
@@ -218,7 +242,8 @@ final class ScriptRunner {
                 }
                 return nil
             }
-            guard editor.handleKey(k) else { throw Failure("the stage doesn't use \(words[1])") }
+            let used = model.document?.ref.kind == .object ? model.objectEditor.handleKey(k) : editor.handleKey(k)
+            guard used else { throw Failure("the stage doesn't use \(words[1])") }
             return nil
         case "move":
             return try needEdit(await editor.move(dc: try int(words, 1), dr: try int(words, 2), dl: words.count > 3 ? try int(words, 3) : 0))
@@ -256,6 +281,12 @@ final class ScriptRunner {
             model.timeline.pause()
             model.timeline.scrub(to: Double(try int(words, 1)))
             return nil
+        case "play" where model.document?.ref.kind == .object:
+            model.objectEditor.play()
+            return model.objectEditor.playing ? "playing" : "nothing to play"
+        case "pause" where model.document?.ref.kind == .object:
+            model.objectEditor.stopPlaying()
+            return "paused on \(model.objectEditor.frameName(model.objectEditor.frame)), \(model.document?.renderCount ?? 0) renders so far"
         case "play": model.timeline.play(); return nil
         case "pause":
             model.timeline.pause()
@@ -266,7 +297,13 @@ final class ScriptRunner {
             if z == "fit" { model.zoom = .fit } else { model.zoom = .level(try int(words, 1)) }
             return nil
         case "sidebar":
-            editor.sidebarTab = (try arg(words, 1)) == "items" ? .items : .library
+            switch try arg(words, 1) {
+            case "palette": model.objectEditor.sidebarTab = .palette
+            case "items": editor.sidebarTab = .items
+            default:
+                editor.sidebarTab = .library
+                model.objectEditor.sidebarTab = .library
+            }
             return nil
         case "search":
             model.searchText = words.dropFirst().joined(separator: " ")
@@ -278,10 +315,15 @@ final class ScriptRunner {
             // Real NSEvents into the stage view: mouse down|drag|up <sceneX> <sceneY> [opt]
             guard let view = editor.stageView as? StageInputView, let geometry = view.geometry, let window = view.window else { throw Failure("no stage") }
             let phase = try arg(words, 1)
-            let scene = CGPoint(x: Double(try int(words, 2)) + 0.5, y: Double(try int(words, 3)) + 0.5)
+            // Object mode: object pixels (render pixels at scale 1); scenes: scene pixels.
+            let origin = model.document?.ref.kind == .object ? geometry.viewBox.origin : .zero
+            let scene = CGPoint(x: origin.x + Double(try int(words, 2)) + 0.5, y: origin.y + Double(try int(words, 3)) + 0.5)
             let inWindow = view.convert(geometry.viewPoint(fromScene: scene), to: nil)
             let type: NSEvent.EventType = phase == "down" ? .leftMouseDown : phase == "drag" ? .leftMouseDragged : .leftMouseUp
-            guard let event = NSEvent.mouseEvent(with: type, location: inWindow, modifierFlags: words.count > 4 && words[4] == "opt" ? .option : [],
+            var flags: NSEvent.ModifierFlags = []
+            if words.dropFirst(4).contains("opt") { flags.insert(.option) }
+            if words.dropFirst(4).contains("shift") { flags.insert(.shift) }
+            guard let event = NSEvent.mouseEvent(with: type, location: inWindow, modifierFlags: flags,
                                                  timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
                                                  eventNumber: 0, clickCount: 1, pressure: 1) else { throw Failure("no event") }
             switch type {
@@ -291,6 +333,29 @@ final class ScriptRunner {
             }
             let scroll = view.enclosingScrollView?.contentView.bounds.origin
             return "view \(Int(geometry.viewPoint(fromScene: scene).x)),\(Int(geometry.viewPoint(fromScene: scene).y))\(scroll.map { "; scrolled to \(Int($0.x)),\(Int($0.y))" } ?? "; no scroll view")\(editor.drag.map { " drag \($0.dc),\($0.dr) px \($0.dx),\($0.dy)" } ?? "")"
+        case "mousepath":
+            // A fast real drag: mouse down at the first object pixel, a drag
+            // event every 4 ms through the rest, up at the last.
+            guard let view = editor.stageView as? StageInputView, let geometry = view.geometry, let window = view.window else { throw Failure("no stage") }
+            let pts = words.dropFirst().compactMap { PixelPoint(spec: $0) }
+            guard pts.count >= 2 else { throw Failure("mousepath x,y x,y …") }
+            for (i, p) in pts.enumerated() {
+                let scene = CGPoint(x: geometry.viewBox.minX + Double(p.x) + 0.5, y: geometry.viewBox.minY + Double(p.y) + 0.5)
+                let type: NSEvent.EventType = i == 0 ? .leftMouseDown : (i == pts.count - 1 ? .leftMouseUp : .leftMouseDragged)
+                guard let event = NSEvent.mouseEvent(with: type, location: view.convert(geometry.viewPoint(fromScene: scene), to: nil), modifierFlags: [],
+                                                     timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                                                     eventNumber: 0, clickCount: 1, pressure: 1) else { throw Failure("no event") }
+                switch type {
+                case .leftMouseDown: view.mouseDown(with: event)
+                case .leftMouseDragged: view.mouseDragged(with: event)
+                default:
+                    view.mouseDragged(with: event)
+                    view.mouseUp(with: event)
+                }
+                try? await Task.sleep(for: .milliseconds(4))
+            }
+            await waitIdle(model.objectEditor)
+            return "\(pts.count) samples, \(model.objectEditor.lastStrokeCalls) paint call\(model.objectEditor.lastStrokeCalls == 1 ? "" : "s")"
         case "layout":
             guard let w = Snapshotter.mainWindow(), let c = w.contentView else { throw Failure("no window") }
             func walk(_ v: NSView, _ depth: Int) -> [String] {
@@ -315,6 +380,145 @@ final class ScriptRunner {
         }
     }
 
+    /// Object mode's actions and New Scene / New Object.
+    private func performObject(_ words: [String], model: AppModel) async throws -> String? {
+        let objects = model.objectEditor
+        func needEdit(_ r: EditResult?) throws -> String? {
+            guard let r else { throw Failure(model.notice ?? "the edit failed") }
+            return r.summary
+        }
+        func points(_ from: Int) throws -> [PixelPoint] {
+            let pts = words.dropFirst(from).map { PixelPoint(spec: $0) }
+            guard !pts.isEmpty, pts.allSatisfy({ $0 != nil }) else { throw Failure("\(words[0]) needs x,y points") }
+            return pts.compactMap { $0 }
+        }
+        func requireObject() throws {
+            guard model.document?.ref.kind == .object, objects.info != nil else { throw Failure("no object open") }
+        }
+        switch words[0] {
+        case "mode":
+            guard let kind = DocRef.Kind(rawValue: try arg(words, 1)) else { throw Failure("mode scene|object") }
+            model.switchMode(to: kind)
+            try? await Task.sleep(for: .milliseconds(100))
+            return nil
+        case "color":
+            let name = try arg(words, 1)
+            guard objects.allowed(name) else { throw Failure(objects.whyNot(name)) }
+            objects.setColor(name)
+            return nil
+        case "stroke", "erase":
+            try requireObject()
+            let pts = try points(1)
+            let tool = objects.tool
+            if words[0] == "erase" { objects.tool = .eraser } else if tool != .pencil && tool != .eraser { objects.tool = .pencil }
+            defer { objects.tool = tool }
+            objects.beginStroke(at: pts[0])
+            guard objects.stroking else { throw Failure(model.notice ?? "the stroke didn't start") }
+            for p in pts.dropFirst() { objects.extendStroke(to: p) }
+            objects.endStroke()
+            await waitIdle(objects)
+            if let n = model.notice { throw Failure(n) }
+            return "\(objects.lastStrokeCalls) call\(objects.lastStrokeCalls == 1 ? "" : "s"): \(model.lastEdit ?? "")"
+        case "px":
+            try requireObject()
+            let p = PixelPoint(try int(words, 1), try int(words, 2))
+            objects.press(p, option: words.contains("opt"), shift: words.contains("shift"))
+            objects.endStroke()
+            await waitIdle(objects)
+            return model.lastEdit
+        case "fill":
+            try requireObject()
+            return try needEdit(await objects.fill(PixelPoint(try int(words, 1), try int(words, 2))))
+        case "pick":
+            try requireObject()
+            let c = await objects.pick(PixelPoint(try int(words, 1), try int(words, 2)))
+            return c.map { "picked \($0)" } ?? "empty"
+        case "grid":
+            objects.pixelGrid = (try arg(words, 1)) == "on"
+            return nil
+        case "onion":
+            if objects.onion != ((try arg(words, 1)) == "on") { objects.toggleOnion() }
+            return nil
+        case "resize":
+            return try needEdit(await objects.resize(width: try int(words, 1), height: try int(words, 2)))
+        case "layer":
+            try requireObject()
+            switch try arg(words, 1) {
+            case "add": return try needEdit(await objects.addLayer())
+            case "duplicate": return try needEdit(await objects.duplicateLayer())
+            case "delete": return try needEdit(await objects.deleteLayer())
+            case "up": return try needEdit(await objects.moveLayer(by: 1))
+            case "down": return try needEdit(await objects.moveLayer(by: -1))
+            case "hide", "show":
+                let n = try int(words, 2)
+                if objects.hidden.contains(n) != (words[1] == "hide") { objects.toggleVisible(n) }
+                return nil
+            default:
+                objects.selectLayer(try int(words, 1))
+                return objects.label(objects.layer)
+            }
+        case "frame":
+            try requireObject()
+            switch try arg(words, 1) {
+            case "next": objects.selectFrame(objects.frame + 1)
+            case "prev": objects.selectFrame(objects.frame - 1)
+            case "add": return try needEdit(await objects.addFrame())
+            case "duplicate": return try needEdit(await objects.duplicateFrame())
+            case "delete": return try needEdit(await objects.deleteFrame())
+            case "earlier": return try needEdit(await objects.moveFrame(by: -1))
+            case "later": return try needEdit(await objects.moveFrame(by: 1))
+            default: objects.selectFrame(try int(words, 1))
+            }
+            return objects.frameName(objects.frame)
+        case "animate":
+            try requireObject()
+            let loop = words.count > 1 ? FrameLoop(rawValue: words[1]) : .ff
+            guard let loop else { throw Failure("animate ff|wf|hf") }
+            return try needEdit(await objects.animate(loop))
+        case "still":
+            try requireObject()
+            return try needEdit(await objects.makeStill())
+        case "new", "newdialog":
+            guard let kind = DocRef.Kind(rawValue: try arg(words, 1)) else { throw Failure("\(words[0]) scene|object <name>") }
+            model.showNew(kind)
+            guard let draft = model.newDoc else { throw Failure("no sheet") }
+            if words.count > 2 { draft.name = words[2] }
+            for w in words.dropFirst(3) {
+                if w == "block" { draft.objectKind = .block }
+                else if w == "extends" { draft.extendsCharacter = true }
+                else {
+                    let wh = w.split(separator: "x").map(String.init)
+                    guard wh.count == 2 else { throw Failure("unknown option \(w)") }
+                    draft.width = wh[0]
+                    draft.height = wh[1]
+                }
+            }
+            if words[0] == "newdialog" { return draft.help(taken: model.takenNames) }
+            fallthrough
+        case "newsubmit":
+            guard let draft = model.newDoc else { throw Failure("no New sheet open") }
+            guard await model.createNewDoc() else {
+                let why = draft.serverError ?? draft.problem(taken: model.takenNames) ?? "not created"
+                model.newDoc = nil
+                throw Failure(why)
+            }
+            return "opened \(model.document?.ref.id ?? "?")"
+        case "newcancel":
+            model.newDoc = nil
+            return nil
+        default:
+            throw Failure("unknown action \(words[0])")
+        }
+    }
+
+    /// Waits for a stroke's paint calls to be answered (at most 10 s).
+    private func waitIdle(_ objects: ObjectEditor) async {
+        let started = Date()
+        while objects.busy, Date().timeIntervalSince(started) < 10 {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
     private func expect(_ words: [String], model: AppModel) throws -> String {
         let what = try arg(words, 1)
         let want = words.dropFirst(2).joined(separator: " ")
@@ -329,9 +533,26 @@ final class ScriptRunner {
         case "items": got = String(doc?.items.count ?? 0)
         case "problems": got = String(doc?.problems?.count ?? -1)
         case "build": got = model.build?.result.map { $0.ok ? "ok" : "failed" } ?? "none"
-        case "tool": got = model.editor.tool.rawValue
+        case "tool": got = doc?.ref.kind == .object ? model.objectEditor.tool.rawValue : model.editor.tool.rawValue
         case "time": got = String(model.timeline.renderTime)
         case "alert": got = model.saveAlert.map { "\($0.kind)" } ?? "none"
+        case "color": got = model.objectEditor.color
+        case "layer": got = String(model.objectEditor.layer)
+        case "frame": got = String(model.objectEditor.frame)
+        case "layers": got = String(model.objectEditor.layers.count)
+        case "frames": got = String(model.objectEditor.frameCount)
+        case "hidden": got = model.objectEditor.hidden.sorted().map(String.init).joined(separator: ",")
+        case "calls": got = String(model.objectEditor.lastStrokeCalls)
+        case "doc": got = doc?.ref.id ?? "none"
+        case "mode": got = model.mode.rawValue
+        case "pixel":
+            let parts = words.dropFirst(2)
+            guard let p = parts.first.flatMap(PixelPoint.init(spec:)) else { throw Failure("expect pixel x,y <color|empty>") }
+            let hex = model.objectEditor.renderColors?.hex(p)
+            let name = hex.flatMap { model.objectEditor.colorName(hex: $0) } ?? hex ?? "empty"
+            let wantColor = parts.dropFirst().joined(separator: " ")
+            guard name == wantColor else { throw Failure("expected pixel \(p) \(wantColor), got \(name)") }
+            return "pixel \(p) = \(name)"
         default: throw Failure("expect what? \(what)")
         }
         guard got == want else { throw Failure("expected \(what) \(want), got \(got)") }
@@ -347,7 +568,8 @@ final class ScriptRunner {
         var steadySince: Date?
         while Date().timeIntervalSince(started) < 30 {
             let busy: Bool = {
-                if model.editor.pendingEdits > 0 || model.build?.running == true { return true }
+                if model.editor.pendingEdits > 0 || model.build?.running == true || model.objectEditor.busy { return true }
+                if model.newDoc?.creating == true { return true }
                 guard let doc = model.document else { return false }
                 return doc.rendering || doc.checking || doc.loadingItems || doc.render == nil || !model.thumbnails.isIdle
             }()

@@ -607,7 +607,7 @@ read-only · MCP tool `object_pick`
 Render one object to a transparent PNG.
 
 ```
-pixellab object render <name> [--scale <n>] [--frame <n>] [--time <n>] [--out <file.png>]
+pixellab object render <name> [--scale <n>] [--frame <n>] [--time <n>] [--layers <n,…>] [--out <file.png>]
 ```
 
 The anchor is at (0, 0). A sprite's viewBox is its whole map, so at scale 1 PNG pixel (x, y) is map column x, row y; a block's is the box around its pixels. Returns the same shape as scene.render, with one item. On the command line, --out <file.png> writes the PNG.
@@ -620,6 +620,7 @@ read-only · MCP tool `object_render`
 | `--scale` | integer | default `1` | whole-pixel zoom of the PNG (1 to 16) |
 | `--frame` | integer | default `0` | the frame every loop shows (loops shorter than this show nothing) (at least 0) |
 | `--time` | integer |  | ms into the loops; overrides frame (at least 0) |
+| `--layers` | list of integer |  | only these layers of a sprite, each at --frame or its last frame, as the lab's stage shows them (hidden layers, onion skin) |
 
 ```sh
 pixellab object render pine --scale 4 --out /tmp/pine.png

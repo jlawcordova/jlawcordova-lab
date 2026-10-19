@@ -19,12 +19,26 @@ struct InspectorView: View {
                     if model.editor.tool == .place || model.editor.placeObject != nil {
                         PlaceInspector()
                     }
-                }
-                section("Checks") {
+                    section("Checks") {
+                        ScrollView {
+                            ChecksList(doc: doc).frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .scrollBounceBehavior(.basedOnSize)
+                    }
+                } else {
+                    // Below the document card, so the scroll view isn't at the
+                    // column's top edge (see above).
                     ScrollView {
-                        ChecksList(doc: doc).frame(maxWidth: .infinity, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 18) {
+                            ObjectInspector(doc: doc)
+                            section("Checks") {
+                                ChecksList(doc: doc).frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        .padding(.bottom, 8)
                     }
                     .scrollBounceBehavior(.basedOnSize)
+                    .scrollIndicators(.automatic)
                 }
             } else {
                 Text("No document open").font(.callout).foregroundStyle(Theme.inkMuted)
@@ -49,6 +63,8 @@ struct InspectorView: View {
             if doc.ref.kind == .scene, doc.itemsLoaded {
                 Text("\(doc.items.count) items\(model.timeline.hasMotion ? " · motion \(TimelineModel.label(model.timeline.duration ?? 0))" : "")")
                     .font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(1)
+            } else if doc.ref.kind == .object, let summary = model.objectEditor.info?.description ?? doc.summary {
+                Text(summary).font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(2)
             } else if let summary = doc.summary {
                 Text(summary).font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(2)
             }

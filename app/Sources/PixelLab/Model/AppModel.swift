@@ -58,7 +58,14 @@ final class AppModel {
 
     let thumbnails = ThumbnailStore()
     let editor = SceneEditor()
+    let objectEditor = ObjectEditor()
     let timeline = TimelineModel()
+    /// The palette (`palette.get`), in its order, and by name and hex.
+    var palette: [PaletteColor] = []
+    var paletteByName: [String: PaletteColor] = [:]
+    var paletteByHex: [String: String] = [:]
+    /// The New Scene / New Object sheet.
+    var newDoc: NewDocDraft?
     /// The last edit's summary (the status line under the stage).
     var lastEdit: String?
     /// Open docs with unsaved changes (from `doc.changed`), for Save/Don't Save on quit.
@@ -74,6 +81,7 @@ final class AppModel {
 
     init() {
         editor.app = self
+        objectEditor.app = self
         timeline.app = self
     }
     @ObservationIgnored private(set) var connection: ServerConnection?
@@ -143,6 +151,7 @@ final class AppModel {
         connection = conn
         thumbnails.reset(connection: conn)
         listen(to: conn)
+        await loadPalette()
         await loadLists()
         document = nil
         phase = .ready
@@ -173,6 +182,11 @@ final class AppModel {
             if status.dirty { dirtyDocs.insert(status.doc) } else { dirtyDocs.remove(status.doc) }
             guard let doc = document, doc.ref.id == status.doc else { return }
             doc.status = status
+            if doc.ref.kind == .object {
+                objectEditor.docChanged()
+                // The library and scenes show the working copy.
+                thumbnails.invalidate([doc.ref.name])
+            }
             timeline.invalidate()
             requestRender()
             requestCheck()
@@ -187,6 +201,8 @@ final class AppModel {
                 }
             }
             if everything { thumbnails.invalidateAll() } else { thumbnails.invalidate(objectsChanged) }
+            if everything { await loadPalette() }
+            if let doc = document, doc.ref.kind == .object, everything || objectsChanged.contains(doc.ref.name) { objectEditor.docChanged() }
             await loadLists()
             timeline.invalidate()
             requestRender()
@@ -201,6 +217,7 @@ final class AppModel {
             if let doc = document {
                 _ = try? await connection?.call("doc.open", ["doc": .string(doc.ref.id)])
                 dirtyDocs = []
+                if doc.ref.kind == .object { objectEditor.docChanged() }
                 timeline.invalidate()
                 requestRender()
                 requestCheck()
@@ -224,6 +241,19 @@ final class AppModel {
             }
         } catch {
             notice = "Couldn't list the site's art: \(error.localizedDescription)"
+        }
+    }
+
+    /// `palette.get`: the swatches and the hex → name map for the color under the pointer.
+    func loadPalette() async {
+        guard let connection else { return }
+        do {
+            let r: PaletteResult = try await connection.call("palette.get")
+            palette = r.colors
+            paletteByName = Dictionary(r.colors.map { ($0.name, $0) }, uniquingKeysWith: { a, _ in a })
+            paletteByHex = Dictionary(r.colors.map { ($0.hex.uppercased(), $0.name) }, uniquingKeysWith: { a, _ in a })
+        } catch {
+            notice = "Couldn't read the palette: \(error.localizedDescription)"
         }
     }
 
@@ -261,6 +291,7 @@ final class AppModel {
         document = doc
         if snapshot == nil, script == nil { UserDefaults.standard.set(ref.id, forKey: SettingsKey.lastDoc) }
         editor.reset()
+        objectEditor.reset()
         timeline.reset()
         do {
             let status = try await connection.call("doc.open", ["doc": .string(ref.id)], as: DocStatus.self)
@@ -270,15 +301,21 @@ final class AppModel {
             doc.error = error.localizedDescription
         }
         await loadMotion()
+        if ref.kind == .object { objectEditor.requestInfo() }
         requestRender()
         requestCheck()
         requestItems()
     }
 
-    /// The Scene/Object segmented control: show the last doc of that kind.
+    /// The Scene/Object segmented control: show the last doc of that kind;
+    /// Object with a scene item selected opens that item's object.
     func switchMode(to kind: DocRef.Kind) {
         mode = kind
         guard document?.ref.kind != kind else { return }
+        if kind == .object, let object = document?.selectedItem?.object, objects.contains(where: { $0.name == object }) {
+            Task { await open(DocRef(.object, object)) }
+            return
+        }
         let name: String? = kind == .scene
             ? (lastScene ?? scenes.first { $0.name == "hero-island" }?.name ?? scenes.first?.name)
             : (lastObject ?? objects.first { $0.name == "house" }?.name ?? objects.first?.name)
@@ -300,6 +337,18 @@ final class AppModel {
                 let animated = isScene && timeline.hasMotion
                 let t = timeline.renderTime
                 let generation = timeline.generation
+                let objects = objectEditor
+                let objectFrame = objects.frame
+                let objectKey = objects.cacheKey(frame: objectFrame)
+                let objectGeneration = objects.cacheGeneration
+                let acked = objects.ackedJob
+                if !isScene, objects.info != nil, let cached = objects.cached(frame: objectFrame) {
+                    doc.render = cached
+                    objects.renderColors = PixelColors(cgImage: cached.image.cgImage, scale: cached.scale)
+                    objects.reconcile(upTo: acked)
+                    doc.renderCount += 1
+                    continue
+                }
                 if animated, let frame = timeline.cached(t), let image = PixelImage(png: frame.png, renderScale: frame.scale) {
                     doc.render = StageImage(image: image, viewBox: frame.viewBox, scale: frame.scale, items: frame.items, anchor: nil, time: Double(t))
                     doc.renderCount += 1
@@ -309,13 +358,14 @@ final class AppModel {
                     let method = isScene ? "scene.render" : "object.render"
                     var params: [String: JSONValue] = ["name": .string(doc.ref.name), "scale": 1]
                     if animated { params["time"] = JSONValue(t) }
+                    if !isScene { params.merge(objects.renderParams(frame: objectFrame)) { _, b in b } }
                     let r: RenderResult = try await connection.call(method, params)
                     let viewBox = CGRect(x: r.viewBox[0], y: r.viewBox[1], width: r.viewBox[2], height: r.viewBox[3])
                     if animated {
                         timeline.store(t, .init(png: r.png, scale: r.scale, viewBox: viewBox, items: r.items), generation: generation)
                     }
                     if let image = PixelImage(png: r.png, renderScale: r.scale) {
-                        doc.render = StageImage(
+                        let stage = StageImage(
                             image: image,
                             viewBox: viewBox,
                             scale: r.scale,
@@ -323,7 +373,13 @@ final class AppModel {
                             anchor: r.anchor.map { CGPoint(x: $0[0], y: $0[1]) },
                             time: r.time
                         )
+                        doc.render = stage
                         doc.error = nil
+                        if !isScene, document === doc {
+                            objects.renderColors = PixelColors(cgImage: image.cgImage, scale: r.scale)
+                            objects.reconcile(upTo: acked)
+                            if objects.info != nil { objects.store(stage, key: objectKey, generation: objectGeneration) }
+                        }
                     }
                 } catch {
                     doc.error = error.localizedDescription
@@ -331,6 +387,7 @@ final class AppModel {
                 doc.renderCount += 1
             } while doc.needsRender && document === doc
             doc.rendering = false
+            if doc.ref.kind == .object, document === doc, !objectEditor.playing { objectEditor.requestExtras() }
         }
     }
 

@@ -41,7 +41,14 @@ struct PixelLabCommands: Commands {
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
-        CommandGroup(replacing: .newItem) {}
+        CommandGroup(replacing: .newItem) {
+            Button("New Scene…") { model.showNew(.scene) }
+                .keyboardShortcut("n")
+                .disabled(model.phase != .ready)
+            Button("New Object…") { model.showNew(.object) }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+                .disabled(model.phase != .ready)
+        }
         CommandGroup(replacing: .saveItem) {
             Button("Save") { Task { await model.save() } }
                 .keyboardShortcut("s")
@@ -85,7 +92,9 @@ struct PixelLabCommands: Commands {
                 Button("Zoom \(Zoom.levels(for: model.mode)[i])×") { model.setZoomLevel(index: i) }
                     .keyboardShortcut(KeyEquivalent(Character(String(i + 1))))
             }
-            Button(model.showGrid ? "Hide Grid" : "Show Grid") { model.showGrid.toggle() }
+            Button(gridShown ? "Hide Grid" : "Show Grid") {
+                if model.mode == .object { model.objectEditor.pixelGrid.toggle() } else { model.showGrid.toggle() }
+            }
                 .keyboardShortcut("'")
             Divider()
             Button("Agent") { openWindow(id: WindowID.agent) }
@@ -93,6 +102,8 @@ struct PixelLabCommands: Commands {
             Divider()
         }
     }
+
+    private var gridShown: Bool { model.mode == .object ? model.objectEditor.pixelGrid : model.showGrid }
 
     private var hasSelection: Bool { model.mode == .scene && model.document?.selectedItem != nil }
 
