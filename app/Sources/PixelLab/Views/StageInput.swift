@@ -1,0 +1,253 @@
+import AppKit
+import SwiftUI
+
+/// The stage's pointer and keyboard: an AppKit view over the scrollable
+/// content (same coordinates as `StageGeometry`'s view points), so clicks,
+/// drags, modifier keys, cursors, key repeat and drops behave like a Mac
+/// editor. It forwards everything to the `SceneEditor`.
+struct StageInput: NSViewRepresentable {
+    var geometry: StageGeometry
+    var editor: SceneEditor
+    var tool: StageTool
+    var isScene: Bool
+
+    func makeNSView(context: Context) -> StageInputView {
+        let v = StageInputView()
+        v.editor = editor
+        editor.stageView = v
+        return v
+    }
+
+    func updateNSView(_ v: StageInputView, context: Context) {
+        v.geometry = geometry
+        v.editor = editor
+        v.isScene = isScene
+        if editor.stageView !== v { editor.stageView = v }
+        if v.tool != tool {
+            v.tool = tool
+            v.window?.invalidateCursorRects(for: v)
+        }
+    }
+}
+
+final class StageInputView: NSView {
+    var geometry: StageGeometry?
+    weak var editor: SceneEditor?
+    var tool: StageTool = .select
+    var isScene = true
+    private var panStart: (window: CGPoint, origin: CGPoint)?
+    private var tracking: NSTrackingArea?
+
+    override var isFlipped: Bool { true }
+    override var acceptsFirstResponder: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        registerForDraggedTypes([.string])
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+        setAccessibilityLabel("Stage")
+        setAccessibilityHelp("V select, A place, H pan. Arrows move the selection by a tile, Option-arrows by a pixel, Shift-up and down by a level. Return places the library object at the cursor.")
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    // MARK: Focus
+
+    override func becomeFirstResponder() -> Bool {
+        editor?.stageFocused = true
+        return true
+    }
+
+    override func resignFirstResponder() -> Bool {
+        editor?.stageFocused = false
+        editor?.spaceHeld = false
+        return true
+    }
+
+    // MARK: Cursor and hover
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let t = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect, .cursorUpdate], owner: self)
+        addTrackingArea(t)
+        tracking = t
+    }
+
+    private var cursor: NSCursor {
+        guard isScene, let editor else { return .arrow }
+        if editor.panning { return .closedHand }
+        switch editor.effectiveTool {
+        case .pan: return .openHand
+        case .place: return .crosshair
+        case .select: return .arrow
+        }
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(visibleRect, cursor: cursor)
+    }
+
+    override func cursorUpdate(with event: NSEvent) { cursor.set() }
+
+    private func point(_ event: NSEvent) -> CGPoint { convert(event.locationInWindow, from: nil) }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard isScene, let geometry, let editor else { return }
+        editor.pointerMoved(point(event), geometry: geometry, option: event.modifierFlags.contains(.option))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        editor?.pointerExited()
+    }
+
+    override func flagsChanged(with event: NSEvent) {
+        editor?.placeByPixel = event.modifierFlags.contains(.option)
+        super.flagsChanged(with: event)
+    }
+
+    // MARK: Clicks and drags
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        guard isScene, let geometry, let editor else { return }
+        editor.mouseDown(point(event), geometry: geometry, option: event.modifierFlags.contains(.option), clickCount: event.clickCount)
+        if editor.panning, let clip = enclosingScrollView?.contentView {
+            panStart = (event.locationInWindow, clip.bounds.origin)
+            NSCursor.closedHand.set()
+        }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let editor else { return }
+        if let panStart, let scroll = enclosingScrollView {
+            let clip = scroll.contentView
+            let dx = event.locationInWindow.x - panStart.window.x
+            let dy = event.locationInWindow.y - panStart.window.y
+            // The window's y runs up; a flipped clip view's runs down.
+            let y = clip.isFlipped ? panStart.origin.y + dy : panStart.origin.y - dy
+            clip.scroll(to: CGPoint(x: panStart.origin.x - dx, y: y))
+            scroll.reflectScrolledClipView(clip)
+            return
+        }
+        guard let geometry else { return }
+        editor.mouseDragged(point(event), geometry: geometry, option: event.modifierFlags.contains(.option))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        panStart = nil
+        editor?.mouseUp()
+        window?.invalidateCursorRects(for: self)
+    }
+
+    // MARK: Keys
+
+    override func keyDown(with event: NSEvent) {
+        guard let editor, let input = Self.keyInput(event) else {
+            super.keyDown(with: event)
+            return
+        }
+        if input.key == .space, !event.modifierFlags.contains(.command) {
+            if !editor.spaceHeld {
+                editor.spaceHeld = true
+                window?.invalidateCursorRects(for: self)
+                NSCursor.openHand.set()
+            }
+            return
+        }
+        // Space + arrows pans, like Space + drag.
+        if editor.spaceHeld, let scroll = enclosingScrollView {
+            let d: CGPoint? = switch input.key {
+            case .left: CGPoint(x: -32, y: 0)
+            case .right: CGPoint(x: 32, y: 0)
+            case .up: CGPoint(x: 0, y: -32)
+            case .down: CGPoint(x: 0, y: 32)
+            default: nil
+            }
+            if let d {
+                let clip = scroll.contentView
+                clip.scroll(to: CGPoint(x: clip.bounds.origin.x + d.x, y: clip.bounds.origin.y + (clip.isFlipped ? d.y : -d.y)))
+                scroll.reflectScrolledClipView(clip)
+                return
+            }
+        }
+        if !isScene {
+            // Objects: only zoom keys on the stage (object tools come in slice 5).
+            if case .char(let c) = input.key, let n = c.wholeNumberValue, !input.option, !input.command {
+                if n == 0 { editor.app?.zoom = .fit; return }
+                if n <= 4 { editor.app?.setZoomLevel(index: n - 1); return }
+            }
+            super.keyDown(with: event)
+            return
+        }
+        if !editor.handleKey(input) { super.keyDown(with: event) }
+    }
+
+    override func keyUp(with event: NSEvent) {
+        if event.keyCode == 49, let editor, editor.spaceHeld {
+            editor.spaceHeld = false
+            window?.invalidateCursorRects(for: self)
+            cursor.set()
+            return
+        }
+        super.keyUp(with: event)
+    }
+
+    static func keyInput(_ event: NSEvent) -> KeyInput? {
+        let f = event.modifierFlags
+        let key: KeyInput.Key
+        switch event.keyCode {
+        case 123: key = .left
+        case 124: key = .right
+        case 125: key = .down
+        case 126: key = .up
+        case 116: key = .pageUp
+        case 121: key = .pageDown
+        case 51, 117: key = .delete
+        case 36, 76: key = .returnKey
+        case 53: key = .escape
+        case 49: key = .space
+        default:
+            guard let c = event.charactersIgnoringModifiers?.lowercased().first else { return nil }
+            key = .char(c)
+        }
+        return KeyInput(key: key, option: f.contains(.option), shift: f.contains(.shift), command: f.contains(.command), control: f.contains(.control))
+    }
+
+    // MARK: Drops from the library
+
+    private func draggedObject(_ info: NSDraggingInfo) -> String? {
+        guard let s = info.draggingPasteboard.string(forType: .string) else { return editor?.dropObject }
+        return s.hasPrefix(LibraryDrag.prefix) ? String(s.dropFirst(LibraryDrag.prefix.count)) : nil
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        draggingUpdated(sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard isScene, let geometry, let editor, let object = draggedObject(sender) ?? editor.placeObject else { return [] }
+        editor.dropObject = object
+        editor.pointerMoved(convert(sender.draggingLocation, from: nil), geometry: geometry, option: NSEvent.modifierFlags.contains(.option))
+        return .copy
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        editor?.dropObject = nil
+        editor?.pointerExited()
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard isScene, let geometry, let editor, let object = draggedObject(sender) ?? editor.placeObject else { return false }
+        window?.makeFirstResponder(self)
+        editor.drop(object, at: convert(sender.draggingLocation, from: nil), geometry: geometry, option: NSEvent.modifierFlags.contains(.option))
+        return true
+    }
+}
+
+/// Library thumbnails drag as the string "pixellab-object:<name>".
+enum LibraryDrag {
+    static let prefix = "pixellab-object:"
+}

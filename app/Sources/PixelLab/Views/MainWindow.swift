@@ -54,6 +54,54 @@ struct DocumentWindow: View {
         .toolbarBackground(Theme.hero, for: .windowToolbar)
         .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
         .background(Theme.page)
+        .background(WindowAccessor { window in
+            model.mainWindow = window
+            WindowCloseGuard.install(on: window)
+            window.isDocumentEdited = !model.dirtyDocs.isEmpty
+        })
+        .onChange(of: model.dirtyDocs) { _, dirty in
+            model.mainWindow?.isDocumentEdited = !dirty.isEmpty
+        }
+        .alert(
+            saveAlertTitle,
+            isPresented: Binding(get: { model.saveAlert != nil }, set: { if !$0 { model.saveAlert = nil } }),
+            presenting: model.saveAlert
+        ) { alert in
+            switch alert.kind {
+            case .invalid:
+                Button("OK", role: .cancel) {}
+            case .conflict:
+                Button("Revert") { Task { await model.revert() } }
+                Button("Save Anyway", role: .destructive) { Task { await model.save(alert.doc, force: true) } }
+                Button("Cancel", role: .cancel) {}
+            }
+        } message: { alert in
+            switch alert.kind {
+            case .invalid:
+                let shown = alert.problems.prefix(8).map { "• " + Self.trimFile($0) }.joined(separator: "\n")
+                let more = alert.problems.count > 8 ? "\n…and \(alert.problems.count - 8) more (see Checks)." : ""
+                Text("Fix these first; nothing was written.\n\n" + (shown.isEmpty ? alert.message : shown) + more)
+            case .conflict:
+                Text("\(alert.doc.file) changed on disk since you opened it. Revert loads the file as it is now and drops your changes; Save Anyway overwrites it.")
+            }
+        }
+        .sheet(isPresented: Binding(get: { model.build != nil }, set: { if !$0 { model.build = nil } })) {
+            BuildArtSheet().environment(model)
+        }
+    }
+
+    private var saveAlertTitle: String {
+        guard let a = model.saveAlert else { return "" }
+        switch a.kind {
+        case .invalid: return "Can't save \(a.doc.name): \(a.problems.count) problem\(a.problems.count == 1 ? "" : "s")"
+        case .conflict: return "\(a.doc.name) changed on disk"
+        }
+    }
+
+    /// "scenes/x.mjs: items[3]: rule" → "items[3]: rule".
+    static func trimFile(_ line: String) -> String {
+        guard let r = line.range(of: ".mjs: ") else { return line }
+        return String(line[r.upperBound...])
     }
 }
 
@@ -71,15 +119,17 @@ struct DocumentToolbar: ToolbarContent {
             .help("Edit scenes or objects")
         }
         ToolbarItemGroup(placement: .primaryAction) {
-            ControlGroup {
-                Button {} label: { Label("Select", systemImage: "cursorarrow") }
-                    .help("Select (V) — comes with scene editing")
-                Button {} label: { Label("Place", systemImage: "plus.square.on.square") }
-                    .help("Place (A) — comes with scene editing")
-                Button {} label: { Label("Pan", systemImage: "hand.raised") }
-                    .help("Pan (H) — comes with scene editing")
+            Picker("Tool", selection: Binding(get: { model.editor.tool }, set: { model.editor.setTool($0); model.editor.focusStage() })) {
+                ForEach(StageTool.allCases) { tool in
+                    Label("\(tool.title) (\(String(tool.key).uppercased()))", systemImage: tool.symbol)
+                        .labelStyle(.iconOnly)
+                        .tag(tool)
+                        .accessibilityLabel("\(tool.title) tool")
+                }
             }
-            .disabled(true)
+            .pickerStyle(.segmented)
+            .help("Select (V) · Place (A) · Pan (H); hold Space to pan")
+            .disabled(model.mode != .scene)
 
             Menu {
                 Button("Fit") { model.zoom = .fit }
@@ -102,6 +152,14 @@ struct DocumentToolbar: ToolbarContent {
             }
             .help(model.showGrid ? "Hide the iso grid" : "Show the iso grid")
             .disabled(model.mode != .scene)
+
+            Button {
+                Task { await model.buildArt() }
+            } label: {
+                Label("Build Art", systemImage: "hammer")
+            }
+            .help("Build art: run npm run art in the site (⌘B)")
+            .disabled(model.build?.running == true)
 
             Button {
                 Task { await model.save() }

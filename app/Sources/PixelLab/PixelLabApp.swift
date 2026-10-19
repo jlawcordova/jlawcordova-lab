@@ -48,6 +48,28 @@ struct PixelLabCommands: Commands {
                 .disabled(!model.canSave)
             Button("Revert to Saved") { Task { await model.revert() } }
                 .disabled(!model.canSave)
+            Divider()
+            Button("Build Art") { Task { await model.buildArt() } }
+                .keyboardShortcut("b")
+                .disabled(model.phase != .ready || model.build?.running == true)
+        }
+        CommandGroup(after: .pasteboard) {
+            Divider()
+            Button("Duplicate") { Task { await model.editor.duplicate() } }
+                .keyboardShortcut("d")
+                .disabled(!hasSelection)
+            Button("Remove Item (⌫ on the stage)") { Task { await model.editor.remove() } }
+                .disabled(!hasSelection)
+            Button("Raise") { Task { await model.editor.raise() } }
+                .keyboardShortcut("]")
+                .disabled(!hasSelection)
+            Button("Lower") { Task { await model.editor.lower() } }
+                .keyboardShortcut("[")
+                .disabled(!hasSelection)
+            Button("Snap to Tile") { Task { await model.editor.snap() } }
+                .disabled(model.document?.selectedItem?.at.isTile ?? true)
+            Button("Select None") { model.editor.select(nil) }
+                .disabled(!hasSelection)
         }
         CommandGroup(replacing: .undoRedo) {
             Button("Undo") { undoOrText(Selector(("undo:"))) { await model.undo() } }
@@ -72,6 +94,8 @@ struct PixelLabCommands: Commands {
         }
     }
 
+    private var hasSelection: Bool { model.mode == .scene && model.document?.selectedItem != nil }
+
     /// ⌘Z in a text field undoes typing; elsewhere it undoes the doc.
     private func undoOrText(_ action: Selector, doc: @escaping @MainActor () async -> Void) {
         if NSApp.keyWindow?.firstResponder is NSTextView {
@@ -94,6 +118,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.applyAppearance()
         if let request = model.snapshot {
             Snapshotter.start(request, model: model)
+        } else if let script = model.script {
+            script.start(model: model)
         } else {
             NSApp.activate()
         }
@@ -106,7 +132,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !terminating else { return .terminateNow }
         terminating = true
         Task {
-            await AppModel.shared.shutdown()
+            let model = AppModel.shared
+            guard await model.confirmUnsaved(window: model.mainWindow) else {
+                terminating = false
+                NSApp.reply(toApplicationShouldTerminate: false)
+                return
+            }
+            await model.shutdown()
             NSApp.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater

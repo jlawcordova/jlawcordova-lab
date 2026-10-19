@@ -6,7 +6,6 @@ import SwiftUI
 struct StageView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.displayScale) private var displayScale
-    @FocusState private var focused: Bool
 
     var body: some View {
         GeometryReader { proxy in
@@ -14,14 +13,11 @@ struct StageView: View {
         }
         .background(Theme.hero)
         .onGeometryChange(for: CGSize.self, of: { $0.size }) { model.stageViewport = $0 }
-        .focusable()
-        .focused($focused)
-        .focusEffectDisabled()
-        .onKeyPress(characters: CharacterSet(charactersIn: "012345"), phases: .down) { press in
-            // Plain 1–4 zoom and 0 fits while the stage has focus (the View menu has ⌘1–⌘4, ⌘0).
-            guard press.modifiers.isEmpty, let n = Int(press.characters) else { return .ignored }
-            if n == 0 { model.zoom = .fit } else if n <= 4 { model.setZoomLevel(index: n - 1) } else { return .ignored }
-            return .handled
+        // Visible focus: the stage takes keys (tools, arrows, ⌫, Return, 1–4, 0).
+        .overlay {
+            Rectangle()
+                .strokeBorder(Theme.accent.opacity(model.editor.stageFocused ? 0.55 : 0), lineWidth: 2)
+                .allowsHitTesting(false)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Stage")
@@ -37,6 +33,12 @@ struct StageView: View {
             )
             ScrollView([.horizontal, .vertical]) {
                 ZStack(alignment: .topLeading) {
+                    // The input view sits at the bottom: everything drawn over it
+                    // lets the pointer through, and AppKit-hosted views drawn
+                    // under SwiftUI layers keep the art and overlays in order
+                    // (on screen and in cacheDisplay snapshots).
+                    StageInput(geometry: geometry, editor: model.editor, tool: model.editor.effectiveTool, isScene: doc.ref.kind == .scene)
+                        .frame(width: geometry.contentSize.width, height: geometry.contentSize.height)
                     if doc.ref.kind == .scene {
                         if model.showGrid {
                             IsoGridLayer(geometry: geometry, hairline: 1 / max(displayScale, 1))
@@ -46,14 +48,15 @@ struct StageView: View {
                     }
                     render.image.view(pointsPerPixel: geometry.zoom, displayScale: displayScale)
                         .offset(x: geometry.artOrigin.x, y: geometry.artOrigin.y)
+                        .allowsHitTesting(false)
                         .accessibilityLabel("\(doc.ref.name), \(doc.ref.kind.rawValue) at \(zoom)×")
                     if doc.ref.kind == .object {
                         AnchorMark(geometry: geometry)
+                    } else {
+                        StageOverlay(geometry: geometry, doc: doc, render: render)
                     }
                 }
                 .frame(width: geometry.contentSize.width, height: geometry.contentSize.height, alignment: .topLeading)
-                .contentShape(Rectangle())
-                .onTapGesture { focused = true }
             }
             .scrollIndicators(.automatic)
             .defaultScrollAnchor(.center)

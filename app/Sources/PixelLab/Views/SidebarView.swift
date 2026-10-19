@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// The left sidebar: a search field, the SCENES list and the LIBRARY grid of
-/// object thumbnails.
+/// The left sidebar: a search field, the SCENES list, and below it the
+/// LIBRARY grid of object thumbnails or (scene mode) the open scene's ITEMS
+/// tree. In scene mode a library click picks the object to place (drag it onto
+/// the stage, or double-click to open it in object mode).
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
 
@@ -12,6 +14,7 @@ struct SidebarView: View {
                 .padding(.horizontal, 12)
                 .padding(.top, 10)
                 .padding(.bottom, 8)
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) {
                     sectionHeader("Scenes", count: filteredScenes.count)
@@ -24,29 +27,72 @@ struct SidebarView: View {
                     }
                     if filteredScenes.isEmpty { emptyLine("No scenes match") }
 
-                    sectionHeader("Library", count: filteredObjects.count)
-                        .padding(.top, 14)
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
-                        ForEach(filteredObjects) { object in
-                            LibraryCell(
-                                object: object,
-                                image: model.thumbnails.images[object.name],
-                                selected: model.document?.ref == DocRef(.object, object.name)
-                            ) {
-                                Task { await model.open(DocRef(.object, object.name)) }
-                            }
-                            .onAppear { model.thumbnails.appeared(object.name) }
-                            .onDisappear { model.thumbnails.disappeared(object.name) }
+                    if showItemsTab {
+                        Picker("Show", selection: Binding(get: { model.editor.sidebarTab }, set: { model.editor.sidebarTab = $0 })) {
+                            Text("Library").tag(SceneEditor.SidebarTab.library)
+                            Text("Items").tag(SceneEditor.SidebarTab.items)
                         }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .padding(.top, 12)
+                        .padding(.horizontal, 4)
                     }
-                    if filteredObjects.isEmpty { emptyLine("No objects match") }
+                    if showItemsTab, model.editor.sidebarTab == .items, let doc = model.document {
+                        ItemsTree(doc: doc, query: query)
+                    } else {
+                        library
+                    }
                 }
                 .padding(.horizontal, 10)
                 .padding(.bottom, 16)
             }
             .scrollIndicators(.automatic)
+            .onChange(of: model.editor.placeObject) { _, name in
+                guard let name, model.editor.sidebarTab == .library || !showItemsTab else { return }
+                withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(name, anchor: .center) }
+            }
+            .onChange(of: model.editor.sidebarTab) { _, tab in
+                guard tab == .items, let path = model.document?.selectedPath else { return }
+                Task { @MainActor in proxy.scrollTo(path, anchor: .center) }
+            }
+            .onChange(of: model.document?.selectedPath) { _, path in
+                guard let path, model.editor.sidebarTab == .items else { return }
+                withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(path, anchor: .center) }
+            }
+            }
         }
         .background(Theme.sidebar)
+    }
+
+    private var showItemsTab: Bool { model.document?.ref.kind == .scene && model.mode == .scene }
+
+    @ViewBuilder
+    private var library: some View {
+        sectionHeader("Library", count: filteredObjects.count)
+            .padding(.top, showItemsTab ? 4 : 14)
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
+            ForEach(filteredObjects) { object in
+                LibraryCell(
+                    object: object,
+                    image: model.thumbnails.images[object.name],
+                    selected: showItemsTab
+                        ? model.editor.placeObject == object.name
+                        : model.document?.ref == DocRef(.object, object.name),
+                    placing: showItemsTab
+                ) {
+                    if showItemsTab {
+                        model.editor.choosePlaceObject(object.name)
+                    } else {
+                        Task { await model.open(DocRef(.object, object.name)) }
+                    }
+                } open: {
+                    Task { await model.open(DocRef(.object, object.name)) }
+                }
+                .onAppear { model.thumbnails.appeared(object.name) }
+                .onDisappear { model.thumbnails.disappeared(object.name) }
+            }
+        }
+        if filteredObjects.isEmpty { emptyLine("No objects match") }
     }
 
     private var query: String { model.searchText.trimmingCharacters(in: .whitespaces).lowercased() }
@@ -146,7 +192,10 @@ struct LibraryCell: View {
     var object: ObjectSummary
     var image: PixelImage?
     var selected: Bool
+    /// Scene mode: a click picks the object to place, and it drags onto the stage.
+    var placing = false
     var action: () -> Void
+    var open: () -> Void = {}
     @Environment(AppModel.self) private var model
     private var hovering: Bool { model.hovered == "object:\(object.name)" }
     @Environment(\.displayScale) private var displayScale
@@ -180,9 +229,20 @@ struct LibraryCell: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(TapGesture(count: 2).onEnded { if placing { open() } })
+        .onDrag {
+            if placing { model.editor.placeObject = object.name }
+            return NSItemProvider(object: (LibraryDrag.prefix + object.name) as NSString)
+        }
+        .contextMenu {
+            if placing {
+                Button("Place \(object.name)") { action() }
+            }
+            Button("Open in Object Mode") { open() }
+        }
         .onHover { model.setHovered("object:\(object.name)", $0) }
-        .help(object.description ?? object.name)
-        .accessibilityLabel("Object \(object.name)")
+        .help(placing ? "\(object.name): click to place it, drag it onto the stage, double-click to open it" : (object.description ?? object.name))
+        .accessibilityLabel(placing ? "Place \(object.name)" : "Object \(object.name)")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 

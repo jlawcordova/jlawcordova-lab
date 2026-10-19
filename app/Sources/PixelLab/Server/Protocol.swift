@@ -170,3 +170,102 @@ enum ServerEvent: Sendable {
     /// The server stopped and won't be restarted (too many crashes, or it couldn't start).
     case stopped(reason: String)
 }
+
+// MARK: Scene editing (slice 4)
+
+/// Where an item is placed: `{ tile: [col, row, level] }` or `{ px: [x, y] }`.
+struct ItemAt: Codable, Sendable, Hashable {
+    var tile: [Int]?
+    var px: [Int]?
+
+    var isTile: Bool { tile?.count == 3 }
+    var col: Int? { tile.flatMap { $0.count == 3 ? $0[0] : nil } }
+    var row: Int? { tile.flatMap { $0.count == 3 ? $0[1] : nil } }
+    var level: Int? { tile.flatMap { $0.count == 3 ? $0[2] : nil } }
+    var x: Int? { px.flatMap { $0.count == 2 ? $0[0] : nil } }
+    var y: Int? { px.flatMap { $0.count == 2 ? $0[1] : nil } }
+
+    /// "column 3, row 4, level 0" or "x 31, y 6".
+    var spoken: String {
+        if let t = tile, t.count == 3 { return "column \(t[0]), row \(t[1]), level \(t[2])" }
+        if let p = px, p.count == 2 { return "x \(p[0]), y \(p[1])" }
+        return "nowhere"
+    }
+
+    /// "14,6,1" or "px 31,6".
+    var short: String {
+        if let t = tile, t.count == 3 { return "\(t[0]),\(t[1]),\(t[2])" }
+        if let p = px, p.count == 2 { return "px \(p[0]),\(p[1])" }
+        return "?"
+    }
+}
+
+/// One placed item of `scene.items`, in paint order.
+struct SceneItemInfo: Codable, Sendable, Hashable, Identifiable {
+    var path: String
+    var object: String
+    var at: ItemAt
+    var `class`: String?
+    var id: String?
+    /// The enclosing group's path.
+    var group: String?
+    /// The placement point in scene pixels.
+    var point: [Double]?
+}
+
+/// A group of `scene.items` (its attributes are `class` and `data-*`).
+struct SceneGroupInfo: Codable, Sendable, Hashable {
+    var path: String
+    var attrs: [String: String]
+    var items: Int
+    var group: String?
+}
+
+struct SceneItemsResult: Codable, Sendable {
+    var scene: String
+    var items: [SceneItemInfo]
+    var groups: [SceneGroupInfo]
+}
+
+/// One motion track: the item id it moves and its key times (ms).
+struct MotionTrack: Sendable, Hashable, Identifiable {
+    var item: String
+    var keys: [Double]
+    var id: String { item }
+}
+
+/// `scene.show --doc`, only the motion part of the doc.
+struct SceneShowMotion: Codable, Sendable {
+    struct Doc: Codable, Sendable {
+        struct Motion: Codable, Sendable {
+            struct Track: Codable, Sendable {
+                struct Key: Codable, Sendable { var t: Double? }
+                var item: String
+                var keys: [Key]?
+            }
+            var duration: Double?
+            var tracks: [Track]?
+        }
+        var motion: Motion?
+    }
+    var name: String
+    var doc: Doc?
+}
+
+/// A scene edit's result: `{ doc, changed, summary, path?, item? }`.
+struct EditResult: Codable, Sendable {
+    var doc: String
+    var changed: Bool?
+    var summary: String?
+    var path: String?
+}
+
+/// `art.build`: `{ ok, code, report, errors, ms, unsaved }`.
+struct ArtBuildResult: Codable, Sendable {
+    var ok: Bool
+    var code: Int?
+    var report: [String]
+    var errors: [String]
+    var ms: Double
+    var unsaved: [String]
+}
