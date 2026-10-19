@@ -165,7 +165,7 @@ The state dir is \`$PIXELLAB_STATE\`, else \`~/Library/Application Support/Pixel
 - \`proposals/<id>.json\`: \`{ id, doc: "scene:<name>" | "object:<name>", baseHash, source, summary, createdAt, agent }\`. \`id\` is \`YYYYMMDD-HHMMSS-xxxxxx\` (UTC, sortable). \`baseHash\` is the sha256 (hex) of the file the agent opened, or null for a new doc. \`source\` is the full new file, serialized by the engine. \`summary\` lists the edits since the doc was opened. \`agent\` is the MCP client's name and version. Saving the same doc again in one MCP session rewrites its proposal.
 - \`activity.jsonl\`: one line per MCP \`tools/call\`: \`{ time, tool, args, ok, summary }\` (\`tool\` is the MCP tool name).
 
-\`proposal.apply\` refuses (\`conflict\`) when the file no longer has \`baseHash\`, and (\`invalid\`) when the proposed doc has validation problems, unless forced; then it writes \`source\`, deletes the proposal, and reloads an open, unchanged working copy. \`proposal.reject\` deletes it.
+\`proposal.apply\` refuses (\`conflict\`) when the file no longer has \`baseHash\`, and (\`invalid\`) when the proposed doc has validation problems, unless forced; then it writes \`source\`, deletes the proposal, and reloads an open, unchanged working copy. \`proposal.reject\` deletes it. \`proposal.render\` renders the proposed doc over the files on disk (the shape of \`scene.render\` or \`object.render\`) without writing, for the Agent window's ghost preview.
 
 ## Command reference
 

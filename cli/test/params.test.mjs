@@ -150,7 +150,7 @@ describe('registry', () => {
     const names = [...registry.commands.keys()];
     const readOnly = [
       'activity.list', 'check', 'doc.close', 'doc.open', 'doc.status', 'object.list', 'object.pick', 'object.render', 'object.show',
-      'palette.get', 'proposal.list', 'proposal.show', 'scene.items', 'scene.list', 'scene.render', 'scene.show', 'site.info',
+      'palette.get', 'proposal.list', 'proposal.render', 'proposal.show', 'scene.items', 'scene.list', 'scene.render', 'scene.show', 'site.info',
     ];
     const mutating = [
       'doc.redo', 'doc.revert', 'doc.save', 'doc.undo',

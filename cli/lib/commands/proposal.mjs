@@ -7,6 +7,7 @@ import { join } from 'node:path';
 
 import { createContext, docFile } from '../context.mjs';
 import { unifiedDiff } from '../diff.mjs';
+import { MAX_SCALE, renderObjectImage, renderSceneImage } from '../render.mjs';
 import { CommandError } from '../errors.mjs';
 import { docRef, importSource, problemsIn, readSource } from '../session.mjs';
 import { writeAtomic } from '../state.mjs';
@@ -96,6 +97,48 @@ export default [
       ]
         .filter(Boolean)
         .join('\n'),
+  },
+  {
+    name: 'proposal.render',
+    summary: "Render a proposal's doc as it would be once applied, without writing anything",
+    description:
+      'The proposed source over the files on disk, rendered as scene.render or object.render renders the doc (same params, same result shape), ' +
+      'plus { id, doc, kind, baseMatches }. The Agent window draws it over the stage as a ghost.',
+    params: {
+      type: 'object',
+      properties: {
+        id: ID,
+        scale: { type: 'integer', minimum: 1, maximum: MAX_SCALE, default: 1, description: 'whole-pixel zoom of the PNG' },
+        time: { type: 'integer', minimum: 0, description: 'ms into the motion and loops (a scene: default 0; an object: overrides frame)' },
+        frame: { type: 'integer', minimum: 0, default: 0, description: "an object's frame" },
+        layers: { type: 'array', items: { type: 'integer', minimum: 0 }, description: "only these layers of a sprite, as object.render's --layers" },
+      },
+      required: ['id'],
+    },
+    args: ['id'],
+    mutates: false,
+    writesPng: true,
+    examples: ['pixellab proposal render 20261019-142301-a1b2c3 --scale 2 --out /tmp/proposal.png'],
+    async run(ctx, { id, scale, time, frame, layers }) {
+      const p = await stateOf(ctx).readProposal(id);
+      const { kind, name } = targetOf(ctx, p);
+      let data;
+      try {
+        data = await importSource(p.source);
+      } catch (err) {
+        throw new CommandError(`proposal ${id}: its source can't be loaded: ${/** @type {Error} */ (err).message.split('\n')[0]}`, { code: 'invalid' });
+      }
+      // As apply would leave the site: the proposed doc over the files on disk.
+      const view = createContext(ctx.site, { overlay: { get: (k, n) => (k === kind && n === name ? data : undefined), names: (k) => (k === kind ? [name] : []) } });
+      const { sources } = await view.sources();
+      const disk = await readSource(ctx.site, kind, name);
+      const image =
+        kind === 'scene'
+          ? renderSceneImage(ctx.site, sources, name, { scale, time: time ?? 0 })
+          : renderObjectImage(ctx.site, sources, name, { scale, frame, time, layers });
+      return { id, doc: p.doc, kind, baseMatches: baseMatches(p, disk), ...image };
+    },
+    format: (r) => `${r.id}: ${r.doc} as proposed, ${r.width}×${r.height} PNG at ${r.scale}×, ${r.items.length} item${r.items.length === 1 ? '' : 's'}`,
   },
   {
     name: 'proposal.apply',

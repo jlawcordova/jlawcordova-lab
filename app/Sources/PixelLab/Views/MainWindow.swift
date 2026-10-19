@@ -3,6 +3,7 @@ import SwiftUI
 /// The main window: setup until the server runs, then the document window.
 struct MainWindow: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Group {
@@ -21,6 +22,10 @@ struct MainWindow: View {
             }
         }
         .tint(Theme.accent)
+        .onAppear {
+            let open = openWindow
+            model.agent.openWindowAction = { open(id: WindowID.agent) }
+        }
     }
 }
 
@@ -192,6 +197,9 @@ struct DocumentToolbar: ToolbarContent {
             .help("Save the source (⌘S)")
         }
         ToolbarItem(placement: .primaryAction) {
+            AgentToolbarButton(agent: model.agent)
+        }
+        ToolbarItem(placement: .primaryAction) {
             Button {
                 model.showInspector.toggle()
             } label: {
@@ -244,5 +252,32 @@ struct AccentButtonStyle: ButtonStyle {
             .background(Theme.accent, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             .opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.45)
             .contentShape(Rectangle())
+    }
+}
+
+/// The toolbar's way into the Agent window, with the count of proposals
+/// waiting (a small accent badge; nothing when there are none).
+struct AgentToolbarButton: View {
+    var agent: AgentModel
+
+    var body: some View {
+        let n = agent.pendingCount
+        Button {
+            agent.showWindow()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "sparkles")
+                if n > 0 {
+                    Text("\(n)")
+                        .font(.system(size: 10, weight: .bold).monospacedDigit())
+                        .foregroundStyle(Theme.onAccent)
+                        .padding(.horizontal, 5)
+                        .frame(minWidth: 16, minHeight: 16)
+                        .background(Theme.accent, in: Capsule())
+                }
+            }
+        }
+        .help(n == 0 ? "Agent: activity and proposals (⌥⌘A)" : "\(n) proposal\(n == 1 ? "" : "s") from agents to review (⌥⌘A)")
+        .accessibilityLabel(n == 0 ? "Agent" : "Agent, \(n) proposal\(n == 1 ? "" : "s") to review")
     }
 }

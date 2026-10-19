@@ -48,6 +48,7 @@
 | [`proposal apply`](#proposalapply) | Apply a proposal: check its base, validate it, write the doc's source and remove the proposal | writes files |
 | [`proposal list`](#proposallist) | List the proposals agents made, oldest first | read |
 | [`proposal reject`](#proposalreject) | Reject a proposal: delete it, leaving the site as it is | writes files |
+| [`proposal render`](#proposalrender) | Render a proposal's doc as it would be once applied, without writing anything | read |
 | [`proposal show`](#proposalshow) | Show a proposal: its edits, the source, and a diff from the file as it is now | read |
 | [`scene duplicate`](#sceneduplicate) | Duplicate an item one column over, right after it in paint order | edit |
 | [`scene items`](#sceneitems) | List a scene's items in paint order, with stable paths | read |
@@ -159,7 +160,7 @@ The state dir is `$PIXELLAB_STATE`, else `~/Library/Application Support/Pixel La
 - `proposals/<id>.json`: `{ id, doc: "scene:<name>" | "object:<name>", baseHash, source, summary, createdAt, agent }`. `id` is `YYYYMMDD-HHMMSS-xxxxxx` (UTC, sortable). `baseHash` is the sha256 (hex) of the file the agent opened, or null for a new doc. `source` is the full new file, serialized by the engine. `summary` lists the edits since the doc was opened. `agent` is the MCP client's name and version. Saving the same doc again in one MCP session rewrites its proposal.
 - `activity.jsonl`: one line per MCP `tools/call`: `{ time, tool, args, ok, summary }` (`tool` is the MCP tool name).
 
-`proposal.apply` refuses (`conflict`) when the file no longer has `baseHash`, and (`invalid`) when the proposed doc has validation problems, unless forced; then it writes `source`, deletes the proposal, and reloads an open, unchanged working copy. `proposal.reject` deletes it.
+`proposal.apply` refuses (`conflict`) when the file no longer has `baseHash`, and (`invalid`) when the proposed doc has validation problems, unless forced; then it writes `source`, deletes the proposal, and reloads an open, unchanged working copy. `proposal.reject` deletes it. `proposal.render` renders the proposed doc over the files on disk (the shape of `scene.render` or `object.render`) without writing, for the Agent window's ghost preview.
 
 ## Command reference
 
@@ -731,6 +732,30 @@ edits docs · writes files directly · not an MCP tool
 | param | type | | description |
 | --- | --- | --- | --- |
 | `id` (positional) | string | required | the proposal id (proposal.list) |
+
+#### proposal.render
+
+Render a proposal's doc as it would be once applied, without writing anything.
+
+```
+pixellab proposal render <id> [--scale <n>] [--time <n>] [--frame <n>] [--layers <n,…>] [--out <file.png>]
+```
+
+The proposed source over the files on disk, rendered as scene.render or object.render renders the doc (same params, same result shape), plus { id, doc, kind, baseMatches }. The Agent window draws it over the stage as a ghost.
+
+read-only · MCP tool `proposal_render`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `id` (positional) | string | required | the proposal id (proposal.list) |
+| `--scale` | integer | default `1` | whole-pixel zoom of the PNG (1 to 16) |
+| `--time` | integer |  | ms into the motion and loops (a scene: default 0; an object: overrides frame) (at least 0) |
+| `--frame` | integer | default `0` | an object's frame (at least 0) |
+| `--layers` | list of integer |  | only these layers of a sprite, as object.render's --layers |
+
+```sh
+pixellab proposal render 20261019-142301-a1b2c3 --scale 2 --out /tmp/proposal.png
+```
 
 #### proposal.show
 

@@ -19,6 +19,13 @@ struct StageView: View {
                 .strokeBorder(Theme.accent.opacity(model.editor.stageFocused ? 0.55 : 0), lineWidth: 2)
                 .allowsHitTesting(false)
         }
+        .overlay(alignment: .top) {
+            if model.agent.previewing, model.agent.ghostShown, let p = model.agent.selected {
+                ProposalBanner(agent: model.agent, proposal: p)
+                    .padding(.top, 10)
+                    .padding(.horizontal, 12)
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Stage")
     }
@@ -60,6 +67,10 @@ struct StageView: View {
                         .offset(x: geometry.artOrigin.x, y: geometry.artOrigin.y)
                         .allowsHitTesting(false)
                         .accessibilityLabel("\(doc.ref.name), \(doc.ref.kind.rawValue) at \(zoom)×")
+                    if let ghost = model.agent.visibleGhost {
+                        ProposalGhostLayer(geometry: geometry, ghost: ghost, current: render,
+                                           changes: model.agent.changes(current: render, renderCount: doc.renderCount))
+                    }
                     if doc.ref.kind == .object {
                         ObjectStageOverlay(geometry: geometry, objects: model.objectEditor, focused: model.editor.stageFocused,
                                            hairline: 1 / max(displayScale, 1))
