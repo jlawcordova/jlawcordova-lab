@@ -13,6 +13,8 @@
 //   session      runs only in a session (pixellab serve): doc.open, doc.undo…
 //   writes       'direct': writes files itself (art.build, proposal.apply), so
 //                the CLI's --dry-run doesn't apply to it
+//   document     false: runs without an open document (document.new), so the
+//                CLI doesn't look for one first
 //
 // A mutating command (mutates: true) edits docs through ctx.edit (session.mjs).
 // The CLI saves what it changed right after it runs (or shows the diff with
@@ -45,6 +47,7 @@ import { checkParams, suggest } from './params.mjs';
  *   writesPng?: boolean,
  *   session?: boolean,
  *   writes?: 'direct',
+ *   document?: false,
  * }} Command
  */
 
@@ -62,6 +65,7 @@ export function checkDefinition(/** @type {Command} */ cmd) {
   if (typeof cmd.mutates !== 'boolean') fail('mutates must be true or false');
   if (typeof cmd.run !== 'function') fail('run must be a function');
   if (cmd.writes !== undefined && cmd.writes !== 'direct') fail("writes must be 'direct' when given");
+  if (cmd.document !== undefined && cmd.document !== false) fail('document must be false when given');
   for (const arg of cmd.args ?? []) if (!(arg in cmd.params.properties)) fail(`args names ${arg}, which isn't a param`);
   for (const req of cmd.params.required ?? []) if (!(req in cmd.params.properties)) fail(`required names ${req}, which isn't a param`);
   return cmd;

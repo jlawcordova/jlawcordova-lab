@@ -67,6 +67,13 @@ export async function main(argv, io = {}) {
     if (globals.force && command.params.properties?.force) params.force = 'true';
     // Params are checked before the site is read, so a usage error is always exit 2.
     const checked = checkParams(command.params, params, { coerce: true, command: command.name });
+    if (command.document === false) {
+      // It makes a document, so there's none to open first (a Mac with no site checkout has no default).
+      const result = await registry.call({}, command.name, checked);
+      if (globals.json) stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      else stdout.write(`${command.format ? command.format(result, checked) : JSON.stringify(result, null, 2)}\n`);
+      return 0;
+    }
     const site = await openDocument({ doc: globals.document, site: globals.site, env, cwd });
     const session = new Session(site, { env });
     const ctx = session.context();
