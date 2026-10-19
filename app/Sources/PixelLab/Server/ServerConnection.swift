@@ -253,6 +253,9 @@ actor ServerConnection {
         case "doc.changed":
             if let s = try? JSONDecoder().decode(ParamsEnvelope<DocStatus>.self, from: line).params { note = .docChanged(s) }
             else { note = .other(method: method, params: params) }
+        case "doc.stale":
+            if let doc = params["doc"]?.stringValue { note = .docStale(doc: doc, file: params["file"]?.stringValue ?? doc) }
+            else { note = .other(method: method, params: params) }
         case "files.changed":
             note = .filesChanged((params["files"]?.arrayValue ?? []).compactMap(\.stringValue))
         case "proposals.changed": note = .proposalsChanged(params["proposals"] ?? .null)

@@ -1,5 +1,9 @@
 // check: the engine's validation problems, for every source or for one doc
-// and what it uses (as `npm run art -- --check <name>` scopes them).
+// and what it uses (as `npm run art -- --check <name>` scopes them), and
+// warnings that don't fail it: motion that steps off the grid
+// (docs/intents/2026-10-mcp-gaps/spec.md, D8).
+
+import { offGridMoves, offGridText } from '../motion-ops.mjs';
 
 /**
  * The files a check of one doc covers: palette.mjs, the doc, and every
@@ -38,7 +42,9 @@ const check = {
   summary: 'Validate the sources with the engine, all of them or one doc',
   description:
     'Problems are the engine\'s "<file>: <where>: <rule>" lines. With a name, only the problems in that doc and the files it uses ' +
-    '(palette.mjs, the objects it places or extends) are listed. On the command line, the exit code is 1 when there are problems.',
+    '(palette.mjs, the objects it places or extends) are listed. On the command line, the exit code is 1 when there are problems. ' +
+    'Warnings don\'t fail the check: a scene\'s key-to-key moves (the loop back to the first key included) whose steps aren\'t 1 px straight, 1:1 or 2:1, ' +
+    'so the item jumps instead of walking the grid; scene.motion.path makes on-grid keys.',
   params: {
     type: 'object',
     properties: {
@@ -52,12 +58,16 @@ const check = {
   async run(ctx, { name: query, kind }) {
     const { sources, loadErrors } = await ctx.sources();
     const all = [...loadErrors, ...ctx.site.engine.validate(sources)];
+    const entry = (/** @type {string} */ text) => ({ file: fileOf(text), message: text.slice(fileOf(text).length + 2), text });
+    const warningsOf = (/** @type {string[]} */ names) =>
+      names.flatMap((n) => offGridMoves(ctx.site.motion, sources.scenes.get(n)).map((w) => entry(offGridText(`scenes/${n}.mjs`, w))));
     if (query === undefined) {
       return {
         ok: all.length === 0,
         target: null,
         checked: 1 + sources.objects.size + sources.scenes.size,
-        problems: all.map((text) => ({ file: fileOf(text), message: text.slice(fileOf(text).length + 2), text })),
+        problems: all.map(entry),
+        warnings: warningsOf([...sources.scenes.keys()].sort()),
       };
     }
     const target = await ctx.find(query, kind);
@@ -80,14 +90,17 @@ const check = {
       ok: mine.length === 0,
       target,
       checked: files.size,
-      problems: mine.map((text) => ({ file: fileOf(text), message: text.slice(fileOf(text).length + 2), text })),
+      problems: mine.map(entry),
+      warnings: target.kind === 'scene' ? warningsOf([target.name]) : [],
       ...(summary ? { summary } : {}),
     };
   },
   format: (r) => {
-    if (r.ok) return r.target ? `${r.target.file}: ok · ${r.summary}` : `ok · ${r.checked} files, no problems`;
+    const w = r.warnings.length;
+    const warnings = [...r.warnings.map((/** @type {any} */ p) => `warning: ${p.text}`), ...(w ? [`${w} warning${w === 1 ? '' : 's'}`] : [])];
+    if (r.ok) return [r.target ? `${r.target.file}: ok · ${r.summary}` : `ok · ${r.checked} files, no problems`, ...warnings].join('\n');
     const n = r.problems.length;
-    return [...r.problems.map((/** @type {any} */ p) => p.text), `${n} problem${n === 1 ? '' : 's'}`].join('\n');
+    return [...r.problems.map((/** @type {any} */ p) => p.text), `${n} problem${n === 1 ? '' : 's'}`, ...warnings].join('\n');
   },
 };
 

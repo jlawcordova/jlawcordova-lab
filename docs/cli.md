@@ -21,8 +21,10 @@
 | [`art sizes`](#artsizes) | Bytes each object and each color adds to a compiled scene, against the document's git HEAD | read |
 | [`check`](#check) | Validate the sources with the engine, all of them or one doc | read |
 | [`doc close`](#docclose) | Close an open doc (refused with unsaved changes unless --force) | session |
+| [`doc merge`](#docmerge) | Merge the changes to a doc's file on disk into its working copy, keeping the unsaved edits | edit, session |
 | [`doc open`](#docopen) | Open a scene or object as a working copy, with undo and redo | session |
 | [`doc redo`](#docredo) | Redo the last undone edit to an open doc | edit, session |
+| [`doc reload`](#docreload) | Load an open doc from disk again, only if no unsaved work is lost | edit, session |
 | [`doc revert`](#docrevert) | Load an open doc from disk again, dropping its changes (as one undo step) | edit, session |
 | [`doc save`](#docsave) | Save an open doc: validate, serialize with the engine and write its source (MCP: write a proposal) | edit, session |
 | [`doc status`](#docstatus) | Whether open docs have unsaved changes, and can undo or redo | session |
@@ -42,6 +44,7 @@
 | [`object layer duplicate`](#objectlayerduplicate) | Duplicate a layer, just above it | edit |
 | [`object layer move`](#objectlayermove) | Move a layer up (--by 1, raise) or down (--by -1, lower) | edit |
 | [`object list`](#objectlist) | List every object with its kind, size, layers, frames and colors | read |
+| [`object map set`](#objectmapset) | Replace a whole map of a sprite's layer (or frame of a loop) from rows, in one undo step | edit |
 | [`object new`](#objectnew) | Make a new object from a starter: a blank sprite, a block, or one that extends another | edit |
 | [`object paint`](#objectpaint) | Paint pixels of an object a palette color, on a layer and frame | edit |
 | [`object pick`](#objectpick) | The color at a pixel of an object, on a layer and frame (the Picker) | read |
@@ -56,9 +59,15 @@
 | [`proposal render`](#proposalrender) | Render a proposal's doc as it would be once applied, without writing anything | read |
 | [`proposal show`](#proposalshow) | Show a proposal: its edits, the source, and a diff from the file as it is now | read |
 | [`scene duplicate`](#sceneduplicate) | Duplicate an item one column over, right after it in paint order | edit |
+| [`scene group set`](#scenegroupset) | Set or remove a group's class and data attributes, or set its data-x and data-y to its first item's foot | edit |
 | [`scene items`](#sceneitems) | List a scene's items in paint order, with stable paths | read |
+| [`scene key delete`](#scenekeydelete) | Delete a key of an item's track (not the one at 0: remove the track for that) | edit |
+| [`scene key move`](#scenekeymove) | Move a key of an item's track to another time | edit |
+| [`scene key set`](#scenekeyset) | Set a key of an item's track: its move, show and pose at a time (made if there's no key there) | edit |
 | [`scene list`](#scenelist) | List every scene | read |
 | [`scene lower`](#scenelower) | Lower an item: paint it one earlier, behind the item before it | edit |
+| [`scene motion path`](#scenemotionpath) | Key an item along a polyline on the grid, at a steady speed or between two times | edit |
+| [`scene motion set`](#scenemotionset) | Set the length of a scene's motion loop (making the motion if it has none) | edit |
 | [`scene move`](#scenemove) | Move an item by tiles and levels (--by) or by pixels (--nudge) | edit |
 | [`scene new`](#scenenew) | Make a new, empty scene (the starter: a 128×128 view around tile 0,0,0) | edit |
 | [`scene place`](#sceneplace) | Place an object on a tile (or at a pixel point) in a scene | edit |
@@ -68,6 +77,8 @@
 | [`scene set`](#sceneset) | Set an item's tile or pixel point, one coordinate, its class or its id | edit |
 | [`scene show`](#sceneshow) | Show a scene's settings, size, objects and motion | read |
 | [`scene snap`](#scenesnap) | Snap a pixel-placed item to the level-0 tile under its placement point | edit |
+| [`scene track add`](#scenetrackadd) | Add a motion track for an item (it needs an id): one key at 0, the rest frame | edit |
+| [`scene track remove`](#scenetrackremove) | Remove an item's motion track, with all its keys | edit |
 
 ## The command line
 
@@ -114,9 +125,10 @@ The server holds a **session**: docs open as in-memory working copies with undo 
 
 - `scene.render` / `object.render`: `{ png, scale, viewBox: [x, y, w, h], width, height, time | frame, items: [{ path, object, at, id?, pose?, bounds: [x, y, w, h] }] }`. `png` is a base64 PNG with a transparent background at an integer `scale`; `bounds` are in output pixels (scale included), for hit-testing; `path` is the item's dotted path (`"5.2"`). An object render's item has `path: null` and the result has its `anchor`.
 - Edits: `{ doc: "scene:<name>" | "object:<name>", changed, summary, ... }`; scene item edits add `path` (the item's path after the edit) and `item`; paint edits add `pixels` (how many changed).
-- `DocStatus` (in `doc.changed`, `session.info` and `doc.status` without a doc): `{ doc, dirty, canUndo, canRedo }`. `doc.status` with a doc adds `file, exists, stale` (the file changed on disk since it was opened), `undo: [edit summaries]`, `redo: [...]` and `proposal?`.
+- `DocStatus` (in `doc.changed`, `session.info` and `doc.status` without a doc): `{ doc, dirty, canUndo, canRedo }`. `doc.status` with a doc adds `file, exists, stale` (the file changed on disk since the doc was opened or last matched it), `undo: [edit summaries]`, `redo: [...]`, `edits` (the edits since the doc last matched its file: what a proposal would list), `proposal?`, `synced?` and `unsavedInApp` (see MCP).
 - `doc.save`: `{ doc, file, wrote, hash, bytes, diff, dirty, canUndo, canRedo }` (`wrote` is false when the file already held exactly this text).
-- `doc.undo` / `doc.redo` / `doc.revert`: `{ doc, changed, summary, dirty, canUndo, canRedo }`.
+- `doc.undo` / `doc.redo` / `doc.revert`: `{ doc, changed, summary, dirty, canUndo, canRedo }`; `doc.reload` adds `reloaded`, `doc.merge` adds `merged`.
+- `proposal.apply`: `{ id, doc, file, wrote, reloaded, merged?, conflict?, diff, summary }`: an open copy with no unsaved edits reloads; one with unsaved edits has the proposal merged in (`merged`), or, when both changed the same lines, is left as it is and reported with `doc.stale` (`conflict`).
 
 **Errors** are JSON-RPC errors with a stable `data.code`:
 
@@ -137,18 +149,23 @@ The server holds a **session**: docs open as in-memory working copies with undo 
 
 | method | params | when |
 | --- | --- | --- |
-| `doc.changed` | `{ doc, dirty, canUndo, canRedo }` | after each edit, undo, redo, save, revert, and when a clean open doc reloads because its file changed. Sent before the request's response. |
+| `doc.changed` | `{ doc, dirty, canUndo, canRedo }` | after each edit, undo, redo, save, revert, merge or reload, and when a clean open doc reloads because its file changed. Sent before the request's response. |
+| `doc.stale` | `{ doc, file }` | an open doc with unsaved edits whose file changed on disk (the app shows Merge, Reload, Keep Mine), and after an applied proposal whose merge into the open copy clashed |
 | `files.changed` | `{ files: ["scenes/hero-island.mjs", …] }` | sources changed on disk (another editor, git, an applied proposal, a save), debounced 150 ms |
 | `proposals.changed` | `{ proposals: [ProposalSummary] }` (as `proposal.list`) | a proposal was written, applied or rejected |
 | `activity.appended` | `{ entries: [{ time, tool, args, ok, summary }] }` | an MCP server logged tool calls |
 
-An open doc without unsaved changes reloads from disk when its file changes; one with unsaved changes stays as it is, `doc.status` reports it `stale`, and its `doc.save` fails with `conflict` until it's reverted or saved with `force`.
+An open doc without unsaved changes reloads from disk when its file changes; one with unsaved changes stays as it is, the server sends `doc.stale`, `doc.status` reports it `stale`, and its `doc.save` fails with `conflict` until it's merged (`doc.merge`: a three-way line merge of the file into the working copy, keeping its edits; it refuses with `merge_conflict` when both changed the same lines), reverted, or saved with `force`. The server also keeps `open/<pid>.json` in the state dir (see below), so agents can see what the app has open with unsaved edits.
 
 ## MCP
 
 `pixellab serve --mcp [--direct] [--document <path> | --site <checkout>]` is an MCP server over stdio (protocol `2025-06-18`, hand-written: `initialize`, `notifications/initialized`, `ping`, `tools/list`, `tools/call`). Tools are the commands with `.` → `_` (`scene.place` → `scene_place`), each with its params as `inputSchema`. A tool's result is `content: [{ type: "text", text: <the result as JSON> }]` plus `structuredContent` (the result); render tools return the PNG as an `image` content block first, so agents can see the art. A failed command is a result with `isError: true` and `structuredContent: { error: { code, message, details? } }`; an unknown tool is a JSON-RPC error.
 
-**Agents propose, people approve.** Edits stay in the server's session. `doc_save` validates the doc (refusing one with problems unless `force`) and writes a **proposal** to the state dir instead of the document; a person approves it in Pixel Lab's Agent window or with `pixellab proposal apply`. With `--direct`, `doc_save` writes the document instead. Left out of the tools: `proposal_apply` (approving a proposal is for a person, in Pixel Lab or with pixellab proposal apply); `proposal_reject` (rejecting a proposal is for a person); `art_build` (it publishes the SVGs a site inlines; a person publishes after approving); `document_copy` (saving a copy of the document is for a person). With `--direct`, `art_build` is a tool.
+**Agents propose, people approve.** Edits stay in the server's session. `doc_save` validates the doc (refusing one with problems unless `force`) and writes a **proposal** to the state dir instead of the document; a person approves it in Pixel Lab's Agent window or with `pixellab proposal apply`. With `--direct`, `doc_save` writes the document instead.
+
+**The session follows disk.** Before every `tools/call`, the session brings its open docs in line with disk where nothing is lost. A doc whose proposal was applied or rejected is settled: marked clean if it matches the file; reloaded if it has no edits since the proposal; rebased onto the file, keeping the later edits, if the proposal was applied; left as it is only when a rejected proposal has edits on top. `doc_status` reports it as `synced: { proposal, outcome: applied | rejected, action: clean | reloaded | rebased | kept }` (`settled`, without a doc, lists the latest, including a new doc discarded after its proposal was rejected). A clean doc whose file changed reloads. So the next edit starts from the file, with no revert. `doc_reload` reloads a doc only when nothing unsaved is lost (code `dirty` with the edits otherwise, `proposed` while its proposal waits); `doc_revert`, which drops edits, is annotated destructive.
+
+**What the app has open.** `doc_status` lists `unsavedInApp`: the docs Pixel Lab has open with unsaved edits (from `open/<pid>.json`). A proposal for one of them comes back with `warnings`: approving it will merge it into the owner's unsaved edits, and lines both changed will clash. Left out of the tools: `proposal_apply` (approving a proposal is for a person, in Pixel Lab or with pixellab proposal apply); `proposal_reject` (rejecting a proposal is for a person); `art_build` (it publishes the SVGs a site inlines; a person publishes after approving); `document_copy` (saving a copy of the document is for a person). With `--direct`, `art_build` is a tool.
 
 ### Setup for Claude Code
 
@@ -170,8 +187,9 @@ Add `--document <path.pixellab>` (or `--site <checkout>`) after `--mcp` for anot
 
 The state dir is `$PIXELLAB_STATE`, else `~/Library/Application Support/Pixel Lab/`.
 
-- `proposals/<id>.json`: `{ id, doc: "scene:<name>" | "object:<name>", baseHash, source, summary, createdAt, agent }`. `id` is `YYYYMMDD-HHMMSS-xxxxxx` (UTC, sortable). `baseHash` is the sha256 (hex) of the file the agent opened, or null for a new doc. `source` is the full new file, serialized by the engine. `summary` lists the edits since the doc was opened. `agent` is the MCP client's name and version. Saving the same doc again in one MCP session rewrites its proposal.
+- `proposals/<id>.json`: `{ id, doc: "scene:<name>" | "object:<name>", baseHash, source, summary, createdAt, agent }`. `id` is `YYYYMMDD-HHMMSS-xxxxxx` (UTC, sortable). `baseHash` is the sha256 (hex) of the file the agent opened, or null for a new doc. `source` is the full new file, serialized by the engine. `summary` lists the edits since the doc last matched its file (opened, saved, reloaded, or its last proposal settled), so a proposal made after an earlier one was applied lists only its own edits. `agent` is the MCP client's name and version. Saving the same doc again in one MCP session rewrites its proposal.
 - `activity.jsonl`: one line per MCP `tools/call`: `{ time, tool, args, ok, summary }` (`tool` is the MCP tool name).
+- `open/<pid>.json`: written by Pixel Lab's server (`serve --stdio`) whenever its open docs change, removed when it stops: `{ pid, document, updatedAt, docs: [{ doc, dirty }] }`. Readers skip a file whose process is gone or whose `document` isn't theirs.
 
 `proposal.apply` refuses (`conflict`) when the file no longer has `baseHash`, and (`invalid`) when the proposed doc has validation problems, unless forced; then it writes `source`, deletes the proposal, and reloads an open, unchanged working copy. `proposal.reject` deletes it. `proposal.render` renders the proposed doc over the files on disk (the shape of `scene.render` or `object.render`) without writing, for the Agent window's ghost preview.
 
@@ -271,7 +289,7 @@ Validate the sources with the engine, all of them or one doc.
 pixellab check [name] [--kind <object|scene>]
 ```
 
-Problems are the engine's "<file>: <where>: <rule>" lines. With a name, only the problems in that doc and the files it uses (palette.mjs, the objects it places or extends) are listed. On the command line, the exit code is 1 when there are problems.
+Problems are the engine's "<file>: <where>: <rule>" lines. With a name, only the problems in that doc and the files it uses (palette.mjs, the objects it places or extends) are listed. On the command line, the exit code is 1 when there are problems. Warnings don't fail the check: a scene's key-to-key moves (the loop back to the first key included) whose steps aren't 1 px straight, 1:1 or 2:1, so the item jumps instead of walking the grid; scene.motion.path makes on-grid keys.
 
 read-only · MCP tool `check`
 
@@ -303,6 +321,22 @@ read-only · session only (`serve`) · MCP tool `doc_close`
 | `doc` (positional) | string | required | the doc: scene:<name>, object:<name>, or a name (scenes/<name>, objects/<name>) |
 | `--force` | boolean | default `false` | drop unsaved changes |
 
+#### doc.merge
+
+Merge the changes to a doc's file on disk into its working copy, keeping the unsaved edits.
+
+```
+pixellab doc merge <doc>
+```
+
+A three-way line merge: the file as the doc was opened or last saved, the file now, and the working copy. One undo step; the doc stays dirty with its own edits. A doc with no unsaved edits just reloads. When both sides changed the same lines it refuses with code merge_conflict (details: [{ base: [from, to], ours: [lines], theirs: [lines] }]) and changes nothing. Returns { doc, merged, changed, summary, dirty, canUndo, canRedo }.
+
+edits docs · session only (`serve`) · MCP tool `doc_merge`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `doc` (positional) | string | required | the doc: scene:<name>, object:<name>, or a name (scenes/<name>, objects/<name>) |
+
 #### doc.open
 
 Open a scene or object as a working copy, with undo and redo.
@@ -333,6 +367,22 @@ edits docs · session only (`serve`) · MCP tool `doc_redo`
 | --- | --- | --- | --- |
 | `doc` (positional) | string | required | the doc: scene:<name>, object:<name>, or a name (scenes/<name>, objects/<name>) |
 
+#### doc.reload
+
+Load an open doc from disk again, only if no unsaved work is lost.
+
+```
+pixellab doc reload <doc>
+```
+
+Reloads when the working copy has no edits its file lacks: it is clean, or it matches the file (as after its proposal was applied). Refuses with code dirty (details: the edits that would be lost) when there are unsaved edits, and with code proposed while its proposal waits for the owner. Returns { doc, reloaded, changed, summary, dirty, canUndo, canRedo }; reloaded is false when the doc already matched the file. doc.revert is the one that drops edits.
+
+edits docs · session only (`serve`) · MCP tool `doc_reload`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `doc` (positional) | string | required | the doc: scene:<name>, object:<name>, or a name (scenes/<name>, objects/<name>) |
+
 #### doc.revert
 
 Load an open doc from disk again, dropping its changes (as one undo step).
@@ -341,7 +391,7 @@ Load an open doc from disk again, dropping its changes (as one undo step).
 pixellab doc revert <doc>
 ```
 
-A doc that was never saved (made by scene.new or object.new) is discarded.
+A doc that was never saved (made by scene.new or object.new) is discarded. To reload without dropping anything, use doc.reload.
 
 edits docs · session only (`serve`) · MCP tool `doc_revert`
 
@@ -357,7 +407,7 @@ Save an open doc: validate, serialize with the engine and write its source (MCP:
 pixellab doc save <doc> [--force]
 ```
 
-Refuses a doc with validation problems (code invalid, details: the problems) and a file that changed on disk since the doc was opened (code conflict), unless --force. In the MCP server it writes a proposal to the state dir for a person to approve instead (unless started with --direct). Returns { doc, file, wrote, hash, diff, dirty, canUndo, canRedo }, or { doc, proposal, file, summary, diff, … } for a proposal.
+Refuses a doc with validation problems (code invalid, details: the problems) and a file that changed on disk since the doc was opened (code conflict), unless --force. In the MCP server it writes a proposal to the state dir for a person to approve instead (unless started with --direct). Returns { doc, file, wrote, hash, diff, dirty, canUndo, canRedo }, or { doc, proposal, file, summary, edits, diff, warnings?, … } for a proposal: edits lists the edits since the doc last matched its file, and warnings says when Pixel Lab has the doc open with unsaved edits.
 
 edits docs · session only (`serve`) · MCP tool `doc_save`
 
@@ -374,7 +424,7 @@ Whether open docs have unsaved changes, and can undo or redo.
 pixellab doc status [doc]
 ```
 
-With a doc: { doc, dirty, canUndo, canRedo, file, exists, stale, undo: [edits], redo: [edits], proposal? }; stale means the file changed on disk since it was opened. Without: { docs: [{ doc, dirty, canUndo, canRedo }] } for every open doc.
+With a doc: { doc, dirty, canUndo, canRedo, file, exists, stale, undo: [edits], redo: [edits], edits, proposal?, synced?, unsavedInApp }. stale: the file changed on disk since the doc was opened or last matched it. edits: the edits since the doc last matched its file (what a proposal lists). synced: how the doc was brought in line with disk after its proposal was applied or rejected ({ proposal, outcome, action }). unsavedInApp: Pixel Lab has this doc open with unsaved edits, so a proposal for it will clash with them. Without a doc: { docs: [{ doc, dirty, canUndo, canRedo }], unsavedInApp: [docs Pixel Lab has open with unsaved edits], settled: [proposals settled lately] }.
 
 read-only · session only (`serve`) · MCP tool `doc_status`
 
@@ -652,6 +702,31 @@ read-only · MCP tool `object_list`
 | --- | --- | --- | --- |
 | `--kind` | `sprite` \| `block` |  | only objects of this kind |
 
+#### object.map.set
+
+Replace a whole map of a sprite's layer (or frame of a loop) from rows, in one undo step.
+
+```
+pixellab object map set <name> <rows…> [--keys <json>] [--layer <n>] [--frame <n>] [--resize]
+```
+
+Rows are strings of one character per pixel, top to bottom, '.' transparent. With --keys (a legend, { char: color }), each legend character becomes the object's key for that color, made if it has none, so a generated map can use any characters; without, the characters are the object's own keys. Checks the palette, outfit colors (only for objects that extend character), the 12-color cap and the 64×64 size cap. A size other than the object's is refused unless --resize, which pads or crops every map first (as object.resize). On an object that extends another, a still layer's rows become row overrides. Blocks are refused: paint their surface and sides.
+
+edits docs · MCP tool `object_map_set`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | object name (or objects/<name>) |
+| `rows` (positional) | list of string | required | the map's rows, top to bottom; on the command line each row a positional or the flag repeated |
+| `--keys` | object |  | a legend: character → palette color, as JSON on the command line |
+| `--layer` | integer | default `0` | the layer, from 0 at the bottom (at least 0) |
+| `--frame` | integer | default `0` | the frame of a frame loop (a block: of its surface loop) (at least 0) |
+| `--resize` | boolean | default `false` | resize the object to the rows' size first |
+
+```sh
+pixellab object map set pebble .gg. gwwg gwwg .gg. --keys '{"g": "grass-2", "w": "ink"}'
+```
+
 #### object.new
 
 Make a new object from a starter: a blank sprite, a block, or one that extends another.
@@ -818,7 +893,7 @@ Apply a proposal: check its base, validate it, write the doc's source and remove
 pixellab proposal apply <id> [--force]
 ```
 
-Refuses (code conflict) if the file changed since the proposal was made, and (code invalid) if the proposed doc has validation problems, unless --force. An open, unchanged working copy of the doc reloads from the new file.
+Refuses (code conflict) if the file changed since the proposal was made, and (code invalid) if the proposed doc has validation problems, unless --force. An open working copy of the doc with no unsaved edits reloads from the new file (reloaded: true); one with unsaved edits has the proposal merged into it, keeping them (merged: true), or, when both changed the same lines, stays as it is and is reported stale (conflict: true). The file is written either way.
 
 edits docs · writes files directly · not an MCP tool
 
@@ -911,6 +986,30 @@ edits docs · MCP tool `scene_duplicate`
 | `name` (positional) | string | required | scene name (or scenes/<name>) |
 | `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id |
 
+#### scene.group.set
+
+Set or remove a group's class and data attributes, or set its data-x and data-y to its first item's foot.
+
+```
+pixellab scene group set <name> <group> [--attrs <json>] [--foot]
+```
+
+--group is the group's path (scene items lists groups), or an item (path or id) inside it. --attrs is an object of attribute values ({"data-enter": "object", "data-x": "96"}); '' removes one. --foot sets data-x and data-y to the foot of the group's first item: an item on a tile stands on its tile's center, a sprite placed by pixel on the center of its bottom row. One undo step.
+
+edits docs · MCP tool `scene_group_set`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `group` (positional) | string | required | the group: its path, or an item (path or id) inside it |
+| `--attrs` | object |  | attribute values; '' removes one (JSON on the command line) |
+| `--foot` | boolean | default `false` | set data-x and data-y to the first item's foot |
+
+```sh
+pixellab scene group set hero-island 42 --foot
+pixellab scene group set hero-island truck-a --attrs '{"data-enter": "object"}'
+```
+
 #### scene.items
 
 List a scene's items in paint order, with stable paths.
@@ -926,6 +1025,69 @@ read-only · MCP tool `scene_items`
 | param | type | | description |
 | --- | --- | --- | --- |
 | `name` (positional) | string | required | scene name (or scenes/<name>) |
+
+#### scene.key.delete
+
+Delete a key of an item's track (not the one at 0: remove the track for that).
+
+```
+pixellab scene key delete <name> <item> --time <n>
+```
+
+edits docs · MCP tool `scene_key_delete`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id; an item needs an id to have a track (scene.set --id) |
+| `--time` | integer | required | ms into the loop (at least 0) |
+
+#### scene.key.move
+
+Move a key of an item's track to another time.
+
+```
+pixellab scene key move <name> <item> --time <n> --to <n>
+```
+
+The key at 0 (the rest frame) stays; a key can't land on another.
+
+edits docs · MCP tool `scene_key_move`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id; an item needs an id to have a track (scene.set --id) |
+| `--time` | integer | required | ms into the loop (at least 0) |
+| `--to` | integer | required | its new time, ms into the loop (at least 0) |
+
+#### scene.key.set
+
+Set a key of an item's track: its move, show and pose at a time (made if there's no key there).
+
+```
+pixellab scene key set <name> <item> --time <n> [--move <n,…>] [--show] [--pose <text>] [--clear <move|show|pose,…>]
+```
+
+--move x,y is pixels from where the scene places the item; --show false hides it from that key on; --pose <object> draws another object from that key on. --clear move,show,pose removes those values from the key, so they carry on from the key before. Returns the key and the track's off-grid warnings (moves whose steps aren't 1 px straight, 1:1 or 2:1).
+
+edits docs · MCP tool `scene_key_set`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id; an item needs an id to have a track (scene.set --id) |
+| `--time` | integer | required | ms into the loop (at least 0) |
+| `--move` | list of integer |  | pixels from where the scene places the item: x,y |
+| `--show` | boolean |  | whether the item shows from this key on |
+| `--pose` | string |  | the object the item draws from this key on |
+| `--clear` | list of string |  | values to remove from the key |
+
+```sh
+pixellab scene key set hero-island truck-a --time 4200 --move 32,16
+pixellab scene key set hero-island crane-hook --time 9000 --pose crane-hook-down
+pixellab scene key set hero-island parcel --time 12000 --no-show
+```
 
 #### scene.list
 
@@ -954,15 +1116,57 @@ edits docs · MCP tool `scene_lower`
 | `name` (positional) | string | required | scene name (or scenes/<name>) |
 | `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id |
 
+#### scene.motion.path
+
+Key an item along a polyline on the grid, at a steady speed or between two times.
+
+```
+pixellab scene motion path <name> <item> <points…> [--start <n>] [--speed <n>] [--end <n>]
+```
+
+--points are moves (pixels from where the scene places the item), the first at --start. Each segment is split into runs that step 1 px straight, 1:1 or 2:1, each ending in a key; times follow the distance at --speed px per second, or spread from --start to --end. Keys inside the path lose their move (and go, if that leaves nothing); a key there with show or pose keeps its place on the path. Makes the track if the item (with an id) has none. Returns the keys written and the track's remaining off-grid warnings (such as the step from the path's end to the next key).
+
+edits docs · MCP tool `scene_motion_path`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id; an item needs an id to have a track (scene.set --id) |
+| `points` (positional) | list of [integer, …] | required | x,y moves along the path; on the command line x,y pairs separated by spaces |
+| `--start` | integer | default `0` | when the path starts, ms into the loop (at least 0) |
+| `--speed` | number |  | pixels per second along the path |
+| `--end` | integer |  | when the path ends, ms into the loop (instead of --speed) (at least 0) |
+
+```sh
+pixellab scene motion path hero-island truck-a 0,0 16,-3 48,-3 --start 2000 --speed 20
+```
+
+#### scene.motion.set
+
+Set the length of a scene's motion loop (making the motion if it has none).
+
+```
+pixellab scene motion set <name> --duration <n>
+```
+
+Refuses a length that would cut off keys.
+
+edits docs · MCP tool `scene_motion_set`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `--duration` | integer | required | the loop's length in ms (at least 100) |
+
 #### scene.move
 
 Move an item by tiles and levels (--by) or by pixels (--nudge).
 
 ```
-pixellab scene move <name> <item> [--by <n,…>] [--nudge <n,…>] [--time <n>]
+pixellab scene move <name> <item> [--keep-group] [--by <n,…>] [--nudge <n,…>] [--time <n>]
 ```
 
-As the lab's arrow keys: --by col,row[,level] moves an item on a tile by whole tiles (a pixel-placed item moves by the same screen offset); --nudge x,y moves it by pixels, and an item on a tile is then placed by pixel. With --time past 0, an animated item (one with an id and a motion track) moves at that time instead: the key there, made if needed, takes the move. Rapid repeats coalesce into one undo step.
+As the lab's arrow keys: --by col,row[,level] moves an item on a tile by whole tiles (a pixel-placed item moves by the same screen offset); --nudge x,y moves it by pixels, and an item on a tile is then placed by pixel. With --time past 0, an animated item (one with an id and a motion track) moves at that time instead: the key there, made if needed, takes the move. Rapid repeats coalesce into one undo step. A move at rest keeps the item's group in step: data-x/data-y that were its placement point or foot, and data-col/data-row that were its tile, follow it (--no-keep-group leaves them); the result has the group when they did.
 
 edits docs · MCP tool `scene_move`
 
@@ -970,6 +1174,7 @@ edits docs · MCP tool `scene_move`
 | --- | --- | --- | --- |
 | `name` (positional) | string | required | scene name (or scenes/<name>) |
 | `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id |
+| `--keep-group` | boolean | default `true` | keep the item's group in step: data-x/data-y that were its placement point or foot, and data-col/data-row that were its tile, follow it |
 | `--by` | list of integer |  | tiles to move: col,row[,level] |
 | `--nudge` | list of integer |  | pixels to move: x,y |
 | `--time` | integer | default `0` | ms into the scene's motion; past 0 an animated item's key moves (at least 0) |
@@ -998,10 +1203,10 @@ edits docs · MCP tool `scene_new`
 Place an object on a tile (or at a pixel point) in a scene.
 
 ```
-pixellab scene place <name> <object> [--at <n,…>] [--px <n,…>] [--class <text>] [--id <text>]
+pixellab scene place <name> <object> [--at <n,…>] [--px <n,…>] [--class <text>] [--id <text>] [--group <text>] [--new-group <json>] [--foot] [--index <n>]
 ```
 
-Like the lab's Place tool: an item on a tile goes in back-to-front order (by row + col, then level, among the items on tiles), so it paints in front of what's behind it. A pixel placement goes last, in front of everything. With neither --at nor --px, it goes on the level-0 tile at the middle of the view, where the lab's cursor starts. Returns the new item's path.
+Like the lab's Place tool: an item on a tile goes in back-to-front order (by row + col, then level, among the items on tiles), so it paints in front of what's behind it. A pixel placement goes last, in front of everything. With neither --at nor --px, it goes on the level-0 tile at the middle of the view, where the lab's cursor starts. --group puts it inside an existing group (the group's path, or an item inside it); --new-group wraps it in a new group with those attributes (class and data-*, like {"class": "enter", "data-enter": "object"}), and --foot sets that group's data-x and data-y to the item's foot. --index is its position in the list it goes into (0 is the back); by default an item on a tile goes back to front there (a new group judged by its first item on a tile) and one placed by pixel goes last. Returns the new item's path, and its group's.
 
 edits docs · MCP tool `scene_place`
 
@@ -1013,10 +1218,15 @@ edits docs · MCP tool `scene_place`
 | `--px` | list of integer |  | a point in scene pixels: x,y |
 | `--class` | string |  | a class list for the item |
 | `--id` | string |  | an id for the item (lowercase kebab-case, unique in the scene) |
+| `--group` | string |  | an existing group to place it in: its path, or an item (path or id) inside it |
+| `--new-group` | object |  | attributes of a new group around the item (class, data-*), as JSON on the command line |
+| `--foot` | boolean | default `false` | with --new-group: set its data-x and data-y to the item's foot |
+| `--index` | integer |  | its position in the list it goes into (0 is the back) (at least 0) |
 
 ```sh
 pixellab scene place hero-island pine --at 14,6,1
 pixellab scene place range-sprite boxes --px 40,12 --dry-run
+pixellab scene place hero-island crate --at 3,1,1 --new-group '{"class": "enter", "data-enter": "object"}' --foot
 ```
 
 #### scene.raise
@@ -1082,10 +1292,10 @@ pixellab scene render hero-island --theme dark --out /tmp/hero-dark.png
 Set an item's tile or pixel point, one coordinate, its class or its id.
 
 ```
-pixellab scene set <name> <item> [--tile <n,…>] [--px <n,…>] [--col <n>] [--row <n>] [--level <n>] [--x <n>] [--y <n>] [--class <text>] [--id <text>]
+pixellab scene set <name> <item> [--keep-group] [--tile <n,…>] [--px <n,…>] [--col <n>] [--row <n>] [--level <n>] [--x <n>] [--y <n>] [--class <text>] [--id <text>]
 ```
 
---tile col,row,level or --px x,y place the item there (changing how it's placed if need be); --col, --row, --level (an item on a tile) and --x, --y (a pixel-placed item) set one coordinate, like the lab's Selected fields. --class sets the class list and --id the id; an empty value removes it. An id's motion track follows it when it's renamed and goes with it when it's removed. All in one undo step.
+--tile col,row,level or --px x,y place the item there (changing how it's placed if need be); --col, --row, --level (an item on a tile) and --x, --y (a pixel-placed item) set one coordinate, like the lab's Selected fields. --class sets the class list and --id the id; an empty value removes it. An id's motion track follows it when it's renamed and goes with it when it's removed. All in one undo step. Moving it keeps its group's data-x/data-y and data-col/data-row in step, as scene.move does (--no-keep-group leaves them).
 
 edits docs · MCP tool `scene_set`
 
@@ -1093,6 +1303,7 @@ edits docs · MCP tool `scene_set`
 | --- | --- | --- | --- |
 | `name` (positional) | string | required | scene name (or scenes/<name>) |
 | `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id |
+| `--keep-group` | boolean | default `true` | keep the item's group in step: data-x/data-y that were its placement point or foot, and data-col/data-row that were its tile, follow it |
 | `--tile` | list of integer |  | a tile: col,row,level |
 | `--px` | list of integer |  | a point in scene pixels: x,y |
 | `--col` | integer |  |  |
@@ -1128,8 +1339,10 @@ read-only · MCP tool `scene_show`
 Snap a pixel-placed item to the level-0 tile under its placement point.
 
 ```
-pixellab scene snap <name> <item>
+pixellab scene snap <name> <item> [--keep-group]
 ```
+
+Its group's data-x/data-y and data-col/data-row follow it, as scene.move keeps them (--no-keep-group leaves them).
 
 edits docs · MCP tool `scene_snap`
 
@@ -1137,3 +1350,42 @@ edits docs · MCP tool `scene_snap`
 | --- | --- | --- | --- |
 | `name` (positional) | string | required | scene name (or scenes/<name>) |
 | `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id |
+| `--keep-group` | boolean | default `true` | keep the item's group in step: data-x/data-y that were its placement point or foot, and data-col/data-row that were its tile, follow it |
+
+#### scene.track.add
+
+Add a motion track for an item (it needs an id): one key at 0, the rest frame.
+
+```
+pixellab scene track add <name> <item> [--duration <n>]
+```
+
+Makes the scene's motion (one loop of --duration ms) when it has none. Then scene.key.set or scene.motion.path keys it.
+
+edits docs · MCP tool `scene_track_add`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id; an item needs an id to have a track (scene.set --id) |
+| `--duration` | integer |  | the loop's length in ms, when the scene has no motion yet (at least 100) |
+
+```sh
+pixellab scene track add hero-island truck-a
+pixellab scene track add meadow bird --duration 4000
+```
+
+#### scene.track.remove
+
+Remove an item's motion track, with all its keys.
+
+```
+pixellab scene track remove <name> <item>
+```
+
+edits docs · MCP tool `scene_track_remove`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id; an item needs an id to have a track (scene.set --id) |

@@ -1,0 +1,58 @@
+# Acceptance 7 (docs/intents/2026-10-mcp-gaps): a doc with unsaved edits whose file changes on disk
+# shows a banner: Merge, Reload, Keep Mine. An approved proposal merges into an unsaved copy.
+appearance dark
+open scene:footer-dirt
+expect stale false
+library pine
+place 0 1 0
+expect dirty true
+expect items 2
+# an outside editor writes the file
+cli scene place footer-dirt tree-small --px 40,30
+expect stale true
+snapshot @OUT@/a6-stale-dark.png
+appearance light
+snapshot @OUT@/a6-stale-light.png
+stale merge
+expect stale false
+expect dirty true
+expect items 3
+save
+expect dirty false
+# Reload drops the unsaved edit and takes the file
+place 1 1 0
+expect items 4
+cli scene place footer-dirt pine --px 50,30
+expect stale true
+stale reload
+expect stale false
+expect dirty false
+expect items 4
+# Keep Mine hides the banner and keeps the edit
+place 2 1 0
+cli scene place footer-dirt pine --px 10,30
+expect stale true
+stale keep
+expect stale false
+expect dirty true
+revert
+expect dirty false
+expect items 5
+# Approving the agent's proposal merges it into the open copy's unsaved edits
+appearance dark
+open scene:footer-grass
+place 0 1 0
+expect dirty true
+agent open
+expect proposals 1
+proposal select 1
+expect proposal scene:footer-grass
+approve
+expect question dirty
+expect proposals 0
+expect stale false
+expect dirty true
+expect items 3
+snapshot agent @OUT@/a6-approved-dark.png
+save
+expect dirty false

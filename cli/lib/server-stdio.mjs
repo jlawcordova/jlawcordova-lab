@@ -6,17 +6,22 @@
 //
 // Notifications it sends:
 //   doc.changed        { doc, dirty, canUndo, canRedo }  after each edit, undo, redo, save, revert or reload
+//   doc.stale          { doc, file }                     an open doc with unsaved edits whose file changed on disk
 //   files.changed      { files: ['scenes/x.mjs', …] }    when sources change on disk (debounced)
+//
+// It also keeps open/<pid>.json in the state dir current (open-docs.mjs), so
+// agents can see which docs the app has open with unsaved edits.
 //   proposals.changed  { proposals: [...] }              when the state dir's proposals change (as proposal.list)
 //   activity.appended  { entries: [...] }                new lines of activity.jsonl
 
 import { consoleToStderr, METHOD_NOT_FOUND, RpcError, serveLines } from './jsonrpc.mjs';
+import { openDocsWriter } from './open-docs.mjs';
 import { registry as defaultRegistry } from './registry.mjs';
-import { Session } from './session.mjs';
+import { readSource, Session } from './session.mjs';
 import { watchSources, watchState } from './watch.mjs';
 
 export const PROTOCOL_VERSION = 1;
-export const VERSION = '0.3.0';
+export const VERSION = '0.4.0';
 
 /**
  * @param {{
@@ -33,7 +38,19 @@ export async function startStdioServer({ site, env = process.env, input = proces
   if (output === process.stdout) consoleToStderr();
   /** @type {ReturnType<typeof serveLines>} */
   let rpc;
-  const session = new Session(site, { env, mode: 'direct', onChange: (status) => rpc?.notify('doc.changed', status) });
+  /** @type {ReturnType<typeof openDocsWriter> | undefined} */
+  let openDocs;
+  const session = new Session(site, {
+    env,
+    mode: 'direct',
+    onChange: (status) => {
+      rpc?.notify('doc.changed', status);
+      openDocs?.update(session.list());
+    },
+  });
+  openDocs = openDocsWriter(session.state.dir, site.root, { log });
+  // The app's server notices stale docs itself (the watcher), so proposal.apply can tell it.
+  session.onStale = (/** @type {{ doc: string, file: string }} */ stale) => rpc?.notify('doc.stale', stale);
   /** @type {(() => void)[]} */
   const stops = [];
   let shuttingDown = false;
@@ -65,7 +82,12 @@ export async function startStdioServer({ site, env = process.env, input = proces
       return { ok: true };
     }
     if (!registry.has(method)) throw new RpcError(METHOD_NOT_FOUND, `no method ${method}`, { code: 'not_found' });
-    return call(method, params);
+    try {
+      return await call(method, params);
+    } finally {
+      // Opening and closing docs changes the list without a doc.changed; written before the response.
+      await openDocs.update(session.list());
+    }
   };
 
   rpc = serveLines({ input, output, handle, log });
@@ -78,7 +100,13 @@ export async function startStdioServer({ site, env = process.env, input = proces
           if (shuttingDown) return;
           for (const file of files) {
             const m = /^(objects|scenes)\/(.+)\.mjs$/.exec(file);
-            if (m) await session.reloadIfClean(`${m[1] === 'objects' ? 'object' : 'scene'}:${m[2]}`).catch(() => false);
+            if (!m) continue;
+            const ref = `${m[1] === 'objects' ? 'object' : 'scene'}:${m[2]}`;
+            if (await session.reloadIfClean(ref).catch(() => false)) continue;
+            const entry = session.entries.get(ref);
+            if (!entry || !session.status(entry).dirty) continue;
+            const disk = await readSource(site, entry.kind, entry.name).catch(() => null);
+            if (disk && session.isStale(entry, disk)) rpc.notify('doc.stale', { doc: ref, file });
           }
           rpc.notify('files.changed', { files });
         },
@@ -106,5 +134,6 @@ export async function startStdioServer({ site, env = process.env, input = proces
 
   await rpc.done;
   for (const stop of stops) stop();
+  await openDocs.remove().catch(() => {});
   return 0;
 }

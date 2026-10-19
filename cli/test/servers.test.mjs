@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 
 import { createState } from '../lib/state.mjs';
-import { decodePng, makeSite, needsSite, readDoc, startServer, tempDir } from './helpers.mjs';
+import { decodePng, makeDocument, makeSite, needsSite, readDoc, runCli, startServer, tempDir } from './helpers.mjs';
 
 describe('serve --stdio', needsSite, () => {
   /** @type {Awaited<ReturnType<typeof makeSite>>} */
@@ -70,7 +70,7 @@ describe('serve --stdio', needsSite, () => {
     const status = await server.request('doc.status', { doc: 'scene:footer-grass' });
     assert.deepEqual(
       { ...status.result, undo: status.result.undo.length },
-      { doc: 'scene:footer-grass', dirty: true, canUndo: true, canRedo: false, file: 'scenes/footer-grass.mjs', exists: true, stale: false, undo: 1, redo: [] },
+      { doc: 'scene:footer-grass', dirty: true, canUndo: true, canRedo: false, file: 'scenes/footer-grass.mjs', exists: true, stale: false, undo: 1, redo: [], edits: ['pine placed at column 0, row 0, level 0'], unsavedInApp: false },
     );
 
     since = server.notifications.length;
@@ -271,6 +271,62 @@ describe('serve --mcp --direct', needsSite, () => {
     } finally {
       server.child.kill();
       await site.cleanup();
+    }
+  });
+});
+
+describe('servers and disk (docs/intents/2026-10-mcp-gaps)', () => {
+  test('R5, R7: the stdio server sends doc.stale for a dirty doc whose file changed, and keeps open/<pid>.json', async () => {
+    const doc = await makeDocument();
+    const state = await tempDir('pixellab-state-');
+    const server = startServer(['--stdio', '--document', doc.root], { env: { ...doc.env, PIXELLAB_STATE: state } });
+    try {
+      const info = (await server.request('session.info')).result;
+      const openFile = join(state, 'open', `${info.pid}.json`);
+      await server.request('scene.place', { name: 'sample', object: 'pebble', at: [3, 3, 0] });
+      const listed = JSON.parse(await readFile(openFile, 'utf8'));
+      assert.deepEqual([listed.pid, listed.document, listed.docs], [info.pid, doc.root, [{ doc: 'scene:sample', dirty: true }]]);
+      const since = server.notifications.length;
+      const file = join(doc.root, 'scenes/sample.mjs');
+      await writeFile(file, (await readFile(file, 'utf8')).replace('tile: [0, 0, 1]', 'tile: [0, 0, 2]'));
+      const stale = await server.waitFor((m) => m.method === 'doc.stale', { since });
+      assert.deepEqual(stale.params, { doc: 'scene:sample', file: 'scenes/sample.mjs' });
+      const merged = await server.request('doc.merge', { doc: 'scene:sample' });
+      assert.deepEqual([merged.result.merged, merged.result.dirty], [true, true]);
+      await server.request('doc.close', { doc: 'scene:sample', force: true });
+      assert.deepEqual(JSON.parse(await readFile(openFile, 'utf8')).docs, [], 'closing updates the list');
+      await server.request('shutdown');
+      assert.equal(await server.exited, 0);
+      await assert.rejects(readFile(openFile, 'utf8'), { code: 'ENOENT' }, 'removed when the server stops');
+    } finally {
+      server.child.kill();
+      await doc.cleanup();
+    }
+  });
+
+  test('R1, R3: an MCP session settles its applied proposal before the next call; doc_reload and doc_revert annotations', async () => {
+    const doc = await makeDocument();
+    const state = await tempDir('pixellab-state-');
+    const env = { ...doc.env, PIXELLAB_STATE: state };
+    const server = startServer(['--mcp', '--document', doc.root], { env });
+    const call = async (/** @type {string} */ name, /** @type {any} */ args) => (await server.request('tools/call', { name, arguments: args })).result.structuredContent;
+    try {
+      await server.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } });
+      const tools = (await server.request('tools/list')).result.tools;
+      const tool = (/** @type {string} */ n) => tools.find((/** @type {any} */ t) => t.name === n);
+      assert.equal(tool('doc_revert').annotations.destructiveHint, true);
+      assert.deepEqual([tool('doc_reload').annotations.destructiveHint, tool('doc_reload').annotations.readOnlyHint], [false, false]);
+      assert.ok(tool('doc_merge'));
+      await call('scene_place', { name: 'sample', object: 'pebble', at: [3, 3, 0] });
+      const saved = await call('doc_save', { doc: 'scene:sample' });
+      const applied = await runCli(['proposal', 'apply', saved.proposal, '--document', doc.root], { env });
+      assert.equal(applied.code, 0, applied.stderr);
+      const status = await call('doc_status', { doc: 'scene:sample' });
+      assert.deepEqual([status.dirty, status.stale, status.synced.action, status.unsavedInApp], [false, false, 'clean', false]);
+      assert.equal((await call('doc_reload', { doc: 'scene:sample' })).reloaded, false);
+    } finally {
+      server.child.kill();
+      await doc.cleanup();
     }
   });
 });

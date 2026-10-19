@@ -63,11 +63,23 @@ agent ── tools/call doc_save ────▶ validate, then write proposals/
 Pixel Lab's serve --stdio watches the state dir ─▶ proposals.changed, activity.appended
   Agent window: the list, a diff (proposal.show), a ghost on the stage (proposal.render)
   Approve → proposal.apply: the file must still hash to baseHash (else it asks),
-            validate, write
+            validate, write; an open copy with unsaved edits gets it merged in
   Reject  → proposal.reject: delete the proposal
+
+agent's next tools/call ─▶ session.sync(): its proposal is gone, so the doc is
+                           settled against the file (clean, reloaded or rebased)
 ```
 
 Agents can't approve, reject, publish or save a copy: those commands are left out of the MCP tools (`LEFT_OUT` in `cli/lib/server-mcp.mjs`). `serve --mcp --direct` lets an agent write the document directly; it's off by default.
+
+## Keeping working copies in step with disk
+
+Two processes hold working copies of the same files: the app's `serve --stdio` and each agent's `serve --mcp`. The design is in [`2026-10-mcp-gaps/spec.md`](intents/2026-10-mcp-gaps/spec.md):
+
+- **Edits since disk.** Every undo step has a sequence number, and each open doc remembers the number when it last matched its file (`baseSeq` in `session.mjs`). A proposal lists only the steps after it, so a second proposal doesn't repeat the first one's edits.
+- **The MCP session settles.** The MCP server has no file watcher; before each `tools/call` it runs `session.sync()`: a doc whose proposal is gone is marked clean, reloaded or rebased onto the file, and a clean doc whose file changed reloads. `doc.reload` does the same on request, refusing when it would drop unsaved edits.
+- **The app's server watches.** A clean open doc reloads when its file changes; a dirty one gets a `doc.stale` notification, and the app shows Merge, Reload and Keep Mine. Merge is `doc.merge`: a three-way line merge (`cli/lib/merge.mjs`) of the file as the doc was opened, the file now and the working copy, refused when both changed the same lines. `proposal.apply` merges into a dirty open copy the same way.
+- **What the app has open.** The app's server keeps `open/<pid>.json` in the state dir (`cli/lib/open-docs.mjs`); an MCP session's `doc.status` lists the docs there with unsaved edits as `unsavedInApp`.
 
 The **state dir** is `$PIXELLAB_STATE`, else `~/Library/Application Support/Pixel Lab/` (`cli/lib/state.mjs`). Tests and the script hook always point it at a temp folder.
 

@@ -153,18 +153,19 @@ describe('registry', () => {
       'palette.get', 'proposal.list', 'proposal.render', 'proposal.show', 'scene.items', 'scene.list', 'scene.render', 'scene.show',
     ];
     const mutating = [
-      'doc.redo', 'doc.revert', 'doc.save', 'doc.undo', 'document.copy', 'document.new',
+      'doc.merge', 'doc.redo', 'doc.reload', 'doc.revert', 'doc.save', 'doc.undo', 'document.copy', 'document.new',
       'object.animate', 'object.erase', 'object.fill', 'object.frame.add', 'object.frame.delete', 'object.frame.duplicate', 'object.frame.move',
-      'object.layer.add', 'object.layer.delete', 'object.layer.duplicate', 'object.layer.move', 'object.new', 'object.paint', 'object.resize', 'object.still',
+      'object.layer.add', 'object.layer.delete', 'object.layer.duplicate', 'object.layer.move', 'object.map.set', 'object.new', 'object.paint', 'object.resize', 'object.still',
       'proposal.apply', 'proposal.reject',
-      'scene.duplicate', 'scene.lower', 'scene.move', 'scene.new', 'scene.place', 'scene.raise', 'scene.remove', 'scene.set', 'scene.snap',
+      'scene.duplicate', 'scene.group.set', 'scene.key.delete', 'scene.key.move', 'scene.key.set', 'scene.lower', 'scene.motion.path', 'scene.motion.set', 'scene.move',
+      'scene.new', 'scene.place', 'scene.raise', 'scene.remove', 'scene.set', 'scene.snap', 'scene.track.add', 'scene.track.remove',
     ];
     assert.deepEqual(names, [...readOnly, ...mutating, 'art.build'].sort());
     for (const name of readOnly) assert.equal(registry.get(name)?.mutates, false, name);
     for (const name of mutating) assert.equal(registry.get(name)?.mutates, true, name);
     assert.deepEqual(
       names.filter((n) => registry.get(n)?.session),
-      ['doc.close', 'doc.open', 'doc.redo', 'doc.revert', 'doc.save', 'doc.status', 'doc.undo'],
+      ['doc.close', 'doc.merge', 'doc.open', 'doc.redo', 'doc.reload', 'doc.revert', 'doc.save', 'doc.status', 'doc.undo'],
     );
     assert.deepEqual(names.filter((n) => registry.get(n)?.writes), ['art.build', 'document.copy', 'document.new', 'proposal.apply', 'proposal.reject']);
     assert.deepEqual([...registry.groups().keys()], ['activity', 'art', 'check', 'doc', 'document', 'object', 'palette', 'proposal', 'scene']);

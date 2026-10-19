@@ -390,3 +390,194 @@ export function findItem(site, doc, ref) {
   if (!found) throw new SceneOpError(`no item with id ${id}; give a path like 12 or 5.2, or an id`, 'not_found');
   return found;
 }
+
+// Groups (docs/intents/2026-10-mcp-gaps/spec.md, D7). The lab never edited
+// groups; these follow the site's conventions for them: a group's data-x and
+// data-y are its first item's foot, data-col and data-row its tile.
+
+/** A group attribute's name: class or data-* (engine.mjs DATA_ATTR). */
+export const GROUP_ATTR = /^(class|data-[a-z][a-z0-9-]*)$/;
+
+/**
+ * The path of a group: `ref` names the group itself (its path), or an item
+ * inside it (a path or an id), whose innermost group it is.
+ * @param {any} site
+ * @param {any} doc
+ * @param {string} ref
+ * @returns {number[]}
+ */
+export function groupPathOf(site, doc, ref) {
+  /** @type {number[]} */
+  let path;
+  if (/^\d+(\.\d+)*$/.test(ref)) {
+    path = ref.split('.').map(Number);
+    const at = itemAt(doc, path);
+    if (!at) throw new SceneOpError(`no item or group at ${show(path)}`, 'not_found');
+    if (isGroup(at)) return path;
+  } else path = findItem(site, doc, ref);
+  if (path.length < 2) throw new SceneOpError(`${ref} is at the top level, not inside a group`, 'not_in_group');
+  return path.slice(0, -1);
+}
+
+/**
+ * An item's foot in scene pixels, as the site's entrance groups record it:
+ * an item on a tile stands on its tile's top-face center (its placement
+ * point); a sprite placed by pixel on the center of its bottom row.
+ * @param {any} site
+ * @param {any} sources  the engine's, to size the item's object
+ * @param {any} item
+ * @param {number[]} origin
+ * @returns {[number, number]}
+ */
+export function footOf(site, sources, item, origin) {
+  const [x, y] = placementPoint(site.iso, item, origin);
+  if (item.at?.tile) return [x, y];
+  let r;
+  try {
+    r = site.engine.resolve(sources, item.object);
+  } catch {
+    return [x, y];
+  }
+  if (r.block || !r.anchor) return [x, y];
+  return [Math.round(x - r.anchor[0] + r.width / 2), y - r.anchor[1] + r.height - 1];
+}
+
+/** Where an item stands, for followGroup: its point, foot and tile. */
+export function standing(/** @type {any} */ site, /** @type {any} */ sources, /** @type {any} */ doc, /** @type {any} */ item) {
+  const origin = doc.origin ?? [0, 0];
+  return { point: placementPoint(site.iso, item, origin), foot: footOf(site, sources, item, origin), tile: item.at?.tile ? [...item.at.tile] : null };
+}
+
+const int = (/** @type {unknown} */ v) => (typeof v === 'string' && /^-?\d+$/.test(v) ? Number(v) : null);
+
+/**
+ * Keeps the item's innermost group in step with a move: data-x and data-y
+ * that were its placement point (or its foot) take the new one, and
+ * data-col, data-row that were its tile take the new tile. Returns the
+ * group's path and attributes when anything changed, else null.
+ * @param {any} doc
+ * @param {number[]} path  the item's path
+ * @param {ReturnType<typeof standing>} before
+ * @param {ReturnType<typeof standing>} after
+ */
+export function followGroup(doc, path, before, after) {
+  if (path.length < 2) return null;
+  const group = itemAt(doc, path.slice(0, -1));
+  if (!isGroup(group) || !group.group) return null;
+  const attrs = group.group;
+  let changed = false;
+  const [gx, gy] = [int(attrs['data-x']), int(attrs['data-y'])];
+  if (gx !== null && gy !== null) {
+    const pick = gx === before.point[0] && gy === before.point[1] ? after.point : gx === before.foot[0] && gy === before.foot[1] ? after.foot : null;
+    if (pick && (pick[0] !== gx || pick[1] !== gy)) {
+      attrs['data-x'] = String(pick[0]);
+      attrs['data-y'] = String(pick[1]);
+      changed = true;
+    }
+  }
+  const [gc, gr] = [int(attrs['data-col']), int(attrs['data-row'])];
+  if (gc !== null && gr !== null && before.tile && after.tile && gc === before.tile[0] && gr === before.tile[1] && (gc !== after.tile[0] || gr !== after.tile[1])) {
+    attrs['data-col'] = String(after.tile[0]);
+    attrs['data-row'] = String(after.tile[1]);
+    changed = true;
+  }
+  return changed ? { path: show(path.slice(0, -1)), attrs: { ...attrs } } : null;
+}
+
+/**
+ * Sets (or with '' removes) a group's attributes. New ones go after the
+ * existing ones. Refuses names and values the engine would.
+ * @param {any} doc
+ * @param {number[]} path  the group's path
+ * @param {Record<string, string>} attrs
+ */
+export function setGroupAttrs(doc, path, attrs) {
+  const group = itemAt(doc, path);
+  if (!isGroup(group)) throw new SceneOpError(`${show(path)} is not a group`, 'not_a_group');
+  for (const [name, value] of Object.entries(attrs)) {
+    if (!GROUP_ATTR.test(name)) throw new SceneOpError(`A group attribute is class or data-*, like data-enter; not ${JSON.stringify(name)}`, 'usage');
+    if (typeof value !== 'string' || /["<>&]/.test(value)) throw new SceneOpError(`group attribute ${name} must be a string without " < > &`, 'usage');
+  }
+  group.group = { ...(group.group ?? {}) };
+  /** @type {string[]} */
+  const said = [];
+  for (const [name, value] of Object.entries(attrs)) {
+    if (value === '') {
+      if (name in group.group) said.push(`${name} removed`);
+      delete group.group[name];
+    } else {
+      group.group[name] = value;
+      said.push(`${name} ${value}`);
+    }
+  }
+  return { path, group, message: `Group ${show(path)}: ${said.join(', ') || 'unchanged'}` };
+}
+
+/** The first placed item in a list, depth first, with its path below `prefix`. */
+export function firstPlaced(/** @type {any[]} */ list, /** @type {number[]} */ prefix = []) {
+  for (let i = 0; i < (list ?? []).length; i++) {
+    const item = list[i];
+    if (isGroup(item)) {
+      const found = firstPlaced(item.items ?? [], [...prefix, i]);
+      if (found) return found;
+    } else if (item) return { item, path: [...prefix, i] };
+  }
+  return null;
+}
+
+/**
+ * Where a new group around an item on `tile` goes in a list: back to front,
+ * judging each group by its first item on a tile (insertIndex, group-aware).
+ * @param {any[]} items
+ * @param {number[]} tile
+ */
+export function insertIndexDeep(items, tile) {
+  const tileOf = (/** @type {any} */ item) => {
+    if (!isGroup(item)) return item?.at?.tile;
+    /** @type {any[]} */
+    const stack = [...(item.items ?? [])];
+    while (stack.length) {
+      const next = stack.shift();
+      if (isGroup(next)) stack.unshift(...(next.items ?? []));
+      else if (next?.at?.tile) return next.at.tile;
+    }
+    return undefined;
+  };
+  return insertIndex(items.map((item) => ({ at: { tile: tileOf(item) } })), tile);
+}
+
+/**
+ * Places an object inside a group: an existing one at `group`, and/or a new
+ * one with `newGroup` attributes, at `index` in the list it goes into (else
+ * back to front for an item on a tile, last for one placed by pixel).
+ * @param {any} doc
+ * @param {string} object
+ * @param {{ tile?: number[], px?: number[] }} at
+ * @param {{ group?: number[] | null, newGroup?: Record<string, string> | null, index?: number }} where
+ * @returns {{ path: number[], group: number[], item: any, message: string }}
+ */
+export function placeInGroup(doc, object, at, { group = null, newGroup = null, index }) {
+  const item = { object, at: at.tile ? { tile: [...at.tile] } : { px: [.../** @type {number[]} */ (at.px)] } };
+  /** @type {any[]} */
+  let list = doc.items;
+  if (group) {
+    const g = itemAt(doc, group);
+    if (!isGroup(g)) throw new SceneOpError(`${show(group)} is not a group`, 'not_a_group');
+    g.items ??= [];
+    list = g.items;
+  }
+  const clamp = (/** @type {number} */ i) => {
+    if (i < 0 || i > list.length) throw new SceneOpError(`index ${i} is outside 0 to ${list.length}`, 'out_of_range');
+    return i;
+  };
+  let i;
+  if (newGroup) {
+    i = index !== undefined ? clamp(index) : at.tile ? insertIndexDeep(list, at.tile) : list.length;
+    list.splice(i, 0, { group: { ...newGroup }, items: [item] });
+    const gpath = [...(group ?? []), i];
+    return { path: [...gpath, 0], group: gpath, item, message: `${object} placed at ${spoken(item)} in a new group` };
+  }
+  i = index !== undefined ? clamp(index) : at.tile ? insertIndex(list, at.tile) : list.length;
+  list.splice(i, 0, item);
+  return { path: [.../** @type {number[]} */ (group), i], group: /** @type {number[]} */ (group), item, message: `${object} placed at ${spoken(item)} in group ${show(/** @type {number[]} */ (group))}` };
+}

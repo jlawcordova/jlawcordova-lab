@@ -6,7 +6,10 @@
 // Agents propose, people approve (docs/intents/2026-10-mac-app/plan.md): edits stay in the server's
 // session, and doc_save writes a proposal to the state dir instead of the
 // site, unless the server was started with --direct. Every tools/call
-// appends { time, tool, args, ok, summary } to activity.jsonl there.
+// appends { time, tool, args, ok, summary } to activity.jsonl there. Before
+// each call the session settles its proposals the owner applied or rejected
+// and reloads clean docs whose files changed (session.sync, spec D2 of
+// docs/intents/2026-10-mcp-gaps/spec.md), so the next edit starts from disk.
 
 import { activitySummary } from './activity-summary.mjs';
 import { consoleToStderr, INVALID_PARAMS, METHOD_NOT_FOUND, RpcError, serveLines } from './jsonrpc.mjs';
@@ -29,13 +32,16 @@ export const LEFT_OUT = {
   'document.copy': 'saving a copy of the document is for a person',
 };
 
+/** Tools that drop work: their MCP annotations say so (doc_reload, which never does, isn't one). */
+const DESTRUCTIVE = new Set(['scene.remove', 'scene.track.remove', 'doc.revert']);
+
 /** scene.place → scene_place. */
 export const toolName = (/** @type {string} */ command) => command.replace(/\./g, '_');
 
 const INSTRUCTIONS = `Pixel Lab edits the pixel art in a .pixellab document: scenes (isometric, 32×16 tiles) and objects (sprites and blocks drawn from a fixed palette). The site that inlines the art publishes from the document.
-Look first: document_info, scene_list, scene_items, scene_render (returns the PNG), object_list, object_show, object_render, palette_get, check.
-Edit: scene_place, scene_move, scene_set, object_paint, object_fill and the rest. Edits stay in this server's memory with undo (doc_undo, doc_redo, doc_status).
-Save: doc_save validates the doc and, unless the server runs with --direct, writes a proposal for a person to approve in Pixel Lab instead of changing the document. Say what you changed when you're done.`;
+Look first: document_info, scene_list, scene_items, scene_render (returns the PNG), object_list, object_show, object_render, palette_get, check (problems, and warnings such as off-grid motion).
+Edit: scene_place (also into a group or a new group), scene_move, scene_set, scene_group_set, object_paint, object_fill, object_map_set (a whole map in one call) and the rest. Motion: scene_track_add, scene_track_remove, scene_key_set, scene_key_move, scene_key_delete, scene_motion_set, scene_motion_path (on-grid keys along a polyline). Edits stay in this server's memory with undo (doc_undo, doc_redo, doc_status).
+Save: doc_save validates the doc and, unless the server runs with --direct, writes a proposal for a person to approve in Pixel Lab instead of changing the document. Once the owner applies or rejects it, this server brings the doc back in line with the file on its own before your next call (doc_status shows how, as synced), so keep editing without a revert. doc_reload reloads a doc from disk when nothing unsaved would be lost. Before proposing, doc_status lists unsavedInApp: docs the owner has open in Pixel Lab with unsaved edits; say so if you propose against one. Say what you changed when you're done.`;
 
 /**
  * @param {{
@@ -62,7 +68,8 @@ export async function startMcpServer({ site, env = process.env, input = process.
     if (cmd.name === 'doc.save') {
       text += direct
         ? ' This server runs with --direct: doc_save writes the site.'
-        : ' In this server doc_save does not change the site: it writes a proposal (with the list of edits) for a person to approve.';
+        : ' In this server doc_save does not change the site: it writes a proposal (with the list of edits since the doc last matched its file) for a person to approve. ' +
+          'Once it is applied or rejected, the doc is brought in line with the file before your next call.';
     }
     if (cmd.mutates && !cmd.writes && cmd.name.split('.')[0] !== 'doc') text += ' The edit stays in memory until doc_save.';
     return text;
@@ -74,7 +81,7 @@ export async function startMcpServer({ site, env = process.env, input = process.
       title: cmd.summary,
       description: describe(cmd),
       inputSchema: { type: 'object', properties: cmd.params.properties ?? {}, ...(cmd.params.required?.length ? { required: cmd.params.required } : {}), additionalProperties: false },
-      annotations: { readOnlyHint: !cmd.mutates && !cmd.writes, destructiveHint: cmd.name === 'scene.remove' || cmd.name.endsWith('.delete'), openWorldHint: false },
+      annotations: { readOnlyHint: !cmd.mutates && !cmd.writes, destructiveHint: DESTRUCTIVE.has(cmd.name) || cmd.name.endsWith('.delete'), openWorldHint: false },
     }));
 
   const callTool = async (/** @type {any} */ params) => {
@@ -90,6 +97,7 @@ export async function startMcpServer({ site, env = process.env, input = process.
       throw new RpcError(INVALID_PARAMS, `unknown tool ${name}${why ? `: ${why}` : ''}`);
     }
     try {
+      await session.sync().catch((err) => log(`syncing the open docs failed: ${err.message}`));
       const result = await registry.call(session.context(), cmd.name, args);
       const summary = activitySummary(cmd, result, args);
       await append(true, summary);

@@ -22,8 +22,8 @@ approve
 expect proposals 1
 expect badge 1
 expect dirty false
-# after a1-4 placed one pine: 280 + the 2 proposed
-expect items 282
+# after a1-4 placed one pine: 281 + the 2 proposed
+expect items 283
 proposal select 1
 expect proposal object:house
 proposal open

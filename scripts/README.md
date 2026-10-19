@@ -54,9 +54,9 @@ Starts the app with `PIXELLAB_SNAPSHOT`, which opens the doc, waits until it's r
 scripts/acceptance.sh [out-dir]
 ```
 
-The acceptance pass, end to end on a temp copy of the site (the real checkout is only copied): scene edits, save and publish (six SVGs into the temp site), then object painting and save (`acceptance/scene-object.txt`); an agent over MCP saving two proposals through the bundled CLI (`acceptance/mcp-agent.mjs`); the Agent window ghosting, approving and rejecting them (`acceptance/agent.txt`); and Save As to a copy, reopening it and publishing from it into a folder (`acceptance/document.txt`). It needs `build/Pixel Lab.app`. Exits 0 only if every step passed, and leaves logs, snapshots and the temp site in `out-dir`.
+The acceptance pass, end to end on a temp copy of the site (the real checkout is only copied): scene edits, save and publish (six SVGs into the temp site), then object painting and save (`acceptance/scene-object.txt`); an agent over MCP saving two proposals through the bundled CLI (`acceptance/mcp-agent.mjs`); the Agent window ghosting, approving and rejecting them (`acceptance/agent.txt`); a doc with unsaved edits changed on disk by the CLI and merged, reloaded and kept, then another agent's proposal (`acceptance/stale-agent.mjs`) approved into an unsaved copy (`acceptance/stale.txt`); and Save As to a copy, reopening it and publishing from it into a folder (`acceptance/document.txt`). It needs `build/Pixel Lab.app`. Exits 0 only if every step passed, and leaves logs, snapshots and the temp site in `out-dir`.
 
-Its `expect` lines pin the site's art as it was on 2026-10-19 (15 scenes, 161 objects, the house at px -59,59). When the art changes, a failing `expect` means updating the scripts, not the app.
+Its `expect` lines pin the site's art as it was on 2026-10-20 (15 scenes, 164 objects, the house at px -59,59). When the art changes, a failing `expect` means updating the scripts, not the app.
 
 ## docs-cli.mjs
 

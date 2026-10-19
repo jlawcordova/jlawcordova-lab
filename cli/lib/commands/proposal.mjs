@@ -147,7 +147,8 @@ export default [
     summary: "Apply a proposal: check its base, validate it, write the doc's source and remove the proposal",
     description:
       'Refuses (code conflict) if the file changed since the proposal was made, and (code invalid) if the proposed doc has validation problems, unless --force. ' +
-      'An open, unchanged working copy of the doc reloads from the new file.',
+      'An open working copy of the doc with no unsaved edits reloads from the new file (reloaded: true); one with unsaved edits has the proposal merged into it, ' +
+      'keeping them (merged: true), or, when both changed the same lines, stays as it is and is reported stale (conflict: true). The file is written either way.',
     params: { type: 'object', properties: { id: ID, force: { type: 'boolean', default: false, description: 'apply despite a changed base or problems' } }, required: ['id'] },
     args: ['id'],
     mutates: true,
@@ -175,7 +176,21 @@ export default [
       }
       await writeAtomic(join(ctx.site.sourceDir, file), p.source);
       await state.removeProposal(id);
-      const reloaded = ctx.session ? await ctx.session.reloadIfClean(docRef(kind, name)) : false;
+      const ref = docRef(kind, name);
+      const session = ctx.session;
+      const reloaded = session ? await session.reloadIfClean(ref) : false;
+      let merged = false;
+      let conflict = false;
+      // A working copy with unsaved edits takes the proposal through a merge (spec D4), not a stale copy.
+      if (session && !reloaded && session.entries.has(ref) && session.status(session.entries.get(ref)).dirty) {
+        try {
+          merged = (await session.merge(ctx, ref)).merged;
+        } catch (err) {
+          if (!(err instanceof CommandError) || !['merge_conflict', 'merge_invalid'].includes(/** @type {any} */ (err).code)) throw err;
+          conflict = true;
+          session.onStale?.({ doc: ref, file });
+        }
+      }
       ctx.invalidate?.();
       return {
         id,
@@ -183,9 +198,11 @@ export default [
         file,
         wrote: true,
         reloaded,
+        ...(merged ? { merged } : {}),
+        ...(conflict ? { conflict } : {}),
         diff: unifiedDiff(disk.text, p.source, { from: `a/${file}`, to: `b/${file}` }),
         ...(problems.length ? { forcedProblems: problems } : {}),
-        summary: `Applied ${id}: wrote ${file}`,
+        summary: `Applied ${id}: wrote ${file}${merged ? '; merged into the open copy' : conflict ? "; the open copy's unsaved edits clash with it, so it was left as it is" : ''}`,
       };
     },
     format: (r) => r.summary,
