@@ -205,6 +205,26 @@ describe('render', needsSite, () => {
     assert.deepEqual(block.items[0].bounds, [0, 0, block.width, block.height]);
   });
 
+  test('object.render --layers: only those layers, as the lab stage shows them', async () => {
+    const png = async (/** @type {any} */ params) => decodePng(Buffer.from((await registry.call(ctx, 'object.render', { name: 'character', ...params })).png, 'base64'));
+    const all = await png({});
+    const both = await png({ layers: [0, 1] });
+    const bottom = await png({ layers: [0] });
+    const top = await png({ layers: [1] });
+    const none = await png({ layers: [] });
+    assert.equal(none.opaqueBox(), null);
+    assert.equal(both.width, all.width);
+    let differs = false;
+    for (let y = 0; y < all.height; y++) {
+      for (let x = 0; x < all.width; x++) {
+        assert.equal(both.alpha(x, y) > 0, all.alpha(x, y) > 0, `pixel ${x},${y}`);
+        assert.equal(all.alpha(x, y) > 0, bottom.alpha(x, y) > 0 || top.alpha(x, y) > 0, `pixel ${x},${y} is in a layer`);
+        if (bottom.alpha(x, y) !== all.alpha(x, y)) differs = true;
+      }
+    }
+    assert.ok(differs, 'the top layer adds pixels');
+  });
+
   test('the CLI writes the PNG with --out', async () => {
     const out = join(site.base, 'out.png');
     const r = await spawnCli(['scene', 'render', 'zz-pine', '--scale', '3', '--out', out, '--site', site.root], { env: site.env() });

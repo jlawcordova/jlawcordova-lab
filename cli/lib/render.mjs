@@ -211,19 +211,46 @@ export function renderSceneImage(site, sources, name, { scale = 1, time = 0, sho
 }
 
 /**
+ * Some of a sprite's layers at a frame (each clamped to its last frame), with
+ * its anchor at (0, 0), and their box. Port of the lab's ObjectMode.pixelsAt.
+ * @param {any} site
+ * @param {any} resolved
+ * @param {number[]} layers
+ * @param {number} frame
+ */
+function layerPixels(site, resolved, layers, frame) {
+  /** @type {Map<string, string>} */
+  const pixels = new Map();
+  const [ax, ay] = resolved.anchor;
+  resolved.layers.forEach((/** @type {any} */ layer, /** @type {number} */ i) => {
+    if (!layers.includes(i)) return;
+    site.edit.mapAt(layer, frame).forEach((/** @type {string} */ row, /** @type {number} */ y) => {
+      for (let x = 0; x < row.length; x++) {
+        const color = row[x] !== '.' && resolved.keys[row[x]];
+        if (color) pixels.set(`${x - ax},${y - ay}`, color);
+      }
+    });
+  });
+  return { pixels, box: site.engine.bounds(pixels.keys()) };
+}
+
+/**
  * Renders one object to a PNG with its anchor at (0, 0). A sprite's viewBox
  * is its whole map, so output pixel (x, y) at 1× is map column x, row y; a
  * block's is the box around its painted pixels.
+ * With `layers` (a sprite's layer indexes) only those layers show, each at
+ * `frame` clamped to its own last frame, as the lab's object stage draws them
+ * (ObjectMode.pixelsAt): hidden layers and the onion skin. A block ignores it.
  * @param {any} site
  * @param {any} sources
  * @param {string} name
- * @param {{ scale?: number, time?: number, frame?: number }} [options]
+ * @param {{ scale?: number, time?: number, frame?: number, layers?: number[] }} [options]
  */
-export function renderObjectImage(site, sources, name, { scale = 1, time, frame = 0 } = {}) {
+export function renderObjectImage(site, sources, name, { scale = 1, time, frame = 0, layers } = {}) {
   const { engine, preview } = site;
   try {
     const resolved = engine.resolve(sources, name);
-    const { pixels, box } = objectPixels(site, sources, name, { time, frame });
+    const { pixels, box } = layers && !resolved.block ? layerPixels(site, resolved, layers, frame) : objectPixels(site, sources, name, { time, frame });
     let viewBox;
     if (!resolved.block) viewBox = [-resolved.anchor[0], -resolved.anchor[1], resolved.width, resolved.height];
     else if (box) viewBox = [box.minX, box.minY, box.maxX - box.minX + 1, box.maxY - box.minY + 1];

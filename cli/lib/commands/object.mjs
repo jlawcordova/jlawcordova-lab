@@ -162,6 +162,11 @@ const render = {
       scale: { type: 'integer', minimum: 1, maximum: MAX_SCALE, default: 1, description: 'whole-pixel zoom of the PNG' },
       frame: { type: 'integer', minimum: 0, default: 0, description: 'the frame every loop shows (loops shorter than this show nothing)' },
       time: { type: 'integer', minimum: 0, description: 'ms into the loops; overrides frame' },
+      layers: {
+        type: 'array',
+        items: { type: 'integer', minimum: 0 },
+        description: "only these layers of a sprite, each at --frame or its last frame, as the lab's stage shows them (hidden layers, onion skin)",
+      },
     },
     required: ['name'],
   },
@@ -169,11 +174,11 @@ const render = {
   mutates: false,
   writesPng: true,
   examples: ['pixellab object render pine --scale 4 --out /tmp/pine.png'],
-  async run(ctx, { name: query, scale, frame, time }) {
+  async run(ctx, { name: query, scale, frame, time, layers }) {
     const { name } = await ctx.find(query, 'object');
     await ctx.doc('object', name);
     const { sources } = await ctx.sources();
-    return { object: name, ...renderObjectImage(ctx.site, sources, name, { scale, frame, time }) };
+    return { object: name, ...renderObjectImage(ctx.site, sources, name, { scale, frame, time, layers }) };
   },
   format: (r) => `${r.object}: ${r.width}×${r.height} PNG at ${r.scale}×, viewBox ${r.viewBox.join(', ')}`,
 };
