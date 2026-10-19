@@ -143,6 +143,8 @@ Every tool call is logged to `activity.jsonl` in the same folder and shown in th
 
 ## Development
 
+The developer docs are in [docs/README.md](docs/README.md): the architecture, contributing, testing, and a README for each of [`cli/`](cli/README.md), [`app/`](app/README.md) and [`scripts/`](scripts/README.md). They're also published as a site at [jlawcordova.com/jlawcordova-lab](https://jlawcordova.com/jlawcordova-lab/), built with `npm run docs:site` and deployed from `main` by [`.github/workflows/docs.yml`](.github/workflows/docs.yml).
+
 ```sh
 npm test                                   # CLI tests (node:test), must show "# fail 0"
 scripts/test-app.sh                        # app unit tests (Swift Testing, works with the Command Line Tools)
@@ -151,6 +153,7 @@ scripts/build-app.sh                       # build/Pixel Lab.app (icon, bundled 
 scripts/snapshot.sh /tmp/hero.png scene:hero-island dark   # read-only self-snapshot of the main window
 scripts/acceptance.sh                      # the end-to-end acceptance pass on a temp copy of the site
 npm run docs:cli                           # regenerate docs/cli.md from the command registry
+npm run docs:site                          # build the developer docs site into build/docs-site/
 ```
 
 **Script hook.** `PIXELLAB_SCRIPT=<file> PIXELLAB_SITE=<temp copy of the site> PIXELLAB_STATE=<temp dir> "build/Pixel Lab.app/Contents/MacOS/PixelLab"` drives the app's model headlessly, one action per line (`open scene:hero-island`, `library pine`, `place 4 -1 1`, `move 1 0`, `save`, `build`, `mode object`, `px 23 20`, `agent open`, `approve`, `snapshot <png>`, `expect …`); it refuses the real checkout, logs each step and exits 0 only if every step passed. The action list is at the top of `app/Sources/PixelLab/Support/ScriptRunner.swift`; [CLAUDE.md](CLAUDE.md) says how to make the temp site.
@@ -166,4 +169,4 @@ npm run docs:cli                           # regenerate docs/cli.md from the com
 
 The **Release Pixel Lab** workflow checks that the tag matches `VERSION` and that the commit is on `main`, runs the CLI tests (against a fresh clone of the site) and the app's unit tests, builds the app on Apple silicon, packages it, installs it from the disk image and smoke-tests it (signature, the bundled MCP server's version, the app opening `scene:hero-island` through the script hook), then publishes the release with generated notes. If it fails, delete the tag (`git push origin :refs/tags/v<version>`), fix it, and tag again.
 
-Layout: `cli/` (Node ≥ 22, ESM, Node built-ins only), `app/` (SwiftPM, SwiftUI + AppKit, macOS 15+), `scripts/`, `docs/intents/` (each change's intent, spec and plan; `2026-10-mac-app/plan.md` is the architecture and design record), `docs/cli.md` (the command reference). No dependencies beyond Node and Swift.
+Layout: `cli/` (Node ≥ 22, ESM, Node built-ins only), `app/` (SwiftPM, SwiftUI + AppKit, macOS 15+), `scripts/`, `docs/intents/` (each change's intent, spec and plan; `2026-10-mac-app/plan.md` is the architecture and design record), `docs/cli.md` (the command reference), `docs/*.md` and each folder's `README.md` (the developer docs). No dependencies beyond Node and Swift.
