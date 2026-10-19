@@ -24,7 +24,7 @@ A small, self-contained fix can go straight to a PR into `main`.
 
 ## Rules
 
-- **The site checkout is the source of truth** for the art and the engine. Import the engine at runtime; never copy or port it. Never write to the real checkout from tests or scripts: use a temp copy. A change the engine or the art needs is a change in the site repo.
+- **The document is the source of truth, and the engine lives here** (`cli/lib/engine/`). A site installs this package to publish and test its art. Never write to the real site checkout, or the real document inside it, from tests or scripts: use a temp copy (`makeDocument()`, `makeSite()`). A change to the site's art is a change in the site repo.
 - **Every action is a command** in the registry, so the CLI, the app and agents can all take it. MCP edits become proposals the owner approves; `--direct` stays off by default.
 - **No new npm or Swift dependencies** without asking.
 - **The app builds with the Command Line Tools:** no `@State`; never `xcode-select -s`.

@@ -17,7 +17,7 @@ It builds with the Xcode Command Line Tools; full Xcode isn't needed. If a tool 
 | --- | --- |
 | `Sources/PixelLab/PixelLabApp.swift` | The `App`: the main window, the Agent window (a single `Window` scene), Settings, the menus (`PixelLabCommands`), and the `AppDelegate` (Save / Don't Save before quitting with unsaved changes, stopping the server). |
 | `Sources/PixelLab/Model/` | The state, all `@Observable` classes: `AppModel` (one per app, `AppModel.shared`: the connection, the scene and object lists, the open `DocumentModel`, zoom, grid, notices, save and build), `SceneEditor` (scene tools, selection, keys, drags, place), `ObjectEditor` (paint tools, layers, frames, strokes), `TimelineModel` (play, scrub, the frame cache), `AgentModel` (proposals, activity, the ghost, the Dock badge), `ThumbnailStore` (library thumbnails), plus value types: `HitTesting`, `ObjectPaint` (pixel math, strokes), `ProposalGhost`, `NewDocDraft`, `Settings`. |
-| `Sources/PixelLab/Server/` | Talking to `pixellab serve --stdio`: `ServerConnection` (an actor: spawns node, sends requests, matches responses, streams notifications as `ServerEvent`s, restarts a crashed server), `Protocol.swift` (`Codable` shapes of results and notifications), `JSONValue` (any JSON), `Locator` (finds node, the bundled CLI and the site). |
+| `Sources/PixelLab/Server/` | Talking to `pixellab serve --stdio`: `ServerConnection` (an actor: spawns node, sends requests, matches responses, streams notifications as `ServerEvent`s, restarts a crashed server), `Protocol.swift` (`Codable` shapes of results and notifications), `JSONValue` (any JSON), `Locator` (finds node and the bundled CLI, checks a document or a site checkout; `DocumentLocation` says which the server gets). |
 | `Sources/PixelLab/Views/` | The windows and their parts: `MainWindow` (setup or the document window, the toolbar), `SidebarView`, `ItemsTree`, `StageView` (with `StageGeometry`, `StageInput`, `StageOverlay`), `InspectorView`, `SelectionInspector`, `ObjectPanels`, `TimelineView`, `AgentWindow`, `BuildArtSheet`, `NewDocSheet`, `SetupView` (and `SettingsView`). |
 | `Sources/PixelLab/Theme/` | `Theme.swift`: the board 03 tokens (night and day), fonts (Sora and Silkscreen if bundled, else SF Pro and SF Mono), `SectionLabel`. |
 | `Sources/PixelLab/Support/` | `ScriptRunner` (the test hook), `Snapshotter` (self-snapshots), `PixelImage` (nearest-neighbor scaling), `WindowGuard` (Save / Don't Save on close). |
@@ -26,8 +26,8 @@ It builds with the Xcode Command Line Tools; full Xcode isn't needed. If a tool 
 
 ## How the app talks to the server
 
-1. `AppModel.bootstrap()` finds node (Settings, else `zsh -lc 'command -v node'`, else Homebrew's paths), the CLI (`Contents/Resources/cli` in the bundle, `PIXELLAB_CLI`, or a `cli/` above the executable for `swift run`) and the site (`PIXELLAB_SITE`, else Settings, else `~/Projects/jlawcordova.github.io`). Anything missing shows `SetupView` with what's wrong and how to fix it.
-2. It starts `ServerConnection` (`node <cli> serve --stdio --site <site>`, with node's folder first on `PATH` so `art.build` finds npm), asks for `session.info`, loads the palette, the scene and object lists and the Agent window's lists, and opens the last doc.
+1. `AppModel.bootstrap()` finds node (Settings, else `zsh -lc 'command -v node'`, else Homebrew's paths), the CLI (`Contents/Resources/cli` in the bundle, `PIXELLAB_CLI`, or a `cli/` above the executable for `swift run`) and the document (`PIXELLAB_DOC`, else `PIXELLAB_SITE`, else Settings, else the document in `~/Projects/jlawcordova.github.io`). Anything missing shows `SetupView` with what's wrong and how to fix it, with New… to make a document.
+2. It starts `ServerConnection` (`node <cli> serve --stdio --document <path>`, or `--site <checkout>`, with node's folder first on `PATH`), asks for `session.info`, loads the palette, the scene and object lists and the Agent window's lists, and opens the last doc.
 3. Commands are calls: `try await connection.call("scene.place", ["name": …, "object": …, "at": …])`, decoded into a `Codable` type from `Protocol.swift` or `JSONValue`. A failed command throws `RPCError`, whose `dataCode` is the server's stable `data.code` (`invalid`, `conflict`, `not_found`, …).
 4. Notifications drive the views: `AppModel.handle(_:)` reacts to `doc.changed` (re-render, re-check, dirty state), `files.changed` (reload lists, drop thumbnails, reload the open doc), `proposals.changed` and `activity.appended` (the Agent window).
 
@@ -49,12 +49,12 @@ The stage renders at scale 1 (`scene.render`, `object.render`) and zooms on scre
 4. Add script-hook actions or `expect`s to `Support/ScriptRunner.swift` if the feature needs them, and a unit test in `Tests/PixelLabTests/` for any pure logic (geometry, pixel math).
 5. Prove it: `swift build`, `scripts/test-app.sh`, `scripts/build-app.sh`, a script-hook run with `expect` lines, snapshots in dark and light, and `scripts/acceptance.sh`. The commands are in [Testing](../docs/testing.md).
 
-## Running it against a test site
+## Running it against a test document
 
-Never point a development build at your real site checkout while trying edits: save writes the site. Copy it (the [testing guide](../docs/testing.md#the-script-hook) has the recipe) and run:
+Never point a development build at your real document while trying edits: save writes it. Copy it (the [testing guide](../docs/testing.md#the-script-hook) has the recipe) and run:
 
 ```sh
-PIXELLAB_SITE=/tmp/site PIXELLAB_STATE=/tmp/state "build/Pixel Lab.app/Contents/MacOS/PixelLab"
+PIXELLAB_DOC=/tmp/copy.pixellab PIXELLAB_STATE=/tmp/state "build/Pixel Lab.app/Contents/MacOS/PixelLab"   # or PIXELLAB_SITE=/tmp/site
 ```
 
-`PIXELLAB_STATE` keeps proposals and the activity log away from the installed app's. Settings (⌘,) change the site and node paths and the appearance for normal use.
+`PIXELLAB_STATE` keeps proposals and the activity log away from the installed app's. Settings (⌘,) change the document and node paths and the appearance for normal use.

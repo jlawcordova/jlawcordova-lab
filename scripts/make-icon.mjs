@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Renders Pixel Lab's app icon with the site's engine: the house, at a whole
+// Renders Pixel Lab's app icon with the engine (cli/lib/engine/): the house, at a whole
 // pixel scale, on a 1024×1024 warm squircle with a faint iso grid. Node
-// built-ins only; PNG via the site's encodePng. Reads the site, never writes it.
+// built-ins only; PNG via the engine's encodePng. Reads the document, never writes it.
 //
-//   node scripts/make-icon.mjs [--site <path>] [--object house] [--out app/Sources/PixelLab/Resources/AppIcon.png]
+//   node scripts/make-icon.mjs [--document <path> | --site <path>] [--object house] [--out app/Sources/PixelLab/Resources/AppIcon.png]
 //
 // scripts/build-app.sh turns the PNG into AppIcon.icns with sips and iconutil.
 
@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createContext } from '../cli/lib/context.mjs';
-import { openSite } from '../cli/lib/site.mjs';
+import { openDocument } from '../cli/lib/document.mjs';
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -31,7 +31,7 @@ const GROUND_BOTTOM = [0x2d, 0x25, 0x1c];
 const GRID = [0xf1, 0xe8, 0xd8, 0.07];
 const RIM = [0xf1, 0xe8, 0xd8, 0.1];
 
-const site = await openSite({ site: flag('site') });
+const site = await openDocument({ doc: flag('document'), site: flag('site') });
 const { sources } = await createContext(site).sources();
 if (!sources.objects.has(objectName)) throw new Error(`no object ${objectName} in ${site.root}`);
 const pixels = site.engine.composite(site.engine.renderObject(sources, objectName), { frame: 0 });

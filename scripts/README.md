@@ -11,7 +11,7 @@ Everything that builds, installs, checks or documents Pixel Lab, run from the re
 | [`acceptance.sh`](#acceptancesh) | The end-to-end acceptance pass, on a temp copy of the site |
 | [`docs-cli.mjs`](#docs-climjs) | Regenerates `docs/cli.md` from the command registry |
 | [`docs-site/`](#docs-site) | Builds the developer docs site |
-| [`make-icon.mjs`](#make-iconmjs) | Renders the app icon with the site's engine |
+| [`make-icon.mjs`](#make-iconmjs) | Renders the app icon with the engine |
 
 ## build-app.sh
 
@@ -46,7 +46,7 @@ scripts/snapshot.sh <out.png> [doc] [dark|light] [zoom]
 scripts/snapshot.sh /tmp/hero.png scene:hero-island dark
 ```
 
-Starts the app with `PIXELLAB_SNAPSHOT`, which opens the doc, waits until it's rendered and checked and the visible thumbnails are in, draws the main window into a PNG and quits. It only opens and renders, so it's safe against the real checkout, and it needs no screen-recording permission. Uses `build/Pixel Lab.app` if it exists, else the debug build. `PIXELLAB_SITE` picks the site; `PIXELLAB_SNAPSHOT_SIZE` (default `1440x900`) the window size.
+Starts the app with `PIXELLAB_SNAPSHOT`, which opens the doc, waits until it's rendered and checked and the visible thumbnails are in, draws the main window into a PNG and quits. It only opens and renders, so it's safe against the real checkout, and it needs no screen-recording permission. Uses `build/Pixel Lab.app` if it exists, else the debug build. `PIXELLAB_DOC` (or `PIXELLAB_SITE`) picks the document; `PIXELLAB_SNAPSHOT_SIZE` (default `1440x900`) the window size. A path that isn't a document snapshots the setup screen.
 
 ## acceptance.sh
 
@@ -54,7 +54,7 @@ Starts the app with `PIXELLAB_SNAPSHOT`, which opens the doc, waits until it's r
 scripts/acceptance.sh [out-dir]
 ```
 
-The acceptance pass of the first build, end to end on a temp copy of the site (the real checkout is only copied): scene edits, save and build art, then object painting and save (`acceptance/scene-object.txt`); an agent over MCP saving two proposals through the bundled CLI (`acceptance/mcp-agent.mjs`); and the Agent window ghosting, approving and rejecting them (`acceptance/agent.txt`). It needs `build/Pixel Lab.app`. Exits 0 only if every step passed, and leaves logs, snapshots and the temp site in `out-dir`.
+The acceptance pass, end to end on a temp copy of the site (the real checkout is only copied): scene edits, save and publish (six SVGs into the temp site), then object painting and save (`acceptance/scene-object.txt`); an agent over MCP saving two proposals through the bundled CLI (`acceptance/mcp-agent.mjs`); the Agent window ghosting, approving and rejecting them (`acceptance/agent.txt`); and Save As to a copy, reopening it and publishing from it into a folder (`acceptance/document.txt`). It needs `build/Pixel Lab.app`. Exits 0 only if every step passed, and leaves logs, snapshots and the temp site in `out-dir`.
 
 Its `expect` lines pin the site's art as it was on 2026-10-19 (15 scenes, 161 objects, the house at px -59,59). When the art changes, a failing `expect` means updating the scripts, not the app.
 
@@ -80,7 +80,7 @@ Builds the developer docs site from the README files and the docs under `docs/` 
 ## make-icon.mjs
 
 ```sh
-node scripts/make-icon.mjs [--site <path>] [--object house] [--out app/Sources/PixelLab/Resources/AppIcon.png]
+node scripts/make-icon.mjs [--document <path> | --site <path>] [--object house] [--out app/Sources/PixelLab/Resources/AppIcon.png]
 ```
 
-Renders the app icon with the site's engine: an object (the house) at a whole pixel scale on a 1024×1024 warm squircle with a faint iso grid. It reads the site and never writes to it. `build-app.sh` turns the PNG into the `.icns`.
+Renders the app icon with the engine: an object (the house) at a whole pixel scale on a 1024×1024 warm squircle with a faint iso grid. It reads the document and never writes to it. `build-app.sh` turns the PNG into the `.icns`.

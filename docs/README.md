@@ -6,7 +6,7 @@ These docs are Markdown in the repo, next to what they describe, and are also pu
 
 ## Start here
 
-1. [Architecture](architecture.md): the three doors onto one command registry, the site as the source of truth, and how an edit and an agent's proposal travel.
+1. [Architecture](architecture.md): the three doors onto one command registry, the document as the source of truth and the engine's home, and how an edit and an agent's proposal travel.
 2. [Contributing](contributing.md): intent → spec → plan, branches, the rules, and what a PR pastes.
 3. [Testing](testing.md): the CLI suites, the app's unit tests, the script hook, snapshots and the acceptance pass.
 

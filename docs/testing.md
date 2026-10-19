@@ -19,7 +19,7 @@ node --test cli/test/scene-ops.test.mjs         # one file
 node --test --test-name-pattern "R3" cli/test/  # by name
 ```
 
-The suites use `node:test` and `node:assert/strict`, nothing else. They **never touch the real site checkout**: `makeSite()` in `cli/test/helpers.mjs` copies the parts the CLI needs (the engine, the preview script, `variables.css`, the art sources, `package.json`) into a temp folder, with an empty `HOME` next to it so no real config file is read, and every test points `--site` at the copy. The copy is made from `~/Projects/jlawcordova.github.io`, or from `PIXELLAB_TEST_SITE` (CI clones the site and sets it). Without a site to copy, the suites that need one are skipped with a message, not failed.
+The suites use `node:test` and `node:assert/strict`, nothing else. The core suites run on the **sample document** in `cli/test/fixtures/sample.pixellab/` (a palette, two objects, two scenes), copied into a temp folder by `makeDocument()` in `cli/test/helpers.mjs`, so they need no site checkout. The suites that pin the owner's art **never touch the real site checkout**: `makeSite()` copies its art (the `*.pixellab`, or the older `source/` folder, laid out as a legacy checkout), `variables.css` and `package.json` into a temp folder, with an empty `HOME` next to it so no real config file is read, and every such test points `--site` at the copy. The copy is made from `~/Projects/jlawcordova.github.io`, or from `PIXELLAB_TEST_SITE` (CI clones the site and sets it). Without a site to copy, those suites are skipped with a message, not failed: `PIXELLAB_TEST_SITE=/nonexistent npm test` shows what runs on the fixture alone.
 
 Other helpers: `runCli()` and `spawnCli()` run the real binary, `startServer()` starts `serve --stdio` or `--mcp` and speaks JSON-RPC to it, `decodePng()` reads a render's pixels, `readDoc()` imports a written source.
 
@@ -27,11 +27,15 @@ Other helpers: `runCli()` and `spawnCli()` run the real binary, `startServer()` 
 | --- | --- |
 | `params.test.mjs` | `checkParams`, the command-line parser, registry definitions |
 | `help.test.mjs` | help text, exit codes, `docs/cli.md` being current |
-| `site.test.mjs` | finding the site, loading sources |
+| `document.test.mjs` | finding the document (flags, env, config, a site checkout), the manifest, `document new` and `copy`, loading sources |
+| `engine.test.mjs` | the engine itself (ported from the site): parsing, validation messages, rendering, the serializer, edits, previews |
+| `compile.test.mjs` | the optimizer and lossless check (ported), `compileScene` and `compileAll`, the site's art compiling byte-identical |
+| `art-commands.test.mjs` | `art preview` and `art sizes` |
+| `package.test.mjs` | the package's exports, files and version |
 | `commands.test.mjs` | the read commands |
 | `render.test.mjs` | PNGs, item bounds, poses, the night theme |
 | `scene-ops.test.mjs` | the scene edits ported from the lab |
-| `edit-commands.test.mjs` | one-shot edits, dry runs, conflicts, sessions and undo, `art.build` |
+| `edit-commands.test.mjs` | one-shot edits, dry runs, conflicts, sessions and undo, `art build` (publishing) |
 | `servers.test.mjs` | `serve --stdio`, `serve --mcp` (proposals, activity), `--direct` |
 | `activity-and-proposals.test.mjs` | activity summaries, proposal order |
 | `docs-site.test.mjs` | the docs site: Markdown rendering, anchors, links, the full build |
@@ -51,19 +55,18 @@ Swift Testing (`import Testing`, `@Test`, `#expect`) in `app/Tests/PixelLabTests
 The hook drives the real app's model from a script, with no UI automation and no screen-recording permission:
 
 ```sh
-PIXELLAB_SCRIPT=script.txt PIXELLAB_SITE=/tmp/site PIXELLAB_STATE=/tmp/state \
+PIXELLAB_SCRIPT=script.txt PIXELLAB_DOC=/tmp/copy.pixellab PIXELLAB_STATE=/tmp/state \
   "build/Pixel Lab.app/Contents/MacOS/PixelLab"
 ```
 
-It refuses to run without `PIXELLAB_SITE` or against the real checkout (scripts save and build), logs each step to stderr as `script: …`, and exits 0 only if every step and `expect` passed (1 if any failed, 2 if it couldn't start).
+It refuses to run without `PIXELLAB_DOC` (or `PIXELLAB_SITE`, a temp copy of the site), or against the real checkout or anything inside it (scripts save and publish), logs each step to stderr as `script: …`, and exits 0 only if every step and `expect` passed (1 if any failed, 2 if it couldn't start).
 
-**Make the temp site** by copying the site's `src/`, `scripts/`, `package.json` and `package-lock.json`, and symlinking its `node_modules`, so `build` can run `npm run art`:
+**Make the temp copy.** A document is a folder, so copy it (`pixellab document copy --to /tmp/copy.pixellab` does it from the CLI, and gives a legacy `source/` folder a manifest). The acceptance pass copies the whole site instead, so `publish` lands where the site's SVGs are:
 
 ```sh
 site=$(mktemp -d)/site && mkdir -p "$site"
 real=~/Projects/jlawcordova.github.io
 cp -R "$real/src" "$real/scripts" "$real/package.json" "$real/package-lock.json" "$site/"
-ln -s "$real/node_modules" "$site/node_modules"
 ```
 
 **Write a script,** one action per line, `#` for comments:
@@ -99,7 +102,7 @@ Snapshots draw the window with `cacheDisplay`, so pixel art stays nearest-neighb
 scripts/build-app.sh && scripts/acceptance.sh
 ```
 
-End to end on a temp copy of the site: scene edits, save and build art; object painting and save; an agent saving two proposals over MCP through the bundled CLI; the Agent window ghosting, approving and rejecting them. Run it whenever `app/`, `cli/` or `scripts/acceptance/` changed. Its `expect` lines pin the art as it was on 2026-10-19: after the site's art changes, update the scripts in `scripts/acceptance/`.
+End to end on a temp copy of the site: scene edits, save and publish (six SVGs into the temp site); object painting and save; an agent saving two proposals over MCP through the bundled CLI; the Agent window ghosting, approving and rejecting them; Save As to a copy, reopening it and publishing from it into a folder. Run it whenever `app/`, `cli/` or `scripts/acceptance/` changed. Its `expect` lines pin the art as it was on 2026-10-19: after the site's art changes, update the scripts in `scripts/acceptance/`.
 
 ## CI
 
