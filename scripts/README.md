@@ -19,7 +19,7 @@ Everything that builds, installs, checks or documents Pixel Lab, run from the re
 scripts/build-app.sh
 ```
 
-A release build of `app/` (`swift build -c release`), then the bundle from scratch: `Info.plist` (bundle id `com.jlawcordova.pixellab`, the version from `VERSION` in `cli/lib/server-stdio.mjs`), `AppIcon.icns` made from `AppIcon.png` with `sips` and `iconutil`, the CLI copied into `Contents/Resources/cli` (without its tests), SwiftPM's resource bundle, and an ad-hoc signature (`codesign -s -`). Works with the Command Line Tools.
+A release build of `app/` (`swift build -c release`), then the bundle from scratch: `Info.plist` (bundle id `com.jlawcordova.pixellab`, the version: `PIXELLAB_VERSION` (the release workflow passes the tag's), else `git describe --tags` (`0.4.0-3-gabc1234`, with `0.4.0` in `Info.plist`), else `package.json`'s `0.0.0-dev`; it's stamped into the bundle's `package.json` too, never the repo's), `AppIcon.icns` made from `AppIcon.png` with `sips` and `iconutil`, the CLI copied into `Contents/Resources/cli` (without its tests), SwiftPM's resource bundle, and an ad-hoc signature (`codesign -s -`). Works with the Command Line Tools.
 
 ## install.sh
 

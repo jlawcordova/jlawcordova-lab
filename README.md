@@ -176,15 +176,15 @@ npm run docs:site                          # build the developer docs site into 
 
 **Script hook.** `PIXELLAB_SCRIPT=<file> PIXELLAB_DOC=<temp copy of a document> PIXELLAB_STATE=<temp dir> "build/Pixel Lab.app/Contents/MacOS/PixelLab"` (or `PIXELLAB_SITE=<temp copy of the site>`) drives the app's model headlessly, one action per line (`open scene:hero-island`, `library pine`, `place 4 -1 1`, `move 1 0`, `save`, `publish`, `saveas <path>`, `mode object`, `px 23 20`, `agent open`, `approve`, `snapshot <png>`, `expect …`); it refuses the real checkout and anything inside it, logs each step and exits 0 only if every step passed. The action list is at the top of `app/Sources/PixelLab/Support/ScriptRunner.swift`; [CLAUDE.md](CLAUDE.md) says how to make the temp copy.
 
-**Releases.** Tags `v<version>` publish a GitHub Release ([`.github/workflows/release.yml`](.github/workflows/release.yml)). The version is `VERSION` in `cli/lib/server-stdio.mjs`, which is also the app's `CFBundleShortVersionString` and the MCP server's version.
+**Releases.** Tags `v<major>.<minor>.<patch>` publish a GitHub Release ([`.github/workflows/release.yml`](.github/workflows/release.yml)). **The tag is the version:** nothing in the repo is bumped. The workflow passes it to `scripts/build-app.sh` (`PIXELLAB_VERSION`), which stamps it into the app's `Info.plist` and the bundled CLI's `package.json`, so the MCP server reports it too. The repo's `package.json` says `0.0.0-dev`; a local build or `scripts/install.sh` takes its version from `git describe` (`0.4.0-3-gabc1234` after three commits past `v0.4.0`).
 
-1. Bump `VERSION`, run `scripts/build-app.sh` and `scripts/acceptance.sh` (CI doesn't run the acceptance pass: it pins today's art), and merge to `main`.
-2. Tag the merge on `main` and push the tag:
+1. With what you want released merged to `main`, run `scripts/build-app.sh` and `scripts/acceptance.sh` on it (CI doesn't run the acceptance pass: it pins today's art).
+2. Tag `main` and push the tag:
 
    ```sh
    git fetch origin && git tag -a v<version> -m "Pixel Lab <version>" origin/main && git push origin v<version>
    ```
 
-The **Release Pixel Lab** workflow checks that the tag matches `VERSION` and that the commit is on `main`, runs the CLI tests (against a fresh clone of the site) and the app's unit tests, builds the app on Apple silicon, packages it, installs it from the disk image and smoke-tests it (signature, the bundled MCP server's version, the app opening `scene:hero-island` through the script hook), then publishes the release with generated notes. If it fails, delete the tag (`git push origin :refs/tags/v<version>`), fix it, and tag again.
+The **Release Pixel Lab** workflow checks that the tag looks like `v0.4.0` and that the commit is on `main`, runs the CLI tests (against a fresh clone of the site) and the app's unit tests, builds the app on Apple silicon with the tag's version, packages it, installs it from the disk image and smoke-tests it (signature, the bundled MCP server reporting the tag's version, the app opening `scene:hero-island` through the script hook), then publishes the release with generated notes. If it fails, delete the tag (`git push origin :refs/tags/v<version>`), fix it, and tag again.
 
 Layout: `cli/` (Node ≥ 22, ESM, Node built-ins only), `app/` (SwiftPM, SwiftUI + AppKit, macOS 15+), `scripts/`, `docs/intents/` (each change's intent, spec and plan; `2026-10-mac-app/plan.md` is the architecture and design record), `docs/cli.md` (the command reference), `docs/*.md` and each folder's `README.md` (the developer docs). No dependencies beyond Node and Swift.

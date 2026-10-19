@@ -1,6 +1,7 @@
 // The package a site installs from git (docs/intents/2026-10-pixellab-document/spec.md, R15):
 // its exports resolve to the engine modules, its files cover what the CLI needs,
-// and its version is the CLI's.
+// and its version is the CLI's: 0.0.0-dev in the repo, since a release takes
+// its version from its tag (scripts/build-app.sh stamps it into the bundle).
 
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
@@ -16,6 +17,7 @@ describe('package.json (R15)', () => {
   test('R15: it is named pixellab and its version is the CLI\'s', () => {
     assert.equal(pkg.name, 'pixellab');
     assert.equal(pkg.version, VERSION);
+    assert.equal(pkg.version, '0.0.0-dev', 'releases take their version from the tag; the repo is never bumped');
     assert.equal(pkg.bin.pixellab, 'cli/bin/pixellab.mjs');
   });
 

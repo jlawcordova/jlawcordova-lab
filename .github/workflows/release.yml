@@ -28,15 +28,14 @@ jobs:
         with:
           node-version: 22
 
-      # Guards: nothing below runs unless the tag matches the app's version
+      # The version is the tag's: nothing in the repo is bumped for a release.
+      # Guards: nothing below runs unless the tag is v<major>.<minor>.<patch>
       # and the tagged commit is on main.
-      - name: Check the tag matches the version
+      - name: Take the version from the tag
         run: |
           version="${GITHUB_REF_NAME#v}"
-          # The same source scripts/build-app.sh reads for Info.plist.
-          app_version="$(grep -o "VERSION = '[^']*'" cli/lib/server-stdio.mjs | cut -d"'" -f2)"
-          if [ "$version" != "$app_version" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME doesn't match VERSION $app_version in cli/lib/server-stdio.mjs."
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME isn't v<major>.<minor>.<patch>, like v0.4.0."
             exit 1
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
@@ -64,11 +63,14 @@ jobs:
         run: scripts/test-app.sh
 
       - name: Build the app
+        env:
+          PIXELLAB_VERSION: ${{ env.VERSION }}
         run: |
           scripts/build-app.sh
           app="build/Pixel Lab.app"
           [ "$(lipo -archs "$app/Contents/MacOS/PixelLab")" = arm64 ] || { echo "::error::PixelLab isn't an arm64 binary."; exit 1; }
           [ "$(plutil -extract CFBundleShortVersionString raw "$app/Contents/Info.plist")" = "$VERSION" ] || { echo "::error::Info.plist doesn't say $VERSION."; exit 1; }
+          [ "$(node -p "require('./build/Pixel Lab.app/Contents/Resources/package.json').version")" = "$VERSION" ] || { echo "::error::The bundled CLI doesn't say $VERSION."; exit 1; }
       # A disk image to drag the app out of, and a zip of the same bundle.
       # ditto keeps the bundle's signature and attributes intact.
       - name: Package the app

@@ -1,6 +1,6 @@
 {
   "name": "pixellab",
-  "version": "0.4.0",
+  "version": "0.0.0-dev",
   "description": "Pixel Lab: the pixel-art engine, compiler, CLI and MCP server behind the Pixel Lab Mac app. A site installs it from git to compile its .pixellab document.",
   "private": true,
   "type": "module",

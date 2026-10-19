@@ -4,7 +4,12 @@
 # Contents/Resources/cli (without tests), the SwiftPM resource bundle, and an
 # ad-hoc signature. Idempotent: it rebuilds the bundle from scratch each time.
 #
-#   scripts/build-app.sh
+#   scripts/build-app.sh                       version from git describe (v0.4.0-3-gabc1234 → 0.4.0-3-gabc1234)
+#   PIXELLAB_VERSION=0.4.0 scripts/build-app.sh   the release workflow's: the tag's version
+#
+# The version is stamped into the bundle (its package.json, which the CLI and
+# the MCP server report, and Info.plist), never into the repo, whose
+# package.json says 0.0.0-dev. With no tag to describe, the bundle says that too.
 #
 # Works with the Command Line Tools; set DEVELOPER_DIR for full Xcode if needed.
 set -euo pipefail
@@ -12,8 +17,15 @@ set -euo pipefail
 root=${0:A:h:h}
 app="$root/build/Pixel Lab.app"
 icon_png="$root/app/Sources/PixelLab/Resources/AppIcon.png"
-version=$(grep -o "VERSION = '[^']*'" "$root/cli/lib/server-stdio.mjs" | cut -d"'" -f2)
-version=${version:-0.0.0}
+version=${PIXELLAB_VERSION:-}
+if [[ -z $version ]]; then
+  version=$(git -C "$root" describe --tags --match 'v[0-9]*' 2>/dev/null || true)
+  version=${version#v}
+fi
+version=${version:-$(node -p "require('$root/package.json').version")}
+# Info.plist takes the numeric part: 0.4.0-3-gabc1234 → 0.4.0.
+plist_version=${version%%-*}
+echo "==> version $version"
 
 echo "==> swift build -c release"
 swift build -c release --package-path "$root/app"
@@ -32,8 +44,9 @@ done
 
 # The CLI, without its tests.
 rsync -a --delete --exclude 'test/' --exclude '.DS_Store' "$root/cli/" "$app/Contents/Resources/cli/"
-# The CLI is an ES module package: keep "type": "module" next to it.
-cp "$root/package.json" "$app/Contents/Resources/package.json"
+# The CLI is an ES module package: keep "type": "module" next to it, with this build's version.
+node -e 'const fs = require("fs"); const [from, to, v] = process.argv.slice(1); const p = JSON.parse(fs.readFileSync(from, "utf8")); p.version = v; fs.writeFileSync(to, JSON.stringify(p, null, 2) + "\n");' \
+  "$root/package.json" "$app/Contents/Resources/package.json" "$version"
 
 echo "==> icon"
 iconset=$(mktemp -d)/AppIcon.iconset
@@ -57,8 +70,8 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>CFBundleName</key><string>Pixel Lab</string>
   <key>CFBundleDisplayName</key><string>Pixel Lab</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>$version</string>
-  <key>CFBundleVersion</key><string>$version</string>
+  <key>CFBundleShortVersionString</key><string>$plist_version</string>
+  <key>CFBundleVersion</key><string>$plist_version</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.graphics-design</string>
