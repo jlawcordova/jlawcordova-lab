@@ -46,6 +46,27 @@ export function run(cmd, args, { cwd, timeout, env = process.env }) {
   });
 }
 
+/**
+ * What to do about a failed build, in a sentence, when the cause is a known
+ * setup problem: npm missing, or the site's packages not installed.
+ * @param {{ code: number | null, stderr: string, error?: string }} r
+ * @param {string} root  the site checkout
+ * @returns {string | null}
+ */
+export function buildHint(r, root) {
+  if (r.code === 0) return null;
+  if (r.error && /ENOENT/.test(r.error)) {
+    return `npm wasn't found next to node (${dirname(process.execPath)}) or on the PATH. Install Node.js 22 with npm, or set the node path in Pixel Lab's Settings.`;
+  }
+  if (/ERR_MODULE_NOT_FOUND|Cannot find (package|module)/.test(r.stderr)) {
+    return existsSync(join(root, 'node_modules'))
+      ? `A package the build needs is missing from the site's node_modules. Run npm install in ${root}, then build again.`
+      : `The site has no node_modules. Run npm install in ${root}, then build again.`;
+  }
+  if (/Missing script: "?art"?/.test(r.stderr)) return `The site's package.json in ${root} has no art script. Is this the right checkout?`;
+  return null;
+}
+
 const lines = (/** @type {string} */ text) => text.split('\n').map((l) => l.trimEnd()).filter(Boolean);
 
 /** @type {import('../registry.mjs').Command} */
@@ -53,7 +74,8 @@ const build = {
   name: 'art.build',
   summary: "Run the site's npm run art: validate every source and write the generated SVGs",
   description:
-    'Runs `npm run art --silent` in the site checkout (timeout 5 minutes) and returns { ok, code, report: [stdout lines], errors: [stderr lines], ms, unsaved }. ' +
+    'Runs `npm run art --silent` in the site checkout (timeout 5 minutes) and returns { ok, code, report: [stdout lines], errors: [stderr lines], hint, ms, unsaved }. ' +
+    'hint (or null) says what to do when the build failed for a known setup reason (npm not found, the site\'s node_modules missing). ' +
     'It builds the files on disk; unsaved lists the open docs with changes it leaves out.',
   params: { type: 'object', properties: {} },
   args: [],
@@ -68,12 +90,13 @@ const build = {
       code: r.code,
       report: lines(r.stdout),
       errors: [...lines(r.stderr), ...(r.timedOut ? [`npm run art took longer than ${BUILD_TIMEOUT_MS / 1000} s and was stopped`] : []), ...(r.error ? [`npm run art could not start: ${r.error}`] : [])],
+      hint: buildHint(r, ctx.site.root),
       ms: Date.now() - started,
       unsaved,
     };
   },
   format: (r) =>
-    [...r.report, ...r.errors, r.ok ? `art built in ${(r.ms / 1000).toFixed(1)} s` : `npm run art failed (exit ${r.code})`, ...(r.unsaved.length ? [`not built (unsaved): ${r.unsaved.join(', ')}`] : [])].join('\n'),
+    [...r.report, ...r.errors, ...(r.hint ? [r.hint] : []), r.ok ? `art built in ${(r.ms / 1000).toFixed(1)} s` : `npm run art failed (exit ${r.code})`, ...(r.unsaved.length ? [`not built (unsaved): ${r.unsaved.join(', ')}`] : [])].join('\n'),
 };
 
 export default [build];

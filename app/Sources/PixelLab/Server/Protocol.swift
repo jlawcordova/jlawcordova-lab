@@ -327,6 +327,8 @@ struct ArtBuildResult: Codable, Sendable {
     var code: Int?
     var report: [String]
     var errors: [String]
+    /// What to do about a failed build with a known setup cause (npm missing, no node_modules).
+    var hint: String?
     var ms: Double
     var unsaved: [String]
 }
