@@ -12,7 +12,10 @@
 //   ctx.find(query, kind?) resolves a name, or objects/<name> or scenes/<name>,
 //                          to { kind, name, file }
 //
-// Loading is memoized per ctx, so a door makes one ctx per call.
+// Loading is memoized per ctx, so a door makes one ctx per call;
+// ctx.invalidate() drops the merged sources after an edit. A session's ctx
+// (session.mjs) adds ctx.session, ctx.state and ctx.edit for the mutating
+// commands.
 
 import { NotFoundError, CommandError } from './errors.mjs';
 
@@ -65,6 +68,11 @@ export function createContext(site, { overlay } = {}) {
 
   const ctx = {
     site,
+
+    /** Forgets the merged sources, so the next read sees the overlay's latest working copies. */
+    invalidate() {
+      sourcesPending = undefined;
+    },
 
     /** @returns {Promise<{ sources: any, loadErrors: string[] }>} */
     sources() {

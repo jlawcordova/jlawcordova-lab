@@ -10,9 +10,21 @@
 //   format       (result, params) → the CLI's human-readable output
 //   examples     command lines for the help
 //   writesPng    the result has a base64 `png` the CLI can write with --out
+//   session      runs only in a session (pixellab serve): doc.open, doc.undo…
+//   writes       'direct': writes files itself (art.build, proposal.apply), so
+//                the CLI's --dry-run doesn't apply to it
+//
+// A mutating command (mutates: true) edits docs through ctx.edit (session.mjs).
+// The CLI saves what it changed right after it runs (or shows the diff with
+// --dry-run); the servers keep the edits in the session until doc.save.
 
+import artCommands from './commands/art.mjs';
 import checkCommands from './commands/check.mjs';
+import docCommands from './commands/doc.mjs';
+import objectEditCommands from './commands/object-edit.mjs';
 import objectCommands from './commands/object.mjs';
+import proposalCommands from './commands/proposal.mjs';
+import sceneEditCommands from './commands/scene-edit.mjs';
 import sceneCommands from './commands/scene.mjs';
 import siteCommands from './commands/site.mjs';
 import { NotFoundError } from './errors.mjs';
@@ -30,6 +42,8 @@ import { checkParams, suggest } from './params.mjs';
  *   format?: (result: any, params: Record<string, any>) => string,
  *   examples?: string[],
  *   writesPng?: boolean,
+ *   session?: boolean,
+ *   writes?: 'direct',
  * }} Command
  */
 
@@ -46,6 +60,7 @@ export function checkDefinition(/** @type {Command} */ cmd) {
   if (!cmd.params || cmd.params.type !== 'object' || typeof cmd.params.properties !== 'object') fail('params must be a JSON Schema object with properties');
   if (typeof cmd.mutates !== 'boolean') fail('mutates must be true or false');
   if (typeof cmd.run !== 'function') fail('run must be a function');
+  if (cmd.writes !== undefined && cmd.writes !== 'direct') fail("writes must be 'direct' when given");
   for (const arg of cmd.args ?? []) if (!(arg in cmd.params.properties)) fail(`args names ${arg}, which isn't a param`);
   for (const req of cmd.params.required ?? []) if (!(req in cmd.params.properties)) fail(`required names ${req}, which isn't a param`);
   return cmd;
@@ -106,4 +121,14 @@ export function createRegistry(list) {
 /** @typedef {ReturnType<typeof createRegistry>} Registry */
 
 /** The built-in commands. */
-export const registry = createRegistry([...siteCommands, ...sceneCommands, ...objectCommands, ...checkCommands]);
+export const registry = createRegistry([
+  ...siteCommands,
+  ...sceneCommands,
+  ...sceneEditCommands,
+  ...objectCommands,
+  ...objectEditCommands,
+  ...checkCommands,
+  ...artCommands,
+  ...docCommands,
+  ...proposalCommands,
+]);
