@@ -112,7 +112,13 @@ export function commandHelp(/** @type {import('./registry.mjs').Command} */ cmd)
       s.type === 'array' ? `list of ${s.items?.type ?? 'values'}` : s.type,
       required.has(key) ? 'required' : '',
       s.default !== undefined ? `default ${JSON.stringify(s.default)}` : '',
-      s.minimum !== undefined || s.maximum !== undefined ? `${s.minimum ?? '…'} to ${s.maximum ?? '…'}` : '',
+      s.minimum !== undefined && s.maximum !== undefined
+        ? `${s.minimum} to ${s.maximum}`
+        : s.minimum !== undefined
+          ? `at least ${s.minimum}`
+          : s.maximum !== undefined
+            ? `at most ${s.maximum}`
+            : '',
     ].filter(Boolean);
     rows.push([name, `${s.description ?? ''}${s.description ? ' ' : ''}(${facts.join(', ')})`]);
   }

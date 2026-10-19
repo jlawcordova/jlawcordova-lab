@@ -9,6 +9,7 @@ import { commandWords, GLOBAL_FLAGS, parseCommandLine } from './argv.mjs';
 import { createContext } from './context.mjs';
 import { CommandError, UsageError } from './errors.mjs';
 import { helpFor } from './help.mjs';
+import { checkParams } from './params.mjs';
 import { registry as defaultRegistry } from './registry.mjs';
 import { openSite } from './site.mjs';
 
@@ -50,9 +51,11 @@ export async function main(argv, io = {}) {
     if (globals.out !== undefined && !command.writesPng) {
       throw new UsageError(`--out goes with a render command, not ${commandWords(command.name)}`);
     }
+    // Params are checked before the site is read, so a usage error is always exit 2.
+    const checked = checkParams(command.params, params, { coerce: true, command: command.name });
     const site = await openSite({ site: globals.site, env, cwd });
     const ctx = createContext(site);
-    const result = await registry.call(ctx, command.name, params, { coerce: true });
+    const result = await registry.call(ctx, command.name, checked);
     /** @type {string | undefined} */
     let wrote;
     if (globals.out !== undefined) {
@@ -62,7 +65,7 @@ export async function main(argv, io = {}) {
     }
     if (globals.json) stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     else {
-      const text = command.format ? command.format(result, params) : JSON.stringify(result, null, 2);
+      const text = command.format ? command.format(result, checked) : JSON.stringify(result, null, 2);
       const hint = command.writesPng && !wrote ? '(add --out <file.png> to write the PNG, or --json for it as base64)' : '';
       stdout.write([text, wrote, hint].filter(Boolean).join('\n') + '\n');
     }

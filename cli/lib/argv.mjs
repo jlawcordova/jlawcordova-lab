@@ -109,7 +109,7 @@ export function parseCommandLine(argv, registry) {
     const isGroup = registry.groups().has(group);
     if (isGroup && (globals.help || words.length === 1)) return { kind: 'help', topic: [group], globals, usage: !globals.help };
     const typed = words.slice(0, isGroup ? 2 : 1).join(' ');
-    const names = [...registry.commands.keys()].map(commandWords);
+    const names = isGroup ? [...registry.commands.keys()].map(commandWords) : [...registry.groups().keys()];
     throw new UsageError(`unknown command ${typed}${suggest(typed, names)}; run pixellab help`);
   }
   const { command, used } = found;
