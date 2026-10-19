@@ -38,7 +38,7 @@ Run these before reporting any task complete, and paste the output. If a test fa
 - Every action is a command in the registry (`cli/lib/commands/`), so the CLI, the app (`serve --stdio`) and agents (`serve --mcp`) can all take it. MCP edits become proposals the owner approves in the Agent window; `--direct` stays off by default.
 - Keep VoiceOver labels, visible focus, comfortable hit targets and Reduce Motion support on anything interactive or animated.
 - Commit messages end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. PR bodies end with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
-- No secrets, tokens or personal data in commits, PRs or comments. The repo is private, but the art it edits is published by the site.
+- No secrets, tokens or personal data in commits, PRs or comments. The repo is public, and so are the art it edits (published by the site) and the docs site.
 
 ## Architecture
 

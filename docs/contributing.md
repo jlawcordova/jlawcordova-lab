@@ -30,7 +30,7 @@ A small, self-contained fix can go straight to a PR into `main`.
 - **The app builds with the Command Line Tools:** no `@State`; never `xcode-select -s`.
 - **Colors come from the board 03 tokens** in `Theme.swift`. Pixel art is nearest-neighbor at integer zoom.
 - **Accessibility:** VoiceOver labels, visible focus, comfortable hit targets and Reduce Motion on anything interactive or animated.
-- **No secrets, tokens or personal data** in commits, PRs, comments or docs. The repo is private, but the art it edits and the docs site are public.
+- **No secrets, tokens or personal data** in commits, PRs, comments or docs. The repo is public, and so are the art it edits and the docs site.
 
 ## Before you open a PR
 
@@ -68,4 +68,4 @@ open build/docs-site/index.html
 - **Links** are written as they work on GitHub: relative `.md` links (with `#anchors`), image paths, and links to source files. The build turns `.md` links into page links, copies images, and points links to files that aren't pages at GitHub. It **fails on a broken link, anchor or image**, naming the file.
 - **The Markdown** is the subset the docs use (headings, paragraphs, lists, code fences, block quotes, tables, links, images, emphasis, inline code). Raw HTML is shown as text, and HTML comments are dropped. If something renders wrong, fix the renderer in `markdown.mjs` with a test, not the doc.
 - **Deploying:** every push to `main` runs the Docs site workflow, which builds the site and deploys it with `actions/deploy-pages`. The site is served at `https://jlawcordova.com/jlawcordova-lab/` (the user site's custom domain applies to project sites too). Pull requests build it without deploying.
-- **One-time setup:** GitHub Pages has to be on for the repo, with **Settings › Pages › Build and deployment › Source: GitHub Actions**. Pages on a private repo needs a paid GitHub plan, and the site is public even though the repo isn't.
+- **Setup:** GitHub Pages is on for the repo with **Settings › Pages › Build and deployment › Source: GitHub Actions** (turned on 2026-10-19). If it's ever turned off, the deploy job fails and the build job still checks every PR.

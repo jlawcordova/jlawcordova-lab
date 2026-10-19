@@ -30,11 +30,11 @@ Status: draft (reviewed with its intent, plan and code in one PR, at the owner's
 
 ## Areas of concern
 
-- **The site is public; the repo is private.** GitHub Pages sites are public on every plan but Enterprise Cloud, and Pages for a private repo needs a paid plan (Pro or above). The docs hold no secrets; `docs/cli.md` names the owner's home folder (`/Users/jlawcordova/…`), the same name as the GitHub account. The owner decides whether public is fine (the intent's open question).
+- **The site is public.** GitHub Pages sites are public on every plan but Enterprise Cloud, and Pages for a private repo needs a paid plan. The docs hold no secrets; `docs/cli.md` names the owner's home folder (`/Users/jlawcordova/…`), the same name as the GitHub account. Resolved 2026-10-19: the owner accepted public docs and made the repo public, since the account's plan doesn't allow Pages on a private repo.
 - **It's served under the owner's domain.** The user site (`jlawcordova.github.io`) has the custom domain `jlawcordova.com`, so this project's Pages site is served at `https://jlawcordova.com/jlawcordova-lab/`. The site has no page at that path today; one added later would be shadowed by Pages' project site.
-- **One-time setting.** Pages must be enabled for the repo with Source: GitHub Actions (Settings › Pages) before the first deploy; the workflow's `GITHUB_TOKEN` can't enable it. Until then the deploy job fails and the build job still checks every PR.
+- **One-time setting.** Pages must be enabled for the repo with Source: GitHub Actions (Settings › Pages) before the first deploy; the workflow's `GITHUB_TOKEN` can't enable it. Until then the deploy job fails and the build job still checks every PR. Done 2026-10-19.
 - **Fonts from Google Fonts.** Sora and Silkscreen load from `fonts.googleapis.com`, so readers' browsers ask Google for them; without them it falls back to system faces.
 
 ## Open questions
 
-- Public docs (from the intent): carried forward to the owner's review of the PR.
+- Public docs (from the intent): answered yes; the repo is now public.

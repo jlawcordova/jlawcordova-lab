@@ -27,7 +27,7 @@ The main session runs every step on `feat/dev-docs` and opens the PR into `main`
 
 - **The renderer mis-renders a construct the docs use** (a list holding a code block, a table cell with `\|`). Each construct has a test, and the snapshots are checked by eye.
 - **Anchors that differ from GitHub's,** which would break links that work on GitHub. The slug rules follow GitHub's, with tests on the anchors the docs already use, and the build's link check covers every anchor.
-- **The deploy can't run** until the owner enables Pages (and the plan allows Pages on a private repo). The build job doesn't depend on it, so PRs are checked either way; the PR says what to enable.
+- **The deploy can't run** until Pages is on. The build job doesn't depend on it, so PRs are checked either way. (As it turned out, the account's plan doesn't allow Pages on a private repo; the owner made the repo public and Pages was turned on, Source: GitHub Actions, on 2026-10-19.)
 - **Docs drift from the code.** The new docs describe structure and flows and link to the source rather than copying it; `docs/cli.md` stays generated and the workflow checks it.
 
 ## Proof

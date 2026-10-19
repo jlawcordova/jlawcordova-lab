@@ -23,3 +23,4 @@ In the owner's words:
 ## Open questions
 
 - The repo is private, and a GitHub Pages site is public unless the account is on GitHub Enterprise Cloud. Is it fine for the developer docs to be readable by anyone?
+  - Answered 2026-10-19: yes. The plan doesn't support Pages on a private repo, so the owner made the repo public.
