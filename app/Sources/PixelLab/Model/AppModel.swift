@@ -110,6 +110,29 @@ final class AppModel {
         NSApp.appearance = appearanceSetting.appearance
     }
 
+    /// The night appearance: scenes render as the site's dark theme does (the
+    /// hero island's drop shadow takes the page color, `scene.render --theme dark`).
+    var stageDark = false
+    var stageTheme: JSONValue { .string(stageDark ? "dark" : "light") }
+    @ObservationIgnored private var appearanceObservation: NSKeyValueObservation?
+
+    /// Follows the effective appearance (the setting, or the system's in Auto).
+    func watchAppearance() {
+        updateStageTheme()
+        appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.new]) { _, _ in
+            Task { @MainActor in AppModel.shared.updateStageTheme() }
+        }
+    }
+
+    func updateStageTheme() {
+        let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        guard dark != stageDark else { return }
+        stageDark = dark
+        timeline.invalidate()
+        requestRender()
+        agent.syncGhost()
+    }
+
     func setHovered(_ id: String, _ inside: Bool) {
         if inside { hovered = id } else if hovered == id { hovered = nil }
     }
@@ -367,6 +390,7 @@ final class AppModel {
                     let method = isScene ? "scene.render" : "object.render"
                     var params: [String: JSONValue] = ["name": .string(doc.ref.name), "scale": 1]
                     if animated { params["time"] = JSONValue(t) }
+                    if isScene { params["theme"] = stageTheme }
                     if !isScene { params.merge(objects.renderParams(frame: objectFrame)) { _, b in b } }
                     let r: RenderResult = try await connection.call(method, params)
                     let viewBox = CGRect(x: r.viewBox[0], y: r.viewBox[1], width: r.viewBox[2], height: r.viewBox[3])

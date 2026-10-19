@@ -1,0 +1,35 @@
+# Acceptance 5: Window > Agent, proposals as ghosts, approve and reject
+appearance dark
+open scene:hero-island
+menus
+expect proposals 2
+expect badge 2
+expect activity 10
+agent open
+proposal select 1
+expect proposal scene:hero-island
+expect base matches
+expect ghost on
+expect ghostchanges 2
+# the ghost follows the timeline
+time 9400
+expect ghosttime 9400
+time 0
+expect ghosttime 0
+snapshot agent @OUT@/a5-agent-dark.png
+snapshot @OUT@/a5-ghost-dark.png
+approve
+expect proposals 1
+expect badge 1
+expect dirty false
+# after a1-4 placed one pine: 280 + the 2 proposed
+expect items 282
+proposal select 1
+expect proposal object:house
+proposal open
+expect doc object:house
+expect ghost on
+answer proceed
+reject
+expect proposals 0
+expect badge none

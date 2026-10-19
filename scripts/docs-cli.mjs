@@ -152,6 +152,14 @@ An open doc without unsaved changes reloads from disk when its file changes; one
 
 ### Setup for Claude Code
 
+With the app installed by \`scripts/install.sh\`, point Claude Code at the CLI inside it (the Agent window's Connect row shows the same command):
+
+\`\`\`sh
+claude mcp add pixellab -- node "$HOME/Applications/Pixel Lab.app/Contents/Resources/cli/bin/pixellab.mjs" serve --mcp
+\`\`\`
+
+Or at this repo's CLI, for development:
+
 \`\`\`sh
 claude mcp add pixellab -- node ${REPO}/cli/bin/pixellab.mjs serve --mcp
 \`\`\`

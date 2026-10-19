@@ -128,7 +128,7 @@ struct DocumentToolbar: ToolbarContent {
             }
             .pickerStyle(.segmented)
             .frame(width: 150)
-            .help("Edit scenes or objects")
+            .help("Edit scenes or objects (Object with an item selected opens its object)")
         }
         ToolbarItemGroup(placement: .primaryAction) {
             if model.mode == .object {
@@ -166,7 +166,7 @@ struct DocumentToolbar: ToolbarContent {
             }
             .menuIndicator(.visible)
             .fixedSize()
-            .help("Zoom")
+            .help(model.mode == .object ? "Zoom: Fit (⌘0) or 4×, 8×, 12×, 16× (⌘1–⌘4)" : "Zoom: Fit (⌘0) or 1×–4× (⌘1–⌘4)")
             .accessibilityLabel("Zoom, \(zoomLabel)")
 
             Button {
@@ -175,8 +175,8 @@ struct DocumentToolbar: ToolbarContent {
                 Label("Grid", systemImage: gridOn ? "square.grid.3x3.fill" : "square.grid.3x3")
             }
             .help(model.mode == .object
-                  ? (gridOn ? "Hide the pixel grid" : "Show the pixel grid (from 8×)")
-                  : (gridOn ? "Hide the iso grid" : "Show the iso grid"))
+                  ? (gridOn ? "Hide the pixel grid (⌘')" : "Show the pixel grid, from 8× (⌘')")
+                  : (gridOn ? "Hide the iso grid (⌘')" : "Show the iso grid (⌘')"))
             .accessibilityLabel(model.mode == .object ? "Pixel grid" : "Grid")
 
             Button {
@@ -185,6 +185,7 @@ struct DocumentToolbar: ToolbarContent {
                 Label("Build Art", systemImage: "hammer")
             }
             .help("Build art: run npm run art in the site (⌘B)")
+            .accessibilityLabel("Build Art")
             .disabled(model.build?.running == true)
 
             Button {
@@ -195,6 +196,7 @@ struct DocumentToolbar: ToolbarContent {
             .buttonStyle(AccentButtonStyle())
             .disabled(!model.canSave)
             .help("Save the source (⌘S)")
+            .accessibilityLabel("Save")
         }
         ToolbarItem(placement: .primaryAction) {
             AgentToolbarButton(agent: model.agent)
@@ -205,7 +207,8 @@ struct DocumentToolbar: ToolbarContent {
             } label: {
                 Label("Inspector", systemImage: "sidebar.right")
             }
-            .help(model.showInspector ? "Hide the inspector" : "Show the inspector")
+            .help(model.showInspector ? "Hide the inspector (⌥⌘I)" : "Show the inspector (⌥⌘I)")
+            .accessibilityLabel(model.showInspector ? "Hide Inspector" : "Show Inspector")
         }
     }
 

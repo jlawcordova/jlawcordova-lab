@@ -5,10 +5,11 @@
 // every real source through the engine's serializer.
 
 import assert from 'node:assert/strict';
-import { readFile, stat, writeFile } from 'node:fs/promises';
+import { readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 
+import { buildHint } from '../lib/commands/art.mjs';
 import { registry } from '../lib/registry.mjs';
 import { readSource, Session } from '../lib/session.mjs';
 import { openSite } from '../lib/site.mjs';
@@ -550,9 +551,25 @@ describe('art.build', needsSite, () => {
       assert.equal(out.ok, true);
       assert.ok(out.report.some((/** @type {string} */ l) => /^hero-island\.svg: /.test(l)), out.report.join('\n'));
       assert.deepEqual(out.unsaved, []);
+      assert.equal(out.hint, null);
       assert.ok((await stat(join(site.root, 'src/assets/pixel-art/hero-island.svg'))).size > 0);
     } finally {
       await site.cleanup();
+    }
+  });
+});
+
+describe('art.build hints', () => {
+  test('explain a missing npm or a site without node_modules', async () => {
+    const dir = await tempDir();
+    try {
+      assert.equal(buildHint({ code: 0, stderr: '' }, dir), null);
+      assert.match(buildHint({ code: null, stderr: '', error: 'spawn npm ENOENT' }, dir) ?? '', /npm wasn't found/);
+      const missing = "Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'astro' imported from /x/scripts/y.mjs";
+      assert.match(buildHint({ code: 1, stderr: missing }, dir) ?? '', /no node_modules\. Run npm install in /);
+      assert.equal(buildHint({ code: 1, stderr: 'site.mjs: problem' }, dir), null);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 });

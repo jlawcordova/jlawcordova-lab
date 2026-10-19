@@ -17,7 +17,8 @@ import Foundation
 ///     undo redo save [force] revert build done
 ///     time <ms>  play  pause  tracks on|off   zoom fit|1-4   sidebar library|items
 ///     search <text>   wait <ms>   snapshot <file.png>   log <text>
-///     expect dirty|selected|object|at|items|problems|build|tool|time <value>
+///     expect dirty|selected|object|at|items|problems|build|hint|tool|time <value>
+///     expect scenes|objects|zoom|badge|theme|ghosttime <value>   expect scenepixel <x>,<y> <#RRGGBB|empty>
 ///
 /// Object mode (pixels are object.render pixels at scale 1: a sprite's map
 /// column and row, a block's render pixel):
@@ -664,6 +665,23 @@ final class ScriptRunner {
         case "base": got = model.agent.selected.map { $0.baseMatches ? "matches" : "changed" } ?? "none"
         case "activity": got = String(model.agent.visibleActivity.count)
         case "question": got = model.agent.lastQuestion?.rawValue ?? "none"
+        case "ghosttime": got = model.agent.visibleGhost?.image.time.map { String(Int($0)) } ?? "none"
+        case "scenes": got = String(model.scenes.count)
+        case "objects": got = String(model.objects.count)
+        case "zoom": got = String(model.effectiveZoom)
+        case "badge": got = NSApp.dockTile.badgeLabel ?? "none"
+        case "theme": got = model.stageDark ? "dark" : "light"
+        case "hint": got = model.build?.result?.hint ?? "none"
+        case "scenepixel":
+            // A pixel of the stage's scene render, in scene pixels: "#RRGGBB" or empty.
+            let parts = words.dropFirst(2)
+            guard let p = parts.first.flatMap(PixelPoint.init(spec:)), let render = doc?.render else { throw Failure("expect scenepixel x,y <#RRGGBB|empty>") }
+            let colors = PixelColors(cgImage: render.image.cgImage, scale: render.scale)
+            let q = PixelPoint(p.x - Int(render.viewBox.minX), p.y - Int(render.viewBox.minY))
+            got = colors?.hex(q) ?? "empty"
+            let wantColor = parts.dropFirst().joined(separator: " ").uppercased()
+            guard got == wantColor else { throw Failure("expected scenepixel \(p) \(wantColor), got \(got)") }
+            return "scene pixel \(p) = \(got)"
         case "pixel":
             let parts = words.dropFirst(2)
             guard let p = parts.first.flatMap(PixelPoint.init(spec:)) else { throw Failure("expect pixel x,y <color|empty>") }

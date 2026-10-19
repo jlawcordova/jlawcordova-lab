@@ -19,6 +19,17 @@ struct BuildArtSheet: View {
                 }
                 .accessibilityElement(children: .combine)
             }
+            if let hint = build?.result?.hint {
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Image(systemName: "lightbulb.fill").foregroundStyle(Theme.gold)
+                    Text(hint)
+                        .font(.callout)
+                        .foregroundStyle(Theme.ink)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine)
+            }
             report(build)
             HStack {
                 if let site = model.sessionInfo?.site {

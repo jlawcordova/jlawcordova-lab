@@ -32,7 +32,7 @@ describe('help', () => {
     const r = await spawnCli(['scene', '--help']);
     assert.equal(r.code, 0);
     assert.match(r.stdout, /^pixellab scene: 13 commands$/m);
-    assert.match(r.stdout, /^ {2}pixellab scene render <name> \[--scale <n>\] \[--time <n>\] \[--show <text>\] \[--out <file\.png>\]$/m);
+    assert.match(r.stdout, /^ {2}pixellab scene render <name> \[--scale <n>\] \[--time <n>\] \[--theme <light\|dark>\] \[--show <text>\] \[--out <file\.png>\]$/m);
     assert.match(r.stdout, /^ {2}pixellab scene list$/m);
     assert.equal((await spawnCli(['help', 'scene'])).stdout, r.stdout);
     const bare = await spawnCli(['scene']);

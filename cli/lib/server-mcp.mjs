@@ -8,6 +8,7 @@
 // site, unless the server was started with --direct. Every tools/call
 // appends { time, tool, args, ok, summary } to activity.jsonl there.
 
+import { activitySummary } from './activity-summary.mjs';
 import { consoleToStderr, INVALID_PARAMS, METHOD_NOT_FOUND, RpcError, serveLines } from './jsonrpc.mjs';
 import { CommandError } from './errors.mjs';
 import { registry as defaultRegistry } from './registry.mjs';
@@ -75,17 +76,6 @@ export async function startMcpServer({ site, env = process.env, input = process.
       annotations: { readOnlyHint: !cmd.mutates && !cmd.writes, destructiveHint: cmd.name === 'scene.remove' || cmd.name.endsWith('.delete'), openWorldHint: false },
     }));
 
-  /** One line for the activity log and the text of an error. */
-  const summarize = (/** @type {import('./registry.mjs').Command} */ cmd, /** @type {any} */ result, /** @type {any} */ params) => {
-    if (typeof result?.summary === 'string') return result.summary;
-    try {
-      const text = cmd.format ? cmd.format(result, params) : '';
-      return text.split('\n')[0].slice(0, 200);
-    } catch {
-      return '';
-    }
-  };
-
   const callTool = async (/** @type {any} */ params) => {
     const name = params?.name;
     const args = params?.arguments ?? {};
@@ -100,7 +90,7 @@ export async function startMcpServer({ site, env = process.env, input = process.
     }
     try {
       const result = await registry.call(session.context(), cmd.name, args);
-      const summary = summarize(cmd, result, args);
+      const summary = activitySummary(cmd, result, args);
       await append(true, summary);
       if (result && typeof result.png === 'string') {
         const { png, ...rest } = result;

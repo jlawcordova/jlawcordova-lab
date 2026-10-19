@@ -1,5 +1,16 @@
 # Pixel Lab for Mac: architecture and build plan
 
+> **Status (2026-10-19): all seven slices are done** (PRs #1–#7 into `feat/mac-app`); the final PR `feat/mac-app` → `main` is open for review. Every item of "What ready to use means" below was verified with scripted runs on a temp copy of the site and read-only snapshots of the real one (the checklist is in the final PR). Install with `scripts/install.sh`; the README has the tour, shortcuts, MCP setup and troubleshooting. This file stays as the design record.
+>
+> Follow-ups, not blocking day-to-day use:
+> - Notarization / a Developer ID signature (the app is ad-hoc signed, so the first launch needs Control-click › Open).
+> - Edits to one item within a second merge into one undo step (meant for held keys; two quick, different moves undo together).
+> - Place level is manual (the stepper or the selected item's level); it doesn't infer the top of the block under the pointer.
+> - Hit-testing uses each object's frame-0 art, so a pixel that only shows in another loop frame can miss.
+> - Library drag-and-drop, Space-panning and the Save/Don't Save prompt on quit are wired but only exercised by hand, not by the script hook.
+> - The Agent window's activity list opens scrolled so its first visible row is partly clipped; live updates while the app runs were verified in slice 6, not re-run here.
+> - The dark-theme shadow recolor follows the site's `[data-enter="shadow"]` rule in `hero.css`; if the site adds other dark-theme pixel rules, `render.mjs` needs the same.
+
 A native macOS editor for the pixel art in J. Law's site (`jlawcordova.github.io`), built CLI first so agents can do everything a person can. It replaces the web lab at `/lab/pixel-art/` for day-to-day editing.
 
 The look was chosen on the mood-board canvas (https://claude.ai/artifact/QW1yk9qUyV4SYKabHQ6Gtu): **board 03, Field notebook**. Agent tooling lives in a **separate Agent window**, opened on demand from the View and Window menus.
