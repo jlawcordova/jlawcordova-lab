@@ -10,6 +10,14 @@ export const RENDER_PARAMS = {
   time: { type: 'integer', minimum: 0, description: 'ms into the animation: frame loops and motion tracks (default 0, the rest frame)' },
 };
 
+/** scene.render's and proposal.render's theme. */
+export const THEME = {
+  type: 'string',
+  enum: ['light', 'dark'],
+  default: 'light',
+  description: 'dark draws as the site\'s dark theme: the hero island\'s drop shadow (data-enter="shadow") takes the dark page color',
+};
+
 const countItems = (/** @type {any[]} */ items) =>
   (items ?? []).reduce((n, item) => n + (item && typeof item === 'object' && 'group' in item ? countItems(item.items) : 1), 0);
 
@@ -141,6 +149,7 @@ const render = {
     properties: {
       name: NAME,
       ...RENDER_PARAMS,
+      theme: THEME,
       show: { type: 'string', pattern: '^\\d+(\\.\\d+)*$', description: 'an item path whose variant group to show, like 12.0' },
     },
     required: ['name'],
@@ -148,14 +157,14 @@ const render = {
   args: ['name'],
   mutates: false,
   writesPng: true,
-  examples: ['pixellab scene render hero-island --scale 2 --out /tmp/hero.png', 'pixellab scene render range-sprite --time 400 --json'],
-  async run(ctx, { name: query, scale, time = 0, show }) {
+  examples: ['pixellab scene render hero-island --scale 2 --out /tmp/hero.png', 'pixellab scene render range-sprite --time 400 --json', 'pixellab scene render hero-island --theme dark --out /tmp/hero-dark.png'],
+  async run(ctx, { name: query, scale, time = 0, show, theme }) {
     const { name } = await ctx.find(query, 'scene');
     await ctx.doc('scene', name);
     const path = show === undefined ? null : parsePath(show);
     if (show !== undefined && !path) throw new UsageError(`--show ${show}: give an item path like 12 or 5.2`);
     const { sources } = await ctx.sources();
-    return { scene: name, ...renderSceneImage(ctx.site, sources, name, { scale, time, show: path }) };
+    return { scene: name, ...renderSceneImage(ctx.site, sources, name, { scale, time, show: path, theme }) };
   },
   format: (r) => `${r.scene}: ${r.width}×${r.height} PNG at ${r.scale}×, ${r.items.length} items shown, time ${r.time} ms`,
 };

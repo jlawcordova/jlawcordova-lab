@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { createContext, docFile } from '../context.mjs';
 import { unifiedDiff } from '../diff.mjs';
 import { MAX_SCALE, renderObjectImage, renderSceneImage } from '../render.mjs';
+import { THEME } from './scene.mjs';
 import { CommandError } from '../errors.mjs';
 import { docRef, importSource, problemsIn, readSource } from '../session.mjs';
 import { writeAtomic } from '../state.mjs';
@@ -112,6 +113,7 @@ export default [
         time: { type: 'integer', minimum: 0, description: 'ms into the motion and loops (a scene: default 0; an object: overrides frame)' },
         frame: { type: 'integer', minimum: 0, default: 0, description: "an object's frame" },
         layers: { type: 'array', items: { type: 'integer', minimum: 0 }, description: "only these layers of a sprite, as object.render's --layers" },
+        theme: { ...THEME, description: "a scene's theme, as scene.render's --theme" },
       },
       required: ['id'],
     },
@@ -119,7 +121,7 @@ export default [
     mutates: false,
     writesPng: true,
     examples: ['pixellab proposal render 20261019-142301-a1b2c3 --scale 2 --out /tmp/proposal.png'],
-    async run(ctx, { id, scale, time, frame, layers }) {
+    async run(ctx, { id, scale, time, frame, layers, theme }) {
       const p = await stateOf(ctx).readProposal(id);
       const { kind, name } = targetOf(ctx, p);
       let data;
@@ -134,7 +136,7 @@ export default [
       const disk = await readSource(ctx.site, kind, name);
       const image =
         kind === 'scene'
-          ? renderSceneImage(ctx.site, sources, name, { scale, time: time ?? 0 })
+          ? renderSceneImage(ctx.site, sources, name, { scale, time: time ?? 0, theme })
           : renderObjectImage(ctx.site, sources, name, { scale, frame, time, layers });
       return { id, doc: p.doc, kind, baseMatches: baseMatches(p, disk), ...image };
     },

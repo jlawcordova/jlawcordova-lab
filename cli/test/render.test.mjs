@@ -147,6 +147,28 @@ describe('render', needsSite, () => {
     }
   });
 
+  test("--theme dark: the island's drop shadow takes the dark page color, nothing else changes", async () => {
+    const light = await render('hero-island', {});
+    const dark = await render('hero-island', { theme: 'dark' });
+    const { groups } = await registry.call(ctx, 'scene.items', { name: 'hero-island' });
+    const shadowGroups = groups.filter((/** @type {any} */ g) => g.attrs['data-enter'] === 'shadow').map((/** @type {any} */ g) => `${g.path}.`);
+    const shadows = light.r.items.filter((/** @type {any} */ i) => shadowGroups.some((/** @type {string} */ g) => i.path.startsWith(g)));
+    assert.ok(shadows.length > 0);
+    let changed = 0;
+    for (let y = 0; y < light.png.height; y++) {
+      for (let x = 0; x < light.png.width; x++) {
+        const a = light.png.rgba(x, y).join();
+        const b = dark.png.rgba(x, y);
+        if (a === b.join()) continue;
+        changed++;
+        assert.deepEqual(b, [0x1c, 0x17, 0x12, 255], `pixel ${x},${y}`);
+        assert.ok(shadows.some(({ bounds: q }) => x >= q[0] && x < q[0] + q[2] && y >= q[1] && y < q[1] + q[3]), `pixel ${x},${y} outside the shadow`);
+      }
+    }
+    assert.ok(changed > 100, `${changed} pixels changed`);
+    assert.equal(dark.r.theme, 'dark');
+  });
+
   test('--time moves a tracked item, its bounds follow, and hidden items drop out', async () => {
     const rest = await render('zz-two', { time: 0 });
     const moved = await render('zz-two', { time: 500 });

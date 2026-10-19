@@ -6,6 +6,9 @@
 // with the engine's renderScene and composite, and take each item's pixels
 // from the engine's renderObject at its placement point.
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { CommandError } from './errors.mjs';
 
 export const MAX_SCALE = 16;
@@ -108,13 +111,54 @@ export function flattenItems(site, scene) {
   return { items, groups };
 }
 
+/** The color name the dark theme's ground pixels get (not a palette name). */
+const PAGE = '--color-page';
+const DARK_PAGE = '#1C1712';
+
+/**
+ * The site's dark-theme page color: --color-page in the [data-theme="dark"]
+ * block of src/styles/variables.css, else #1C1712.
+ * @param {string} root
+ */
+export function darkPageColor(root) {
+  try {
+    const css = readFileSync(join(root, 'src/styles/variables.css'), 'utf8');
+    const at = css.indexOf('[data-theme="dark"]');
+    const m = at < 0 ? null : /--color-page:\s*(#[0-9a-fA-F]{6})\b/.exec(css.slice(at));
+    return m ? m[1].toUpperCase() : DARK_PAGE;
+  } catch {
+    return DARK_PAGE;
+  }
+}
+
+/**
+ * The site's dark theme in a rendered tree: every pixel under a group with
+ * data-enter="shadow" (the hero island's dithered drop shadow) takes the page
+ * color, as src/styles/hero.css does with
+ * `html[data-theme="dark"] .hero-island [data-enter="shadow"] path { fill: var(--color-page) }`.
+ * The sources are untouched; only this render changes.
+ * @param {any} group  the engine's render tree
+ * @param {boolean} [inside]
+ */
+function darkTheme(group, inside = false) {
+  for (const child of group.children ?? []) {
+    if ('pixels' in child) {
+      if (inside) child.pixels = new Map([...child.pixels.keys()].map((p) => [p, PAGE]));
+      continue;
+    }
+    const shadow = inside || (child.attrs ?? []).some((/** @type {string[]} */ [k, v]) => k === 'data-enter' && v === 'shadow');
+    darkTheme(child, shadow);
+  }
+}
+
 /**
  * An RGBA buffer of the pixels inside a box; everything else transparent.
  * @param {any} sources
  * @param {Map<string, string>} pixels  "x,y" → color name
  * @param {number[]} box  [x, y, width, height]
+ * @param {Record<string, string>} [extra]  hex of color names outside the palette
  */
-function toImage(sources, pixels, [bx, by, width, height]) {
+function toImage(sources, pixels, [bx, by, width, height], extra = {}) {
   const rgba = Buffer.alloc(width * height * 4);
   /** @type {Map<string, number[]>} */
   const rgb = new Map();
@@ -125,7 +169,7 @@ function toImage(sources, pixels, [bx, by, width, height]) {
     if (x < 0 || y < 0 || x >= width || y >= height) continue;
     let color = rgb.get(name);
     if (!color) {
-      const hex = sources.colors.get(name)?.hex ?? '#000000';
+      const hex = sources.colors.get(name)?.hex ?? extra[name] ?? '#000000';
       color = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
       rgb.set(name, color);
     }
@@ -156,9 +200,10 @@ const toOutput = (/** @type {any} */ box, /** @type {number[]} */ [vx, vy], /** 
  * @param {any} site
  * @param {any} sources
  * @param {string} name
- * @param {{ scale?: number, time?: number, show?: number[] | null }} [options]
+ * With `theme: 'dark'` it draws as the site's dark theme does (darkTheme).
+ * @param {{ scale?: number, time?: number, show?: number[] | null, theme?: 'light' | 'dark' }} [options]
  */
-export function renderSceneImage(site, sources, name, { scale = 1, time = 0, show = null } = {}) {
+export function renderSceneImage(site, sources, name, { scale = 1, time = 0, show = null, theme = 'light' } = {}) {
   const { engine, motion: motionLib, preview } = site;
   const scene = sources.scenes.get(name);
   const origin = scene.origin ?? [0, 0];
@@ -170,7 +215,8 @@ export function renderSceneImage(site, sources, name, { scale = 1, time = 0, sho
     const view = { ...still, items: motionLib.shownItems(kept) };
     const local = { ...sources, scenes: new Map([[name, view]]) };
     const { root } = engine.renderScene(local, name);
-    const image = toImage(sources, engine.composite(root, { time }), viewBox);
+    if (theme === 'dark') darkTheme(root);
+    const image = toImage(sources, engine.composite(root, { time }), viewBox, theme === 'dark' ? { [PAGE]: darkPageColor(site.root) } : {});
     /** @type {Map<string, ReturnType<typeof objectPixels>>} */
     const arts = new Map();
     const art = (/** @type {string} */ object) => {
@@ -202,6 +248,7 @@ export function renderSceneImage(site, sources, name, { scale = 1, time = 0, sho
       width: image.width * scale,
       height: image.height * scale,
       time,
+      ...(theme === 'dark' ? { theme } : {}),
       items,
     };
   } catch (err) {
