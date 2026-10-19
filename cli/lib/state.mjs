@@ -113,7 +113,9 @@ export function createState(/** @type {string} */ dir) {
           // a half-written or hand-edited file: not listed
         }
       }
-      return out;
+      // Ids sort by second only (two saves in one second get random suffixes): order by createdAt (ms), then id.
+      const at = (/** @type {Proposal} */ p) => Date.parse(p.createdAt) || 0;
+      return out.sort((a, b) => at(a) - at(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     },
 
     async removeProposal(/** @type {string} */ id) {
