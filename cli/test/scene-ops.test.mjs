@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 
 import * as ops from '../lib/scene-ops.mjs';
-import { openSite } from '../lib/site.mjs';
+import { openSite } from '../lib/document.mjs';
 import { makeSite, needsSite } from './helpers.mjs';
 
 const scene = () => ({

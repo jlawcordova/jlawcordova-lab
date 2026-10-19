@@ -149,11 +149,11 @@ describe('registry', () => {
   test('every command is well formed and has a group', () => {
     const names = [...registry.commands.keys()];
     const readOnly = [
-      'activity.list', 'check', 'doc.close', 'doc.open', 'doc.status', 'object.list', 'object.pick', 'object.render', 'object.show',
-      'palette.get', 'proposal.list', 'proposal.render', 'proposal.show', 'scene.items', 'scene.list', 'scene.render', 'scene.show', 'site.info',
+      'activity.list', 'art.preview', 'art.sizes', 'check', 'doc.close', 'doc.open', 'doc.status', 'document.info', 'object.list', 'object.pick', 'object.render', 'object.show',
+      'palette.get', 'proposal.list', 'proposal.render', 'proposal.show', 'scene.items', 'scene.list', 'scene.render', 'scene.show',
     ];
     const mutating = [
-      'doc.redo', 'doc.revert', 'doc.save', 'doc.undo',
+      'doc.redo', 'doc.revert', 'doc.save', 'doc.undo', 'document.copy', 'document.new',
       'object.animate', 'object.erase', 'object.fill', 'object.frame.add', 'object.frame.delete', 'object.frame.duplicate', 'object.frame.move',
       'object.layer.add', 'object.layer.delete', 'object.layer.duplicate', 'object.layer.move', 'object.new', 'object.paint', 'object.resize', 'object.still',
       'proposal.apply', 'proposal.reject',
@@ -166,8 +166,8 @@ describe('registry', () => {
       names.filter((n) => registry.get(n)?.session),
       ['doc.close', 'doc.open', 'doc.redo', 'doc.revert', 'doc.save', 'doc.status', 'doc.undo'],
     );
-    assert.deepEqual(names.filter((n) => registry.get(n)?.writes), ['art.build', 'proposal.apply', 'proposal.reject']);
-    assert.deepEqual([...registry.groups().keys()], ['activity', 'art', 'check', 'doc', 'object', 'palette', 'proposal', 'scene', 'site']);
+    assert.deepEqual(names.filter((n) => registry.get(n)?.writes), ['art.build', 'document.copy', 'document.new', 'proposal.apply', 'proposal.reject']);
+    assert.deepEqual([...registry.groups().keys()], ['activity', 'art', 'check', 'doc', 'document', 'object', 'palette', 'proposal', 'scene']);
   });
 
   test('malformed definitions are refused', () => {

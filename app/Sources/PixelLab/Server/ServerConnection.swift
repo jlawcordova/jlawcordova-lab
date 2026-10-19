@@ -1,10 +1,10 @@
 import Foundation
 
-/// How to start the server: `node <cli> serve --stdio --site <site>`.
+/// How to start the server: `node <cli> serve --stdio --document <path>` (or `--site <checkout>`).
 struct ServerLaunch: Sendable, Equatable {
     var node: URL
     var cli: URL
-    var site: String
+    var location: DocumentLocation
     /// Extra environment for the server (e.g. PIXELLAB_STATE).
     var environment: [String: String] = [:]
 }
@@ -113,15 +113,15 @@ actor ServerConnection {
         let gen = generation
         let p = Process()
         p.executableURL = launch.node
-        p.arguments = [launch.cli.path, "serve", "--stdio", "--site", launch.site]
+        p.arguments = [launch.cli.path, "serve", "--stdio"] + launch.location.arguments
         var env = ProcessInfo.processInfo.environment
-        // node's own folder first, so `art.build` finds the npm next to it.
+        // node's own folder first on the PATH, as a login shell would have it.
         let nodeDir = launch.node.deletingLastPathComponent().path
         env["PATH"] = ([nodeDir] + (env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin").split(separator: ":").map(String.init))
             .joined(separator: ":")
         for (k, v) in launch.environment { env[k] = v }
         p.environment = env
-        p.currentDirectoryURL = URL(fileURLWithPath: launch.site, isDirectory: true)
+        p.currentDirectoryURL = URL(fileURLWithPath: Locator.path(of: launch.location), isDirectory: true)
 
         let inPipe = Pipe(), outPipe = Pipe(), errPipe = Pipe()
         p.standardInput = inPipe

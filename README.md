@@ -1,22 +1,22 @@
 # Pixel Lab for Mac
 
-A native macOS editor for the pixel art of [jlawcordova.github.io](https://github.com/jlawcordova/jlawcordova.github.io): the hero island and the other isometric scenes, and the library objects they're built from. It replaces the web lab at `/lab/pixel-art/` for day-to-day editing.
+A native macOS editor for isometric pixel art: the hero island of [jlawcordova.github.io](https://github.com/jlawcordova/jlawcordova.github.io) and its other scenes, and the library objects they're built from. The art lives in a **`.pixellab` document**, a folder you can open, copy and save as like any file; **Publish** compiles it into the SVGs a site inlines.
 
 It's built CLI first: every action is a command in one registry, reachable three ways, so an agent can do everything a person can.
 
 - **Pixel Lab.app**: a SwiftUI app (board 03, "Field notebook", night and day).
-- **`pixellab`**: a zero-dependency Node CLI (`pixellab scene place hero-island pine --at 14,6,1`).
+- **`pixellab`**: a zero-dependency Node CLI (`pixellab scene place hero-island pine --at 14,6,1`), which is also the pixel-art engine and compiler, exported as the `pixellab` package.
 - **`pixellab serve --mcp`**: an MCP server for Claude Code and other agents. Agents' saves become **proposals** you approve in the app.
 
-The site checkout stays the source of truth: the CLI imports the site's own pixel-art engine at runtime, validates and serializes with it, and writes the `.mjs` sources; **Build art** runs the site's `npm run art`.
+The document is the source of truth: the engine in this repo validates and serializes every write into the document's `.mjs` sources, and nothing touches a site until you publish. The site keeps its document next to the SVGs it compiles to, and installs this package to check its art.
 
 ![Pixel Lab, scene mode, night](docs/screenshots/final-scene-dark.png)
 
 ## Requirements
 
 - macOS 15 or later, Apple silicon or Intel.
-- Node.js 22 or later (`node` on your shell's PATH, in `/opt/homebrew/bin` or `/usr/local/bin`, or set in Settings).
-- The site checkout, by default `~/Projects/jlawcordova.github.io`. Build art runs `npm run art` there, which needs only Node built-ins; run `npm install` in the site if a future build step needs packages.
+- Node.js 22 or later (`node` on your shell's PATH, in `/opt/homebrew/bin` or `/usr/local/bin`, or set in Settings). The app runs its CLI with it; you never type `npm`.
+- A `.pixellab` document. With none chosen, Pixel Lab opens the one in `~/Projects/jlawcordova.github.io` when that checkout is there (or its older `source/` folder); File › New Document… makes one anywhere.
 - To build: the Xcode Command Line Tools (Swift 6). Full Xcode isn't needed.
 
 ## Install
@@ -54,9 +54,11 @@ The app is signed ad hoc, not notarized. If macOS won't open it the first time, 
 
 ## First launch
 
-Pixel Lab opens `~/Projects/jlawcordova.github.io` if it's there and starts its own `pixellab serve --stdio` server against it. If the site or Node.js can't be found, a setup screen says what's missing, with Choose… buttons for the site folder and the node binary and Try Again. Change either later in **Settings** (⌘,), along with the appearance (Auto, Light, Dark).
+Pixel Lab opens the document in `~/Projects/jlawcordova.github.io` if that checkout is there, and starts its own `pixellab serve --stdio` server on it. If the document or Node.js can't be found, a setup screen says what's missing, with Choose… for a `.pixellab` (or a site checkout holding one), New… to make one, Choose… for the node binary, and Try Again. Change either later in **Settings** (⌘,), along with the appearance (Auto, Light, Dark). Double-clicking a `.pixellab` in Finder opens it too.
 
-It reopens the last scene or object you had open, else the hero island.
+It reopens the last scene or object you had open, else the hero island. The window title shows the open doc and the document's name.
+
+![The setup screen](docs/screenshots/document-setup-dark.png)
 
 ## A short tour
 
@@ -66,7 +68,11 @@ It reopens the last scene or object you had open, else the hero island.
 
 **Checks.** The inspector's CHECKS section validates the open doc with the engine after every edit; a problem that names an item selects it when clicked. Save (⌘S) refuses a doc with problems and explains why, and asks before overwriting a file that changed on disk.
 
-**Build art.** ⌘B or the hammer runs the site's `npm run art` and shows its report, which docs it left out because they're unsaved, and a hint when the cause is a setup problem (npm not found, the site's `node_modules` missing).
+**Publish.** ⌘B or the toolbar's share button compiles every scene that has an `output` into the SVGs a site inlines (merging each color's pixels into one path, checking the result is lossless and within its budget) and writes them into the document's publish folder, the one its `manifest.json` names (the site's document publishes next to itself, so `astro dev` picks the change up at once). The sheet shows each output's size, problems or over-budget files, and the docs it left out because they're unsaved. File › Publish to Folder… (or Publish Elsewhere… in the sheet) writes anywhere else; a document whose manifest names no folder asks for one.
+
+**Documents.** File › New Document… makes an empty `.pixellab` with the starter palette; Open Document… (⌘O) opens another; Save As… (⇧⌘S) copies the whole document (palette, objects, scenes, manifest) to a new place and reopens it there. A document is a plain folder, so git, Finder and backups see it as one.
+
+![The Publish sheet](docs/screenshots/document-publish-dark.png)
 
 **Agent window.** Window › Agent or View › Show Agent (⌥⌘A). It shows the `claude mcp add` command to copy, the live activity feed of every MCP tool call ("listed 15 scenes", "rendered hero-island at 2×", "pine placed at x -48, y 92"), and the agents' **proposals**. Select one to see its edits and a diff against the file as it is now, ghosted on the stage (added and moved items outlined in gold, following the timeline when it plays). Approve (⌘↩) writes it; Reject (⌫) deletes it. The Dock icon and the toolbar's sparkle show how many proposals wait.
 
@@ -91,29 +97,38 @@ It reopens the last scene or object you had open, else the hero island.
 | . / , | Next / previous frame (object) |
 | ⌘D | Duplicate |
 | ⌘Z / ⇧⌘Z | Undo / Redo |
-| ⌘S | Save |
-| ⌘B | Build art |
+| ⌘S / ⇧⌘S | Save / Save As… (a copy of the whole document) |
+| ⌘B | Publish |
 | ⌥⌘P | Play / pause the timeline |
 | ⌘N / ⇧⌘N | New Scene / New Object |
+| ⌥⌘N / ⌘O | New Document… / Open Document… |
 | ⌥⌘I | Show or hide the inspector |
 | ⌥⌘A | Show the Agent window |
 | ↑ / ↓, ⌘↩, ⌫, Esc | Agent window: previous / next proposal, Approve, Reject, hide the ghost |
 
 ## The CLI
 
-`pixellab <group> <verb> [args] [--json] [--site <path>]`. Human output by default, JSON with `--json`; `pixellab help` and `pixellab <group> --help` list everything. The full reference is [docs/cli.md](docs/cli.md).
+`pixellab <group> <verb> [args] [--json] [--document <path.pixellab>]`. Human output by default, JSON with `--json`; `pixellab help` and `pixellab <group> --help` list everything. The full reference is [docs/cli.md](docs/cli.md).
 
 ```sh
-pixellab site info                                   # the checkout in use, counts, problems
+pixellab document info                               # the document in use, its publish folder, counts, problems
+pixellab document new ~/Art/meadow.pixellab          # an empty document with the starter palette
 pixellab scene list
 pixellab scene render hero-island --scale 2 --out /tmp/hero.png
 pixellab scene place hero-island pine --at 14,6,1 --dry-run   # the diff it would write
 pixellab object paint house 20,30 21,30 --color water-1
 pixellab check hero-island
+pixellab art preview pine --scale 4 --out /tmp/pine.png       # the review PNG, on the card color
+pixellab art build                                   # publish: compile every scene and write the SVGs
+pixellab art sizes hero-island                       # bytes per object and color, against git HEAD
 pixellab proposal list && pixellab proposal apply <id>
 ```
 
-Edits from the command line are one-shot: load, edit, validate, serialize with the engine, write atomically. They refuse docs with problems or files changed on disk unless `--force`. Inside the repo use `node cli/bin/pixellab.mjs`, or the alias from Install.
+The document comes from `--document`, else `PIXELLAB_DOC`, else `~/.config/pixellab/config.json` (`{"document": "…"}`), else `--site <checkout>` / `PIXELLAB_SITE` (the `*.pixellab` under the site's `src/assets/pixel-art/`, or its older `source/` folder), else the default site checkout. Edits from the command line are one-shot: load, edit, validate, serialize with the engine, write atomically. They refuse docs with problems or files changed on disk unless `--force`. Inside the repo use `node cli/bin/pixellab.mjs`, or the alias from Install.
+
+**The document.** A `.pixellab` is a folder: `manifest.json`, `palette.mjs`, `objects/*.mjs` and `scenes/*.mjs`, the sources exactly as the engine reads them. The manifest holds the format version, a name, and what publishing needs: `publish.dir` (relative to the document) and per-output `budgets`, plus the `preview` colors and the night `theme` color. Everything but `format` is optional.
+
+**As a package.** A site that inlines the art installs this repo from git (`"pixellab": "github:jlawcordova/jlawcordova-lab#<ref>"`) to run `pixellab art build` and to import the engine in its tests: `pixellab/engine`, `pixellab/compile`, `pixellab/document`, `pixellab/serialize`, … (the `exports` in `package.json`).
 
 ## MCP for Claude Code
 
@@ -121,22 +136,22 @@ Edits from the command line are one-shot: load, edit, validate, serialize with t
 claude mcp add pixellab -- node "$HOME/Applications/Pixel Lab.app/Contents/Resources/cli/bin/pixellab.mjs" serve --mcp
 ```
 
-(The Agent window's Copy button gives the same command for the running app. Add `--site <path>` after `--mcp` for another checkout.)
+(The Agent window's Copy button gives the same command for the running app. Add `--document <path.pixellab>` or `--site <checkout>` after `--mcp` for another document.)
 
 Tools are the commands with `.` → `_` (`scene_place`, `object_paint`, `scene_render` returns the PNG so the agent can see it, …). **How proposals work:**
 
 1. The agent's edits stay in its MCP server's memory, with undo.
-2. `doc_save` validates the doc and writes a proposal to `~/Library/Application Support/Pixel Lab/proposals/<id>.json` (the full new source, the edits, the hash of the file it started from, the agent's name). Nothing in the site changes.
-3. Pixel Lab shows it in the Agent window, ghosted on the stage. **Approve** checks the file still matches the hash (if it changed, it asks: apply anyway or reject), validates, and writes the source; **Reject** deletes the proposal. From a terminal: `pixellab proposal show <id>`, `pixellab proposal apply <id>`, `pixellab proposal reject <id>`.
-4. After approving, Build art (⌘B) regenerates the site's SVGs. Agents can't approve, reject or build; `pixellab serve --mcp --direct` lets an agent write the site directly (off by default).
+2. `doc_save` validates the doc and writes a proposal to `~/Library/Application Support/Pixel Lab/proposals/<id>.json` (the full new source, the edits, the hash of the file it started from, the agent's name). Nothing in the document changes.
+3. Pixel Lab shows it in the Agent window, ghosted on the stage. **Approve** checks the file still matches the hash (if it changed, it asks: apply anyway or reject), validates, and writes the source into the document; **Reject** deletes the proposal. From a terminal: `pixellab proposal show <id>`, `pixellab proposal apply <id>`, `pixellab proposal reject <id>`.
+4. After approving, Publish (⌘B) compiles the document into the SVGs. Agents can't approve, reject, publish or save a copy; `pixellab serve --mcp --direct` lets an agent write the document directly (off by default).
 
 Every tool call is logged to `activity.jsonl` in the same folder and shown in the Agent window. `PIXELLAB_STATE` moves the state folder.
 
 ## Troubleshooting
 
 - **"Pixel Lab needs Node.js 22…" / node not found.** The app looks in Settings, then your login shell's `command -v node`, then `/opt/homebrew/bin` and `/usr/local/bin`. Install Node 22+ (e.g. `brew install node`), or set its path in Settings › Node.js and Try Again.
-- **Site not found.** The setup screen names the folder it tried and what's missing (`src/lib/pixel-art/engine.mjs`, the palette, `scripts/pixel-art-preview.mjs`). Choose the right checkout. The CLI resolves the site from `--site`, `PIXELLAB_SITE`, `~/.config/pixellab/config.json` (`{"site": "…"}`), then `~/Projects/jlawcordova.github.io`.
-- **Build art fails.** The sheet shows npm's output and, for known causes, what to do: npm not next to node or on the PATH, or no `node_modules` in the site (`npm install` there). Unsaved docs aren't in a build; save first.
+- **Document not found.** The setup screen names the path it tried and what's wrong (no folder there, or no `palette.mjs` in it). Choose a `.pixellab`, a site checkout holding one, or make a new one. The CLI resolves the document from `--document`, `PIXELLAB_DOC`, `~/.config/pixellab/config.json` (`{"document": "…"}`), then `--site` / `PIXELLAB_SITE` / `{"site": "…"}`, then `~/Projects/jlawcordova.github.io`.
+- **Publish fails or is refused.** Nothing is written when a source has a problem: the sheet lists them (so does the Checks panel), fix them and publish again. An output over its budget is written and flagged; make the art smaller or raise its budget in `manifest.json`. A document whose manifest names no publish folder asks for one. Unsaved docs aren't in a publish; save first.
 - **"The file changed on disk" when saving.** Someone (git, another editor, an approved proposal) changed the source while you had unsaved edits. Revert loads the file; Save Anyway overwrites it.
 - **A proposal's base changed.** The file changed since the agent opened it. Approve asks whether to apply anyway (overwriting those changes) or reject; the diff shows what would change against the file as it is now.
 - **The app won't open the first time.** It's ad-hoc signed; Control-click › Open, or allow it in System Settings › Privacy & Security (Open Anyway, which a downloaded release always needs).
@@ -156,7 +171,7 @@ npm run docs:cli                           # regenerate docs/cli.md from the com
 npm run docs:site                          # build the developer docs site into build/docs-site/
 ```
 
-**Script hook.** `PIXELLAB_SCRIPT=<file> PIXELLAB_SITE=<temp copy of the site> PIXELLAB_STATE=<temp dir> "build/Pixel Lab.app/Contents/MacOS/PixelLab"` drives the app's model headlessly, one action per line (`open scene:hero-island`, `library pine`, `place 4 -1 1`, `move 1 0`, `save`, `build`, `mode object`, `px 23 20`, `agent open`, `approve`, `snapshot <png>`, `expect …`); it refuses the real checkout, logs each step and exits 0 only if every step passed. The action list is at the top of `app/Sources/PixelLab/Support/ScriptRunner.swift`; [CLAUDE.md](CLAUDE.md) says how to make the temp site.
+**Script hook.** `PIXELLAB_SCRIPT=<file> PIXELLAB_DOC=<temp copy of a document> PIXELLAB_STATE=<temp dir> "build/Pixel Lab.app/Contents/MacOS/PixelLab"` (or `PIXELLAB_SITE=<temp copy of the site>`) drives the app's model headlessly, one action per line (`open scene:hero-island`, `library pine`, `place 4 -1 1`, `move 1 0`, `save`, `publish`, `saveas <path>`, `mode object`, `px 23 20`, `agent open`, `approve`, `snapshot <png>`, `expect …`); it refuses the real checkout and anything inside it, logs each step and exits 0 only if every step passed. The action list is at the top of `app/Sources/PixelLab/Support/ScriptRunner.swift`; [CLAUDE.md](CLAUDE.md) says how to make the temp copy.
 
 **Releases.** Tags `v<version>` publish a GitHub Release ([`.github/workflows/release.yml`](.github/workflows/release.yml)). The version is `VERSION` in `cli/lib/server-stdio.mjs`, which is also the app's `CFBundleShortVersionString` and the MCP server's version.
 

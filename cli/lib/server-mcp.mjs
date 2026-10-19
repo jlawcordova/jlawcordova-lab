@@ -25,16 +25,17 @@ const SUPPORTED = [PROTOCOL_VERSION, '2025-03-26', '2024-11-05'];
 export const LEFT_OUT = {
   'proposal.apply': 'approving a proposal is for a person, in Pixel Lab or with pixellab proposal apply',
   'proposal.reject': 'rejecting a proposal is for a person',
-  'art.build': "it writes the site's generated SVGs; a person builds the art after approving",
+  'art.build': 'it publishes the SVGs a site inlines; a person publishes after approving',
+  'document.copy': 'saving a copy of the document is for a person',
 };
 
 /** scene.place → scene_place. */
 export const toolName = (/** @type {string} */ command) => command.replace(/\./g, '_');
 
-const INSTRUCTIONS = `Pixel Lab edits the pixel art of jlawcordova.github.io: scenes (isometric, 32×16 tiles) and objects (sprites and blocks drawn from a fixed palette).
-Look first: scene_list, scene_items, scene_render (returns the PNG), object_list, object_show, object_render, palette_get, check.
+const INSTRUCTIONS = `Pixel Lab edits the pixel art in a .pixellab document: scenes (isometric, 32×16 tiles) and objects (sprites and blocks drawn from a fixed palette). The site that inlines the art publishes from the document.
+Look first: document_info, scene_list, scene_items, scene_render (returns the PNG), object_list, object_show, object_render, palette_get, check.
 Edit: scene_place, scene_move, scene_set, object_paint, object_fill and the rest. Edits stay in this server's memory with undo (doc_undo, doc_redo, doc_status).
-Save: doc_save validates the doc and, unless the server runs with --direct, writes a proposal for a person to approve in Pixel Lab instead of changing the site. Say what you changed when you're done.`;
+Save: doc_save validates the doc and, unless the server runs with --direct, writes a proposal for a person to approve in Pixel Lab instead of changing the document. Say what you changed when you're done.`;
 
 /**
  * @param {{

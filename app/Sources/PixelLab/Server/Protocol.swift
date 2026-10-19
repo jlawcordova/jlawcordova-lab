@@ -55,11 +55,35 @@ struct SessionInfo: Codable, Sendable {
     var version: String
     var `protocol`: Int
     var pid: Int
+    /// The open document (`document.mjs`): its folder, name, kind and publish folder.
+    var document: DocumentInfo?
+    /// The document's folder (the old name; `document.root` is the same path).
     var site: String
     var sourceDir: String
     var stateDir: String
     var saves: String
     var docs: [DocStatus]
+}
+
+/// `session.info.document`: the `.pixellab` folder (or a legacy `source/` folder,
+/// kind `legacy-site`), its manifest name, and where `art.build` publishes.
+struct DocumentInfo: Codable, Sendable, Equatable {
+    var root: String
+    var name: String
+    var kind: String
+    var publishDir: String?
+    var siteRoot: String?
+}
+
+/// `document.new`: `{ root, name }`. `document.copy`: `{ from, to }`.
+struct DocumentNewResult: Codable, Sendable {
+    var root: String
+    var name: String
+}
+
+struct DocumentCopyResult: Codable, Sendable {
+    var from: String
+    var to: String
 }
 
 struct SiteInfo: Codable, Sendable {
@@ -321,14 +345,37 @@ struct PickResult: Codable, Sendable {
     var hex: String?
 }
 
-/// `art.build`: `{ ok, code, report, errors, ms, unsaved }`.
-struct ArtBuildResult: Codable, Sendable {
+/// `art.build`: `{ ok, publishDir, outputs, previewOnly, problems, ms, unsaved }`.
+/// `ok` is false when any source has a problem (nothing written) or an output
+/// is over its budget (written anyway, as `npm run art` did).
+struct ArtBuildResult: Codable, Sendable, Equatable {
     var ok: Bool
-    var code: Int?
-    var report: [String]
-    var errors: [String]
-    /// What to do about a failed build with a known setup cause (npm missing, no node_modules).
-    var hint: String?
+    var publishDir: String
+    var outputs: [ArtOutput]
+    var previewOnly: [ArtOutput]
+    var problems: [String]
     var ms: Double
     var unsaved: [String]
+
+    /// The report as the CLI prints it: one line per output, one per preview-only scene, then the problems.
+    var report: [String] {
+        outputs.map { "\($0.file ?? $0.scene): \($0.report)" }
+            + previewOnly.map { "\($0.scene) (preview only, not written): \($0.report)" }
+            + problems
+    }
+    /// The lines the sheet marks: problems, and outputs over their budget.
+    var marked: Set<String> {
+        Set(problems + outputs.filter(\.over).map { "\($0.file ?? $0.scene): \($0.report)" })
+    }
+    var overBudget: [ArtOutput] { outputs.filter(\.over) }
+}
+
+/// One compiled scene: its output file (nil for a preview-only scene), sizes and report line.
+struct ArtOutput: Codable, Sendable, Equatable {
+    var file: String?
+    var scene: String
+    var raw: Int
+    var gzip: Int
+    var over: Bool
+    var report: String
 }

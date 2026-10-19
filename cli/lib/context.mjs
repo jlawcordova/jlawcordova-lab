@@ -67,6 +67,8 @@ export function createContext(site, { overlay } = {}) {
   };
 
   const ctx = {
+    /** The open document (the Document from document.mjs); `site` is its old name. */
+    document: site,
     site,
 
     /** Forgets the merged sources, so the next read sees the overlay's latest working copies. */

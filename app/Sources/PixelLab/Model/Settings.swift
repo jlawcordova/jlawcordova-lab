@@ -3,6 +3,9 @@ import Foundation
 
 /// UserDefaults keys (also used by @AppStorage in SettingsView).
 enum SettingsKey {
+    /// The `.pixellab` document the app opens (empty: the default site checkout's).
+    static let document = "documentPath"
+    /// The site checkout, before documents (read once to seed `document`, never written).
     static let site = "sitePath"
     static let node = "nodePath"
     static let appearance = "appearance"

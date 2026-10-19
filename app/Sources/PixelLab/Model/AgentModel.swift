@@ -432,8 +432,9 @@ final class AgentModel {
             parts += ["-e", "PIXELLAB_STATE=\(Self.shellQuote(state))"]
         }
         parts += ["--", "node", Self.shellQuote(cli), "serve", "--mcp"]
-        if let site = app?.sitePath, URL(fileURLWithPath: site).standardizedFileURL != URL(fileURLWithPath: Locator.defaultSitePath).standardizedFileURL {
-            parts += ["--site", Self.shellQuote(site)]
+        // The document the app runs on, when it isn't the default site's.
+        if let location = app?.documentLocation, location != .site(Locator.defaultSitePath) {
+            parts += location.arguments.enumerated().map { $0.offset == 1 ? Self.shellQuote($0.element) : $0.element }
         }
         return parts.joined(separator: " ")
     }

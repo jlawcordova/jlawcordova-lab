@@ -48,7 +48,7 @@ jobs:
             exit 1
           fi
 
-      # The site is the source of truth for the engine and the art. The CLI
+      # The site holds the art the suites pin (the engine is this repo's). The CLI
       # tests copy from it and the smoke test runs against a copy; nothing
       # writes to this clone.
       - name: Fetch the site

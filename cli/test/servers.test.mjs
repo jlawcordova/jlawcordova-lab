@@ -32,7 +32,8 @@ describe('serve --stdio', needsSite, () => {
     const { result } = await server.request('session.info');
     assert.equal(result.name, 'pixellab');
     assert.equal(result.protocol, 1);
-    assert.equal(result.site, site.root);
+    assert.equal(result.site, join(site.root, 'src/assets/pixel-art/source'), 'site is the document root (the legacy source folder here)');
+    assert.deepEqual(result.document, { root: result.site, name: 'site', kind: 'legacy-site', publishDir: join(site.root, 'src/assets/pixel-art'), siteRoot: site.root });
     assert.equal(result.stateDir, state);
     assert.equal(result.saves, 'direct');
     assert.deepEqual(result.docs, []);

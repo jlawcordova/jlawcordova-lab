@@ -3,8 +3,9 @@ import Foundation
 
 /// A test hook: drives the app's model from a script, with no UI automation,
 /// and snapshots the window between steps. Set `PIXELLAB_SCRIPT=<file>` (and
-/// `PIXELLAB_SITE` to a temp copy of the site: the runner refuses the real
-/// checkout, since scripts save and build). One action per line, `#` comments:
+/// `PIXELLAB_DOC` to a temp copy of a document, or `PIXELLAB_SITE` to a temp
+/// copy of the site: the runner refuses the real checkout and anything inside
+/// it, since scripts save and publish). One action per line, `#` comments:
 ///
 ///     open scene:hero-island      appearance dark|light   size 1440x900
 ///     tool select|place|pan       library <object>        level <n>
@@ -14,10 +15,10 @@ import Foundation
 ///     key <spec> (right, opt+up, shift+down, delete, return, esc, v, 2, ])
 ///     move <dc> <dr> [<dl>]       nudge <dx> <dy>         set <col|row|level|x|y> <n>
 ///     class <text>  id <text>     raise lower duplicate remove snap
-///     undo redo save [force] revert build done
+///     undo redo save [force] revert publish [<dir>] done   saveas <path.pixellab>
 ///     time <ms>  play  pause  tracks on|off   zoom fit|1-4   sidebar library|items
 ///     search <text>   wait <ms>   snapshot <file.png>   log <text>
-///     expect dirty|selected|object|at|items|problems|build|hint|tool|time <value>
+///     expect dirty|selected|object|at|items|problems|build|outputs|publishdir|document|tool|time <value>
 ///     expect scenes|objects|zoom|badge|theme|ghosttime <value>   expect scenepixel <x>,<y> <#RRGGBB|empty>
 ///
 /// Object mode (pixels are object.render pixels at scale 1: a sprite's map
@@ -83,10 +84,11 @@ final class ScriptRunner {
 
     private func run(_ model: AppModel) async {
         let env = ProcessInfo.processInfo.environment
-        let site = (env["PIXELLAB_SITE"] ?? "").isEmpty ? nil : URL(fileURLWithPath: env["PIXELLAB_SITE"]!).standardizedFileURL.resolvingSymlinksInPath().path
+        let given = [env["PIXELLAB_DOC"], env["PIXELLAB_SITE"]].compactMap { $0 }.first { !$0.isEmpty }
+        let target = given.map { URL(fileURLWithPath: $0).standardizedFileURL.resolvingSymlinksInPath().path }
         let real = URL(fileURLWithPath: Locator.defaultSitePath).standardizedFileURL.resolvingSymlinksInPath().path
-        guard let site, site != real else {
-            log("refusing to run: set PIXELLAB_SITE to a temp copy of the site (not \(real))")
+        guard let target, target != real, !target.hasPrefix(real + "/") else {
+            log("refusing to run: set PIXELLAB_DOC (or PIXELLAB_SITE) to a temp copy of the document or site, not \(real) or anything inside it")
             exit(2)
         }
         guard lines.contains(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty && !$0.hasPrefix("#") }) else {
@@ -98,7 +100,7 @@ final class ScriptRunner {
         while Date().timeIntervalSince(started) < 60 {
             if case .ready = model.phase, model.document != nil { break }
             if case .setup(let p) = model.phase {
-                log("setup problem: \([p.node, p.site, p.cli, p.server].compactMap { $0 }.joined(separator: "; "))")
+                log("setup problem: \([p.node, p.document, p.cli, p.server].compactMap { $0 }.joined(separator: "; "))")
                 exit(2)
             }
             try? await Task.sleep(for: .milliseconds(100))
@@ -244,7 +246,7 @@ final class ScriptRunner {
                 case .char("d"): await editor.duplicate()
                 case .char("z"): if k.shift { await model.redo() } else { await model.undo() }
                 case .char("s"): await model.save()
-                case .char("b"): await model.buildArt()
+                case .char("b"): await model.publish()
                 case .char("]"): await editor.raise()
                 case .char("["): await editor.lower()
                 default: throw Failure("no menu command for \(words[1])")
@@ -278,10 +280,26 @@ final class ScriptRunner {
             if !ok, let a = model.saveAlert { return "refused (\(a.kind)): \(a.message)" }
             return ok ? model.lastEdit : "not saved"
         case "revert": await model.revert(); return nil
-        case "build":
-            await model.buildArt()
-            guard let b = model.build else { throw Failure("no build") }
-            return b.result.map { "ok=\($0.ok) code=\($0.code.map(String.init) ?? "-") \(Int($0.ms)) ms, \($0.report.count) report lines" } ?? b.error
+        case "build", "publish":
+            // `publish [dir]`: into the document's publish folder, or the given one (no panel opens under a script).
+            await model.publish(dir: words.count > 1 ? words[1] : nil)
+            guard let b = model.build else { throw Failure("no publish") }
+            return b.result.map { "ok=\($0.ok) \(Int($0.ms)) ms, \($0.outputs.count) outputs to \($0.publishDir), \($0.problems.count) problems" } ?? b.error
+        case "saveas":
+            // `saveas <path>`: document.copy, then the app switches to the copy.
+            let to = try arg(words, 1)
+            await model.saveAs(to: to)
+            let expected = to.hasSuffix(".pixellab") ? to : "\(to).pixellab"
+            let started = Date()
+            while Date().timeIntervalSince(started) < 30 {
+                if case .ready = model.phase, model.sessionInfo?.document?.root == expected { break }
+                if model.notice != nil { break }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            guard case .ready = model.phase, model.sessionInfo?.document?.root == expected else {
+                throw Failure(model.notice ?? "the copy didn't open; still on \(model.sessionInfo?.document?.root ?? "?")")
+            }
+            return "now \(expected)"
         case "done":
             model.build = nil
             model.saveAlert = nil
@@ -671,7 +689,10 @@ final class ScriptRunner {
         case "zoom": got = String(model.effectiveZoom)
         case "badge": got = NSApp.dockTile.badgeLabel ?? "none"
         case "theme": got = model.stageDark ? "dark" : "light"
-        case "hint": got = model.build?.result?.hint ?? "none"
+        case "outputs": got = model.build?.result.map { String($0.outputs.count) } ?? "none"
+        case "publishdir": got = model.build?.result?.publishDir ?? model.sessionInfo?.document?.publishDir ?? "none"
+        case "document": got = model.sessionInfo?.document?.name ?? "none"
+        case "documentkind": got = model.sessionInfo?.document?.kind ?? "none"
         case "scenepixel":
             // A pixel of the stage's scene render, in scene pixels: "#RRGGBB" or empty.
             let parts = words.dropFirst(2)

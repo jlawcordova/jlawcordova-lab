@@ -5,7 +5,7 @@
 ```sh
 node cli/bin/pixellab.mjs help              # every command, from the registry
 node cli/bin/pixellab.mjs scene --help      # one group
-node cli/bin/pixellab.mjs site info --json  # a command, as JSON
+node cli/bin/pixellab.mjs document info --json  # a command, as JSON
 npm test                                    # the suites in cli/test/, must show "# fail 0"
 ```
 
@@ -18,14 +18,15 @@ npm test                                    # the suites in cli/test/, must show
 | `lib/argv.mjs` | Parses the command line against the registry: the longest run of words that names a command, positionals into the command's `args`, every param as a `--kebab-case` flag, the global flags (`GLOBAL_FLAGS`). |
 | `lib/params.mjs` | `checkParams()`: the JSON Schema subset every door checks params with (type, enum, pattern, minimum, maximum, minItems, maxItems, items, required, default). Refuses unknown params; with `coerce`, turns command-line strings into the declared types. |
 | `lib/registry.mjs` | The registry: `createRegistry()` checks each definition (`checkDefinition()`), sorts by name, and `call(ctx, name, params)` checks params and runs. `registry` is the built-in list. |
-| `lib/commands/*.mjs` | The commands, one file per area: `site` (site.info, palette.get), `scene` (read), `scene-edit`, `object` (read), `object-edit`, `check`, `art`, `doc` (session commands), `proposal` (proposals, activity.list). `common.mjs` holds shared params and helpers. |
+| `lib/commands/*.mjs` | The commands, one file per area: `document` (document.info, document.new, document.copy, palette.get), `scene` (read), `scene-edit`, `object` (read), `object-edit`, `check`, `art` (art.build, art.preview, art.sizes), `doc` (session commands), `proposal` (proposals, activity.list). `common.mjs` holds shared params and helpers. |
 | `lib/context.mjs` | `createContext(site, { overlay })`: what a command runs against. `ctx.sources()`, `ctx.doc(kind, name)`, `ctx.names(kind)`, `ctx.find(query)`; memoized per call, `ctx.invalidate()` after an edit. Commands never read the disk themselves. |
 | `lib/session.mjs` | `Session`: open docs as in-memory working copies with undo and redo, plugged into the ctx as its overlay, plus `ctx.edit()`. Saving: validate, serialize, conflict check by hash, atomic write; in `'propose'` mode (MCP) a save writes a proposal. |
-| `lib/site.mjs` | Finds the site checkout, checks it looks like the site (`REQUIRED_FILES`), imports the engine modules from it, and loads the art sources. |
+| `lib/document.mjs` | Finds the `.pixellab` document (or the one inside a site checkout, legacy `source/` folders included), reads and checks its manifest, carries the engine modules, and loads the art sources. |
+| `lib/engine/` | The pixel-art engine: `engine`, `iso`, `motion`, `serialize`, `edit`, `starter`, `svg` (from the site, verbatim), `compile` (rect SVG → paths, the lossless check, budgets, `compileScene`, `compileAll`, `sceneSizes`), `preview` (the review PNGs), `starter-palette`. Exported from the package as `pixellab/engine`, `pixellab/compile`, … |
 | `lib/scene-ops.mjs` | The scene edits, ported from the site's web lab (`src/components/lab/scene-mode.ts`); each function names the lab function it follows. |
 | `lib/render.mjs` | Scenes and objects to transparent PNGs at an integer scale, with each item's bounds for hit-testing; poses moving items at a time; the night theme's shadow color. |
 | `lib/diff.mjs` | A unified line diff (Myers), for `--dry-run`, `doc.save` and proposals. |
-| `lib/errors.mjs` | `CommandError` (a stable `code`, an exit code, optional `details`), `UsageError`, `NotFoundError`, `SiteError`. |
+| `lib/errors.mjs` | `CommandError` (a stable `code`, an exit code, optional `details`), `UsageError`, `NotFoundError`, `DocumentError`. |
 | `lib/serve.mjs` | `pixellab serve --stdio \| --mcp [--direct]`. |
 | `lib/jsonrpc.mjs` | Newline-delimited JSON-RPC 2.0 over two streams, shared by both servers; maps errors to JSON-RPC codes. |
 | `lib/server-stdio.mjs` | The app's server: one session, the commands as methods plus `session.info` and `shutdown`, and the notifications. `VERSION` here is the app's and the MCP server's version. |
@@ -40,8 +41,8 @@ npm test                                    # the suites in cli/test/, must show
 ```js
 /** @type {import('../registry.mjs').Command} */
 const info = {
-  name: 'site.info',                 // dotted lowercase words; the MCP tool is site_info
-  summary: 'Show the site checkout in use and what it holds',
+  name: 'document.info',             // dotted lowercase words; the MCP tool is document_info
+  summary: 'Show the document in use and what it holds',
   description: 'Longer help text…',  // optional
   params: { type: 'object', properties: {} },  // a JSON Schema object
   args: [],                          // params the CLI fills from positionals, in order
@@ -74,9 +75,9 @@ async run(ctx, params) {
 ## Adding a command
 
 1. Add the definition to the right file in `lib/commands/` and to its default export. A new area gets a new file, added to the list at the bottom of `lib/registry.mjs`.
-2. Use the engine for anything the art's format decides (validate, serialize, edit, starters), from `ctx.site.engine` and friends: never reimplement it here. Scene edits go in `lib/scene-ops.mjs`, following the web lab.
+2. Use the engine (`lib/engine/`) for anything the art's format decides (validate, serialize, edit, starters, compile, previews), from `ctx.site.engine` and friends (`ctx.document` is the same object): never reimplement it in a command. Scene edits go in `lib/scene-ops.mjs`.
 3. Throw `CommandError` with a stable `code` for failures a person or agent can act on (`not_found`, `invalid`, `conflict`, …), `UsageError` for bad params beyond the schema.
-4. Test it in `cli/test/`, named after the requirement it proves (`R3: …`), against a copy of the site (`makeSite()` in `test/helpers.mjs`). See [Testing](../docs/testing.md).
+4. Test it in `cli/test/`, named after the requirement it proves (`R3: …`), against the sample document (`makeDocument()` in `test/helpers.mjs`) or, for the owner's art, a copy of the site (`makeSite()`). See [Testing](../docs/testing.md).
 5. Run `npm run docs:cli` to regenerate [docs/cli.md](../docs/cli.md), and `npm test`. A test fails if the reference is out of date.
 6. It's now on the command line, in the stdio server and in MCP. If agents shouldn't have it, add it to `LEFT_OUT` in `lib/server-mcp.mjs` with the reason. If the app needs it, model its result in `app/Sources/PixelLab/Server/Protocol.swift` (or decode it where it's used) and call it through `ServerConnection` (see [the app's README](../app/README.md#adding-a-feature)).
 

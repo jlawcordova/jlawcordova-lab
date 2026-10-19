@@ -51,16 +51,26 @@ struct PixelLabCommands: Commands {
             Button("New Object…") { model.showNew(.object) }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .disabled(model.phase != .ready)
+            Divider()
+            Button("New Document…") { Task { await model.newDocument() } }
+                .keyboardShortcut("n", modifiers: [.command, .option])
+            Button("Open Document…") { Task { await model.openDocument() } }
+                .keyboardShortcut("o")
         }
         CommandGroup(replacing: .saveItem) {
             Button("Save") { Task { await model.save() } }
                 .keyboardShortcut("s")
                 .disabled(!model.canSave)
+            Button("Save As…") { Task { await model.saveAs() } }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+                .disabled(model.phase != .ready)
             Button("Revert to Saved") { Task { await model.revert() } }
                 .disabled(!model.canSave)
             Divider()
-            Button("Build Art") { Task { await model.buildArt() } }
+            Button("Publish") { Task { await model.publish() } }
                 .keyboardShortcut("b")
+                .disabled(model.phase != .ready || model.build?.running == true)
+            Button("Publish to Folder…") { Task { await model.publish(askFolder: true) } }
                 .disabled(model.phase != .ready || model.build?.running == true)
         }
         CommandGroup(after: .pasteboard) {
@@ -144,6 +154,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// A `.pixellab` opened from Finder (double-click, drag onto the icon): it
+    /// becomes the document, after any unsaved work is dealt with.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let url = urls.first(where: { $0.pathExtension == "pixellab" }) ?? urls.first else { return }
+        Task { await AppModel.shared.switchDocument(to: url.path) }
+    }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !terminating else { return .terminateNow }
