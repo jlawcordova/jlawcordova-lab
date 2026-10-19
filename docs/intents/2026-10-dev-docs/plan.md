@@ -4,7 +4,7 @@
 
 - Docs: `docs/README.md` (new), `docs/architecture.md` (new), `docs/contributing.md` (new), `docs/testing.md` (new), `cli/README.md` (new), `app/README.md` (new), `scripts/README.md` (new), `README.md`, `CLAUDE.md`.
 - Generator: `scripts/docs-site/build.mjs` (new), `scripts/docs-site/markdown.mjs` (new), `scripts/docs-site/style.css` (new), `scripts/docs-site/site.js` (new), `package.json` (the `docs:site` script).
-- Tests: `cli/test/docs-site.test.mjs` (new).
+- Tests: `cli/test/docs-site.test.mjs` (new). Snapshots: `docs/screenshots/docs-site-*.jpg` (new).
 - Deployment: `.github/workflows/docs.yml` (new).
 - This change: `docs/intents/2026-10-dev-docs/{intent,spec,plan}.md` (new).
 
@@ -15,9 +15,9 @@ Nothing in `cli/lib/`, `app/` or `scripts/acceptance/` changes, and nothing touc
 One slice, straight to a PR into `main`, on `feat/dev-docs`: the main session does it in one sitting, and the owner asked for one PR. One commit per step:
 
 1. The change record: intent, spec and plan.
-2. The developer docs (R1, R2): the seven new Markdown files, the README's Developer docs section.
-3. The generator and its tests (R3–R7): `scripts/docs-site/`, `npm run docs:site`, `cli/test/docs-site.test.mjs`; fix any broken link the check finds in the docs.
-4. The workflow (R8) and the docs about it (R9): `.github/workflows/docs.yml`, the deploy notes in `docs/contributing.md` and `scripts/README.md`, `CLAUDE.md`'s command list.
+2. The developer docs (R1, R2): the seven new Markdown files, the README's Developer docs section. (As built, this step also wrote the docs-site and deploy sections of `docs/contributing.md` and `scripts/README.md`, so the docs landed whole.)
+3. The generator and its tests (R3–R7): `scripts/docs-site/`, `npm run docs:site`, `cli/test/docs-site.test.mjs`; fix anything the check or the snapshots find in the docs (as built: the architecture diagrams were narrowed to fit the page), and add the snapshots to `docs/screenshots/docs-site-*.jpg`.
+4. The workflow (R8) and the docs about it (R9): `.github/workflows/docs.yml`, `CLAUDE.md`'s command list and checks.
 
 ## Workflow and reviews
 
@@ -36,4 +36,4 @@ The main session runs every step on `feat/dev-docs` and opens the PR into `main`
 - `npm run docs:site` builds with no broken links; `npm run docs:cli` leaves `git status` clean.
 - Snapshots of the built site in the browser: the home page and `docs/cli.html` in night and day, and one page at phone width, looked at before reporting.
 - The PR's CI run of the Docs site workflow's build job passes; the deploy runs after merge once Pages is enabled.
-- `app/`, `cli/lib/` and `scripts/acceptance/` are unchanged, so `swift build`, `scripts/test-app.sh` and `scripts/acceptance.sh` aren't affected; they are not re-run for this change.
+- `app/`, `cli/lib/` and `scripts/acceptance/` are unchanged. `cli/` gains a test file (and `cli/README.md`, which `build-app.sh` copies into the bundle with the CLI), so `scripts/build-app.sh` and `scripts/acceptance.sh` run once, as `CLAUDE.md` asks for any `cli/` change.
