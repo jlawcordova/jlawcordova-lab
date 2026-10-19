@@ -147,6 +147,14 @@ An open doc without unsaved changes reloads from disk when its file changes; one
 
 ### Setup for Claude Code
 
+With the app installed by `scripts/install.sh`, point Claude Code at the CLI inside it (the Agent window's Connect row shows the same command):
+
+```sh
+claude mcp add pixellab -- node "$HOME/Applications/Pixel Lab.app/Contents/Resources/cli/bin/pixellab.mjs" serve --mcp
+```
+
+Or at this repo's CLI, for development:
+
 ```sh
 claude mcp add pixellab -- node /Users/jlawcordova/Projects/jlawcordova-lab/cli/bin/pixellab.mjs serve --mcp
 ```
@@ -192,7 +200,7 @@ Run the site's npm run art: validate every source and write the generated SVGs.
 pixellab art build
 ```
 
-Runs `npm run art --silent` in the site checkout (timeout 5 minutes) and returns { ok, code, report: [stdout lines], errors: [stderr lines], ms, unsaved }. It builds the files on disk; unsaved lists the open docs with changes it leaves out.
+Runs `npm run art --silent` in the site checkout (timeout 5 minutes) and returns { ok, code, report: [stdout lines], errors: [stderr lines], hint, ms, unsaved }. hint (or null) says what to do when the build failed for a known setup reason (npm not found, the site's node_modules missing). It builds the files on disk; unsaved lists the open docs with changes it leaves out.
 
 read-only · writes files directly · not an MCP tool
 
@@ -738,7 +746,7 @@ edits docs · writes files directly · not an MCP tool
 Render a proposal's doc as it would be once applied, without writing anything.
 
 ```
-pixellab proposal render <id> [--scale <n>] [--time <n>] [--frame <n>] [--layers <n,…>] [--out <file.png>]
+pixellab proposal render <id> [--scale <n>] [--time <n>] [--frame <n>] [--layers <n,…>] [--theme <light|dark>] [--out <file.png>]
 ```
 
 The proposed source over the files on disk, rendered as scene.render or object.render renders the doc (same params, same result shape), plus { id, doc, kind, baseMatches }. The Agent window draws it over the stage as a ghost.
@@ -752,6 +760,7 @@ read-only · MCP tool `proposal_render`
 | `--time` | integer |  | ms into the motion and loops (a scene: default 0; an object: overrides frame) (at least 0) |
 | `--frame` | integer | default `0` | an object's frame (at least 0) |
 | `--layers` | list of integer |  | only these layers of a sprite, as object.render's --layers |
+| `--theme` | `light` \| `dark` | default `"light"` | a scene's theme, as scene.render's --theme |
 
 ```sh
 pixellab proposal render 20261019-142301-a1b2c3 --scale 2 --out /tmp/proposal.png
@@ -935,7 +944,7 @@ edits docs · MCP tool `scene_remove`
 Render a scene to a transparent PNG, with item bounds.
 
 ```
-pixellab scene render <name> [--scale <n>] [--time <n>] [--show <text>] [--out <file.png>]
+pixellab scene render <name> [--scale <n>] [--time <n>] [--theme <light|dark>] [--show <text>] [--out <file.png>]
 ```
 
 Returns { png (base64), scale, viewBox, width, height, time, items: [{ path, object, at, id, bounds: [x, y, w, h] }] }. Bounds are in output pixels (scale included), for hit-testing. Of each run of data-class variant groups only the first shows, or the one holding --show. On the command line, --out <file.png> writes the PNG.
@@ -947,11 +956,13 @@ read-only · MCP tool `scene_render`
 | `name` (positional) | string | required | scene name (or scenes/<name>) |
 | `--scale` | integer | default `1` | whole-pixel zoom of the PNG (1 to 16) |
 | `--time` | integer |  | ms into the animation: frame loops and motion tracks (default 0, the rest frame) (at least 0) |
+| `--theme` | `light` \| `dark` | default `"light"` | dark draws as the site's dark theme: the hero island's drop shadow (data-enter="shadow") takes the dark page color |
 | `--show` | string |  | an item path whose variant group to show, like 12.0 |
 
 ```sh
 pixellab scene render hero-island --scale 2 --out /tmp/hero.png
 pixellab scene render range-sprite --time 400 --json
+pixellab scene render hero-island --theme dark --out /tmp/hero-dark.png
 ```
 
 #### scene.set
