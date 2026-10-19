@@ -1,4 +1,4 @@
-// Proposals and the activity log (docs/plan.md, "Agents propose, people
+// Proposals and the activity log (docs/intents/2026-10-mac-app/plan.md, "Agents propose, people
 // approve"): an MCP agent's doc.save writes a proposal to the state dir;
 // a person lists, shows (with a diff), applies or rejects it. activity.list
 // tails the log of MCP tool calls.

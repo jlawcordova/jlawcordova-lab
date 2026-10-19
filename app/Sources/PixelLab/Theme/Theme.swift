@@ -2,7 +2,7 @@ import AppKit
 import CoreText
 import SwiftUI
 
-/// Board 03, "Field notebook" (docs/plan.md): the site's warm palette in a
+/// Board 03, "Field notebook" (docs/intents/2026-10-mac-app/plan.md): the site's warm palette in a
 /// real Mac window. Every token has a night (dark) and a day (light) value and
 /// follows the effective appearance, which the Appearance setting drives.
 enum Theme {

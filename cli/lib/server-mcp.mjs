@@ -3,7 +3,7 @@
 // initialize, notifications/initialized, ping, tools/list and tools/call,
 // as newline-delimited JSON-RPC 2.0.
 //
-// Agents propose, people approve (docs/plan.md): edits stay in the server's
+// Agents propose, people approve (docs/intents/2026-10-mac-app/plan.md): edits stay in the server's
 // session, and doc_save writes a proposal to the state dir instead of the
 // site, unless the server was started with --direct. Every tools/call
 // appends { time, tool, args, ok, summary } to activity.jsonl there.

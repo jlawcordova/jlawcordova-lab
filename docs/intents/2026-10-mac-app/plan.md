@@ -1,5 +1,7 @@
 # Pixel Lab for Mac: architecture and build plan
 
+> This plan predates the intent → spec → plan workflow (`CLAUDE.md`, "How changes flow"), so it has no `intent.md` or `spec.md` and doesn't follow the `write-plan` template. It stays as the architecture and design record that later specs build on. Its "How we build it" section (`slice/<name>` branches off `feat/mac-app`) is superseded by the `write-plan` skill's "Branches".
+
 > **Status (2026-10-19): all seven slices are done** (PRs #1–#7 into `feat/mac-app`); the final PR `feat/mac-app` → `main` is open for review. Every item of "What ready to use means" below was verified with scripted runs on a temp copy of the site and read-only snapshots of the real one (the checklist is in the final PR). Install with `scripts/install.sh`; the README has the tour, shortcuts, MCP setup and troubleshooting. This file stays as the design record.
 >
 > Follow-ups, not blocking day-to-day use:
@@ -39,7 +41,7 @@ app/                 SwiftPM package for the Mac app (SwiftUI + AppKit), macOS 1
   Sources/PixelLab/
 scripts/
   build-app.sh       swift build → "build/Pixel Lab.app" (Info.plist, icon, CLI copied into Resources, ad-hoc signed)
-docs/plan.md         this file
+docs/plan.md         this file (now docs/intents/2026-10-mac-app/plan.md)
 ```
 
 ## The site is the source of truth

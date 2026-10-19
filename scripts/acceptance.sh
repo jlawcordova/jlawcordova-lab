@@ -1,5 +1,5 @@
 #!/bin/zsh
-# The acceptance pass of docs/plan.md ("What ready to use means"), end to end
+# The acceptance pass of docs/intents/2026-10-mac-app/plan.md ("What ready to use means"), end to end
 # on a temp copy of the site: scene edits → save → build art, object paint →
 # save (scripts/acceptance/scene-object.txt), then an agent over MCP saves two
 # proposals (mcp-agent.mjs, through the app bundle's CLI) and the Agent window
