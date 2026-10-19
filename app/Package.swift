@@ -17,5 +17,12 @@ let package = Package(
             resources: [.process("Resources")],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
+        // Swift Testing, which the Command Line Tools ship: run scripts/test-app.sh.
+        .testTarget(
+            name: "PixelLabTests",
+            dependencies: ["PixelLab"],
+            path: "Tests/PixelLabTests",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
     ]
 )

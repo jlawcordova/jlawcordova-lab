@@ -8,6 +8,8 @@ Pixel Lab for Mac: a `pixellab` CLI and MCP server (Node, zero dependencies) and
 - CLI: `node cli/bin/pixellab.mjs help`
 - App: `swift build --package-path app`, then `scripts/build-app.sh` → `build/Pixel Lab.app`
 - App snapshot (no screen recording needed; read-only): `scripts/snapshot.sh <out.png> [scene:hero-island] [dark|light] [zoom]`
+- App unit tests (Swift Testing, works with the Command Line Tools): `scripts/test-app.sh`
+- App test hook (drives the model headlessly, no UI automation): `PIXELLAB_SCRIPT=<file> PIXELLAB_SITE=<temp site copy> PIXELLAB_STATE=<temp dir> "build/Pixel Lab.app/Contents/MacOS/PixelLab"`. One action per line (`open scene:hero-island`, `select 145.0`, `click <x> <y>`, `library pine`, `hover 3 -1 1`, `place 3 -1 1`, `key opt+up`, `drag 1 0 hold`, `mouse down|drag|up <x> <y> [opt]`, `save`, `build`, `time 9400`, `snapshot <png>`, `expect at 4,-1,1`, …; the full list is in `app/Sources/PixelLab/Support/ScriptRunner.swift`). It refuses to run without `PIXELLAB_SITE` or against the real checkout, logs each step to stderr, and exits 0 only if every step and `expect` passed. Make the temp site by copying the site's `src/`, `scripts/`, `package.json`, `package-lock.json` and symlinking its `node_modules` (so `build` can run `npm run art`).
 - App icon: `node scripts/make-icon.mjs` rewrites `app/Sources/PixelLab/Resources/AppIcon.png` (build-app.sh makes the .icns)
 - The app builds with the Command Line Tools, which lack the SwiftUI macro plugin: don't use `@State` (keep view state in `AppModel`); `@Observable`, `@Environment`, `@AppStorage`, `@FocusState` are fine.
 

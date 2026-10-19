@@ -57,6 +57,25 @@ final class AppModel {
     var notice: String?
 
     let thumbnails = ThumbnailStore()
+    let editor = SceneEditor()
+    let timeline = TimelineModel()
+    /// The last edit's summary (the status line under the stage).
+    var lastEdit: String?
+    /// Open docs with unsaved changes (from `doc.changed`), for Save/Don't Save on quit.
+    var dirtyDocs: Set<String> = []
+    /// A save that failed in a way the user decides about.
+    var saveAlert: SaveAlert?
+    /// The Build art sheet.
+    var build: BuildState?
+    /// The user chose Don't Save: close and quit without asking again.
+    @ObservationIgnored var discardConfirmed = false
+    @ObservationIgnored weak var mainWindow: NSWindow?
+    @ObservationIgnored let script = ScriptRunner.fromEnvironment()
+
+    init() {
+        editor.app = self
+        timeline.app = self
+    }
     @ObservationIgnored private(set) var connection: ServerConnection?
     @ObservationIgnored private var eventsTask: Task<Void, Never>?
     @ObservationIgnored let snapshot = SnapshotRequest.fromEnvironment()
@@ -151,10 +170,13 @@ final class AppModel {
     private func handle(_ event: ServerEvent) async {
         switch event {
         case .notification(.docChanged(let status)):
+            if status.dirty { dirtyDocs.insert(status.doc) } else { dirtyDocs.remove(status.doc) }
             guard let doc = document, doc.ref.id == status.doc else { return }
             doc.status = status
+            timeline.invalidate()
             requestRender()
             requestCheck()
+            requestItems()
         case .notification(.filesChanged(let files)):
             var objectsChanged: [String] = []
             var everything = false
@@ -166,8 +188,10 @@ final class AppModel {
             }
             if everything { thumbnails.invalidateAll() } else { thumbnails.invalidate(objectsChanged) }
             await loadLists()
+            timeline.invalidate()
             requestRender()
             requestCheck()
+            requestItems()
         case .notification:
             break // proposals and activity: the Agent window (slice 6)
         case .restarted(let info):
@@ -176,8 +200,11 @@ final class AppModel {
             thumbnails.reset(connection: connection)
             if let doc = document {
                 _ = try? await connection?.call("doc.open", ["doc": .string(doc.ref.id)])
+                dirtyDocs = []
+                timeline.invalidate()
                 requestRender()
                 requestCheck()
+                requestItems()
             }
         case .stopped(let reason):
             phase = .setup(SetupProblem(server: reason))
@@ -232,14 +259,20 @@ final class AppModel {
             doc.summary = object.description
         }
         document = doc
-        if snapshot == nil { UserDefaults.standard.set(ref.id, forKey: SettingsKey.lastDoc) }
+        if snapshot == nil, script == nil { UserDefaults.standard.set(ref.id, forKey: SettingsKey.lastDoc) }
+        editor.reset()
+        timeline.reset()
         do {
-            doc.status = try await connection.call("doc.open", ["doc": .string(ref.id)], as: DocStatus.self)
+            let status = try await connection.call("doc.open", ["doc": .string(ref.id)], as: DocStatus.self)
+            doc.status = status
+            if status.dirty { dirtyDocs.insert(status.doc) }
         } catch {
             doc.error = error.localizedDescription
         }
+        await loadMotion()
         requestRender()
         requestCheck()
+        requestItems()
     }
 
     /// The Scene/Object segmented control: show the last doc of that kind.
@@ -263,13 +296,28 @@ final class AppModel {
         Task {
             repeat {
                 doc.needsRender = false
+                let isScene = doc.ref.kind == .scene
+                let animated = isScene && timeline.hasMotion
+                let t = timeline.renderTime
+                let generation = timeline.generation
+                if animated, let frame = timeline.cached(t), let image = PixelImage(png: frame.png, renderScale: frame.scale) {
+                    doc.render = StageImage(image: image, viewBox: frame.viewBox, scale: frame.scale, items: frame.items, anchor: nil, time: Double(t))
+                    doc.renderCount += 1
+                    continue
+                }
                 do {
-                    let method = doc.ref.kind == .scene ? "scene.render" : "object.render"
-                    let r: RenderResult = try await connection.call(method, ["name": .string(doc.ref.name), "scale": 1])
+                    let method = isScene ? "scene.render" : "object.render"
+                    var params: [String: JSONValue] = ["name": .string(doc.ref.name), "scale": 1]
+                    if animated { params["time"] = JSONValue(t) }
+                    let r: RenderResult = try await connection.call(method, params)
+                    let viewBox = CGRect(x: r.viewBox[0], y: r.viewBox[1], width: r.viewBox[2], height: r.viewBox[3])
+                    if animated {
+                        timeline.store(t, .init(png: r.png, scale: r.scale, viewBox: viewBox, items: r.items), generation: generation)
+                    }
                     if let image = PixelImage(png: r.png, renderScale: r.scale) {
                         doc.render = StageImage(
                             image: image,
-                            viewBox: CGRect(x: r.viewBox[0], y: r.viewBox[1], width: r.viewBox[2], height: r.viewBox[3]),
+                            viewBox: viewBox,
                             scale: r.scale,
                             items: r.items,
                             anchor: r.anchor.map { CGPoint(x: $0[0], y: $0[1]) },
@@ -283,6 +331,43 @@ final class AppModel {
                 doc.renderCount += 1
             } while doc.needsRender && document === doc
             doc.rendering = false
+        }
+    }
+
+    /// Loads the open scene's items (the Items tree, the inspector, hit-testing
+    /// object art); coalesces like `requestRender`.
+    func requestItems() {
+        guard let doc = document, doc.ref.kind == .scene, let connection else { return }
+        if doc.loadingItems {
+            doc.needsItems = true
+            return
+        }
+        doc.loadingItems = true
+        Task {
+            repeat {
+                doc.needsItems = false
+                do {
+                    let r: SceneItemsResult = try await connection.call("scene.items", ["name": .string(doc.ref.name)])
+                    doc.setItems(r)
+                    thumbnails.prefetch(r.items.map(\.object))
+                } catch {
+                    notice = "Couldn't list the items of \(doc.ref.name): \(error.localizedDescription)"
+                }
+                if timeline.hasMotion || !timeline.tracks.isEmpty { await loadMotion() }
+            } while doc.needsItems && document === doc
+            doc.loadingItems = false
+            if document === doc { editor.syncDrafts() }
+        }
+    }
+
+    /// The open scene's motion: loop length and tracks (`scene.show --doc`).
+    func loadMotion() async {
+        guard let doc = document, doc.ref.kind == .scene, let connection else { return }
+        do {
+            let r: SceneShowMotion = try await connection.call("scene.show", ["name": .string(doc.ref.name), "doc": true])
+            if document === doc { timeline.load(r) }
+        } catch {
+            if document === doc { timeline.load(SceneShowMotion(name: doc.ref.name, doc: nil)) }
         }
     }
 
@@ -317,16 +402,88 @@ final class AppModel {
     var canUndo: Bool { document?.status?.canUndo ?? false }
     var canRedo: Bool { document?.status?.canRedo ?? false }
 
-    func save() async {
-        guard let doc = document, let connection else { return }
+    /// Saves the open doc. `invalid` and `conflict` become an alert the user
+    /// answers; returns whether it saved.
+    @discardableResult
+    func save(force: Bool = false) async -> Bool {
+        guard let doc = document else { return false }
+        return await save(doc.ref, force: force)
+    }
+
+    @discardableResult
+    func save(_ ref: DocRef, force: Bool = false) async -> Bool {
+        guard let connection else { return false }
         do {
-            let r: SaveResult = try await connection.call("doc.save", ["doc": .string(doc.ref.id)])
-            doc.status = DocStatus(doc: r.doc, dirty: r.dirty, canUndo: r.canUndo, canRedo: r.canRedo)
+            var params: [String: JSONValue] = ["doc": .string(ref.id)]
+            if force { params["force"] = true }
+            let r: SaveResult = try await connection.call("doc.save", params)
+            let status = DocStatus(doc: r.doc, dirty: r.dirty, canUndo: r.canUndo, canRedo: r.canRedo)
+            if let doc = document, doc.ref == ref { doc.status = status }
+            if r.dirty { dirtyDocs.insert(r.doc) } else { dirtyDocs.remove(r.doc) }
             notice = nil
+            lastEdit = r.wrote == false ? "\(ref.name) was already saved" : "Saved \(r.file ?? ref.name)"
+            return true
         } catch let e as RPCError {
-            notice = "Couldn't save \(doc.ref.name): \(e.message)"
+            switch e.dataCode {
+            case "invalid":
+                saveAlert = SaveAlert(kind: .invalid, doc: ref, message: e.message, problems: Self.lines(e.details))
+            case "conflict":
+                saveAlert = SaveAlert(kind: .conflict, doc: ref, message: e.message, problems: [])
+            default:
+                notice = "Couldn't save \(ref.name): \(e.message)"
+            }
         } catch {
-            notice = "Couldn't save \(doc.ref.name): \(error.localizedDescription)"
+            notice = "Couldn't save \(ref.name): \(error.localizedDescription)"
+        }
+        return false
+    }
+
+    /// An error's `details` as lines (strings, or objects with message/text).
+    static func lines(_ details: JSONValue?) -> [String] {
+        guard let a = details?.arrayValue else { return details?.stringValue.map { [$0] } ?? [] }
+        return a.compactMap { $0.stringValue ?? $0["text"]?.stringValue ?? $0["message"]?.stringValue }
+    }
+
+    /// Asks Save / Don't Save / Cancel when open docs have unsaved changes.
+    /// Returns whether to go on (close or quit).
+    func confirmUnsaved(window: NSWindow?) async -> Bool {
+        if discardConfirmed || dirtyDocs.isEmpty || script != nil { return true }
+        let refs = dirtyDocs.sorted().compactMap { DocRef(id: $0) }
+        let names = refs.map(\.name)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = names.count == 1
+            ? "Do you want to save the changes you made to \(names[0])?"
+            : "Do you want to save the changes to \(names.count) documents?"
+        alert.informativeText = (names.count == 1 ? "" : names.joined(separator: ", ") + "\n\n") + "Your changes will be lost if you don't save them."
+        alert.addButton(withTitle: "Save")
+        let dont = alert.addButton(withTitle: "Don't Save")
+        dont.hasDestructiveAction = true
+        alert.addButton(withTitle: "Cancel")
+        let response: NSApplication.ModalResponse
+        if let window, window.isVisible { response = await alert.beginSheetModal(for: window) } else { response = alert.runModal() }
+        switch response {
+        case .alertFirstButtonReturn:
+            for ref in refs where !(await save(ref)) { return false }
+            discardConfirmed = true
+            return true
+        case .alertSecondButtonReturn:
+            discardConfirmed = true
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// ⌘B: runs the site's `npm run art` and shows the report.
+    func buildArt() async {
+        guard let connection, build?.running != true else { return }
+        build = BuildState(running: true)
+        do {
+            let r: ArtBuildResult = try await connection.call("art.build")
+            build = BuildState(running: false, result: r)
+        } catch {
+            build = BuildState(running: false, error: error.localizedDescription)
         }
     }
 
@@ -339,6 +496,8 @@ final class AppModel {
         do {
             let r: UndoResult = try await connection.call(method, ["doc": .string(doc.ref.id)])
             doc.status = DocStatus(doc: r.doc, dirty: r.dirty, canUndo: r.canUndo, canRedo: r.canRedo)
+            if r.dirty { dirtyDocs.insert(r.doc) } else { dirtyDocs.remove(r.doc) }
+            if let s = r.summary { lastEdit = s }
         } catch {
             notice = error.localizedDescription
         }
@@ -383,4 +542,21 @@ final class AppModel {
         guard levels.indices.contains(index) else { return }
         zoom = .level(levels[index])
     }
+}
+
+/// A save the server refused: problems to fix, or a file changed on disk.
+struct SaveAlert: Identifiable {
+    enum Kind { case invalid, conflict }
+    var kind: Kind
+    var doc: DocRef
+    var message: String
+    var problems: [String]
+    var id: String { "\(kind)-\(doc.id)" }
+}
+
+/// The Build art sheet: running, then the report.
+struct BuildState {
+    var running: Bool
+    var result: ArtBuildResult?
+    var error: String?
 }
