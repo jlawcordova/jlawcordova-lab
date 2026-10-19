@@ -26,6 +26,8 @@ enum Theme {
     static let gold = dynamic(night: 0xD8B66A, day: 0xD8B66A)
     /// The iso grid: ink at 6% (night), rgba(90,62,43,.10) (day).
     static let grid = dynamic(night: 0xF1E8D8, nightAlpha: 0.07, day: 0x5A3E2B, dayAlpha: 0.12)
+    /// The object stage's checkerboard cells, over the card.
+    static let checker = dynamic(night: 0xF1E8D8, nightAlpha: 0.07, day: 0x5A3E2B, dayAlpha: 0.07)
     /// The lattice's origin lines, a little stronger.
     static let gridStrong = dynamic(night: 0xF1E8D8, nightAlpha: 0.13, day: 0x5A3E2B, dayAlpha: 0.2)
     /// Under the stage's dashed outlines, so they read over any art.

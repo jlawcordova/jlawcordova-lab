@@ -32,6 +32,7 @@ import Foundation
 ///     new scene <name>   new object <name> [block|<w>x<h>|extends]
 ///     newdialog scene|object [<name>] [block|<w>x<h>|extends]   newcancel   newsubmit
 ///     mouse down|drag|up <x> <y> [opt] [shift]   (object pixels in object mode)
+///     mousepath x,y x,y …         (a fast real drag: down, a drag every 4 ms, up)
 ///     expect color|layer|frame|layers|frames|doc|mode|hidden|calls <value>
 ///     expect pixel <x>,<y> <color name|empty>   (the rendered pixel)
 ///
@@ -332,6 +333,29 @@ final class ScriptRunner {
             }
             let scroll = view.enclosingScrollView?.contentView.bounds.origin
             return "view \(Int(geometry.viewPoint(fromScene: scene).x)),\(Int(geometry.viewPoint(fromScene: scene).y))\(scroll.map { "; scrolled to \(Int($0.x)),\(Int($0.y))" } ?? "; no scroll view")\(editor.drag.map { " drag \($0.dc),\($0.dr) px \($0.dx),\($0.dy)" } ?? "")"
+        case "mousepath":
+            // A fast real drag: mouse down at the first object pixel, a drag
+            // event every 4 ms through the rest, up at the last.
+            guard let view = editor.stageView as? StageInputView, let geometry = view.geometry, let window = view.window else { throw Failure("no stage") }
+            let pts = words.dropFirst().compactMap { PixelPoint(spec: $0) }
+            guard pts.count >= 2 else { throw Failure("mousepath x,y x,y …") }
+            for (i, p) in pts.enumerated() {
+                let scene = CGPoint(x: geometry.viewBox.minX + Double(p.x) + 0.5, y: geometry.viewBox.minY + Double(p.y) + 0.5)
+                let type: NSEvent.EventType = i == 0 ? .leftMouseDown : (i == pts.count - 1 ? .leftMouseUp : .leftMouseDragged)
+                guard let event = NSEvent.mouseEvent(with: type, location: view.convert(geometry.viewPoint(fromScene: scene), to: nil), modifierFlags: [],
+                                                     timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                                                     eventNumber: 0, clickCount: 1, pressure: 1) else { throw Failure("no event") }
+                switch type {
+                case .leftMouseDown: view.mouseDown(with: event)
+                case .leftMouseDragged: view.mouseDragged(with: event)
+                default:
+                    view.mouseDragged(with: event)
+                    view.mouseUp(with: event)
+                }
+                try? await Task.sleep(for: .milliseconds(4))
+            }
+            await waitIdle(model.objectEditor)
+            return "\(pts.count) samples, \(model.objectEditor.lastStrokeCalls) paint call\(model.objectEditor.lastStrokeCalls == 1 ? "" : "s")"
         case "layout":
             guard let w = Snapshotter.mainWindow(), let c = w.contentView else { throw Failure("no window") }
             func walk(_ v: NSView, _ depth: Int) -> [String] {

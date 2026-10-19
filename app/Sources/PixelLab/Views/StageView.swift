@@ -124,6 +124,21 @@ struct ObjectGround: View {
                 .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
                 .frame(width: card.width, height: card.height)
                 .offset(x: card.minX, y: card.minY)
+            // A checkerboard of art pixels under the art, so every color
+            // (ink on the night card too) and the transparent pixels show.
+            Canvas(opaque: false, rendersAsynchronously: false) { context, _ in
+                let art = geometry.artRect
+                let w = Int(geometry.viewBox.width), h = Int(geometry.viewBox.height)
+                var path = Path()
+                for y in 0..<max(h, 0) {
+                    for x in 0..<max(w, 0) where (x + y) % 2 == 1 {
+                        path.addRect(CGRect(x: art.minX + CGFloat(x) * geometry.zoom, y: art.minY + CGFloat(y) * geometry.zoom,
+                                            width: geometry.zoom, height: geometry.zoom))
+                    }
+                }
+                context.fill(path, with: .color(Theme.checker))
+            }
+            .frame(width: geometry.contentSize.width, height: geometry.contentSize.height)
         }
         .frame(width: geometry.contentSize.width, height: geometry.contentSize.height, alignment: .topLeading)
         .allowsHitTesting(false)

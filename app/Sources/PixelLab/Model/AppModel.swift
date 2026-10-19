@@ -182,7 +182,11 @@ final class AppModel {
             if status.dirty { dirtyDocs.insert(status.doc) } else { dirtyDocs.remove(status.doc) }
             guard let doc = document, doc.ref.id == status.doc else { return }
             doc.status = status
-            if doc.ref.kind == .object { objectEditor.docChanged() }
+            if doc.ref.kind == .object {
+                objectEditor.docChanged()
+                // The library and scenes show the working copy.
+                thumbnails.invalidate([doc.ref.name])
+            }
             timeline.invalidate()
             requestRender()
             requestCheck()
