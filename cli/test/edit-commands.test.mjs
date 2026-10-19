@@ -477,6 +477,38 @@ describe('sessions', needsSite, () => {
     s.entry('scene:zz-test').doc.items[0].object = 'no-such-object';
     await assert.rejects(call(s, 'doc.save', { doc: 'zz-test' }), (/** @type {any} */ err) => err.code === 'invalid');
   });
+
+  test('proposal.render: the proposed doc over the files on disk, rendered without writing', async () => {
+    const agent = make({ mode: 'propose', agent: 'render-agent' });
+    const person = make();
+    const sceneText = await readFile(file('scenes/zz-test.mjs'), 'utf8');
+    const spriteText = await readFile(file('objects/zz-sprite.mjs'), 'utf8');
+    const now = await call(person, 'scene.render', { name: 'zz-test' });
+    await call(agent, 'scene.place', { name: 'zz-test', object: 'pine', at: [-2, 0, 0] });
+    const scene = await call(agent, 'doc.save', { doc: 'zz-test' });
+    const r = await call(person, 'proposal.render', { id: scene.proposal, scale: 2 });
+    assert.equal(r.kind, 'scene');
+    assert.equal(r.doc, 'scene:zz-test');
+    assert.equal(r.baseMatches, true);
+    assert.equal(r.scale, 2);
+    assert.equal(r.width, now.width * 2);
+    assert.equal(r.items.length, now.items.length + 1);
+    assert.ok(r.items.some((/** @type {any} */ i) => i.object === 'pine' && JSON.stringify(i.at) === '{"tile":[-2,0,0]}' && i.bounds), 'the placed pine renders with bounds');
+    assert.notEqual(r.png, (await call(person, 'scene.render', { name: 'zz-test', scale: 2 })).png);
+
+    await call(agent, 'object.paint', { name: 'zz-sprite', pixels: [[3, 2]], color: 'ink' });
+    const object = await call(agent, 'doc.save', { doc: 'zz-sprite' });
+    const o = await call(person, 'proposal.render', { id: object.proposal, layers: [0] });
+    assert.equal(o.kind, 'object');
+    assert.deepEqual(o.viewBox, (await call(person, 'object.render', { name: 'zz-sprite', layers: [0] })).viewBox);
+    assert.notEqual(o.png, (await call(person, 'object.render', { name: 'zz-sprite', layers: [0] })).png);
+
+    assert.equal(await readFile(file('scenes/zz-test.mjs'), 'utf8'), sceneText, 'nothing written');
+    assert.equal(await readFile(file('objects/zz-sprite.mjs'), 'utf8'), spriteText, 'nothing written');
+    await assert.rejects(call(person, 'proposal.render', { id: '20990101-000000-abcdef' }), (/** @type {any} */ err) => err.code === 'not_found');
+    await call(person, 'proposal.reject', { id: scene.proposal });
+    await call(person, 'proposal.reject', { id: object.proposal });
+  });
 });
 
 describe('round trip', needsSite, () => {
