@@ -6,6 +6,7 @@
   "bin": { "pixellab": "cli/bin/pixellab.mjs" },
   "scripts": {
     "test": "node --test \"cli/test/**/*.test.mjs\"",
-    "docs:cli": "node scripts/docs-cli.mjs"
+    "docs:cli": "node scripts/docs-cli.mjs",
+    "docs:site": "node scripts/docs-site/build.mjs"
   }
 }

@@ -1,0 +1,61 @@
+name: Docs site
+
+# Builds the developer docs site (scripts/docs-site/, `npm run docs:site`)
+# from the README files and docs/. Every pull request builds it, so a broken
+# link fails the PR; a push to main (or a manual run) also deploys it to
+# GitHub Pages. Pages has to be on for the repo, with Source: GitHub Actions
+# (docs/contributing.md, "The docs site").
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: docs-build-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      # The reference is generated from the command registry; publish it
+      # only if it matches the code.
+      - name: Check docs/cli.md is current
+        run: node scripts/docs-cli.mjs --check
+      - name: Test the docs site
+        run: node --test cli/test/docs-site.test.mjs
+      - name: Build the docs site
+        run: npm run docs:site
+      - name: Upload the site
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: build/docs-site
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    # One deploy at a time, and never cancel one halfway.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

@@ -7,6 +7,7 @@ Pixel Lab for Mac: a `pixellab` CLI and MCP server (Node, zero dependencies) and
 - Test: `npm test` (node:test; must show `# fail 0`)
 - CLI: `node cli/bin/pixellab.mjs help`
 - CLI reference: `npm run docs:cli` regenerates `docs/cli.md` from the command registry. Run it after changing a command; never edit `docs/cli.md` by hand.
+- Developer docs site: `npm run docs:site` builds `build/docs-site/` from the README files and `docs/` (`scripts/docs-site/`); it fails on a broken link, anchor or image. `.github/workflows/docs.yml` builds it on every PR and deploys `main` to GitHub Pages. Adding a page: `docs/contributing.md`, "The docs site".
 - App: `swift build --package-path app`, then `scripts/build-app.sh` → `build/Pixel Lab.app`
 - App snapshot (no screen recording needed; read-only): `scripts/snapshot.sh <out.png> [scene:hero-island] [dark|light] [zoom]`
 - App unit tests (Swift Testing, works with the Command Line Tools): `scripts/test-app.sh`
@@ -22,6 +23,7 @@ Pixel Lab for Mac: a `pixellab` CLI and MCP server (Node, zero dependencies) and
 - App, when `app/` changed: `swift build --package-path app` with no errors, and `scripts/test-app.sh` with every test passing.
 - End to end, when `app/`, `cli/` or `scripts/acceptance/` changed: `scripts/build-app.sh`, then `scripts/acceptance.sh` exits 0.
 - Commands: after changing one, `npm run docs:cli` leaves `git status` clean apart from your own edits.
+- Docs: after changing a doc or a README, `npm run docs:site` builds with no broken links.
 - UI: drive the change with the script hook and its `expect` lines, and snapshot each changed view in dark and light (`snapshot <png>` in a script, or `scripts/snapshot.sh`). Look at the snapshots before reporting.
 
 Run these before reporting any task complete, and paste the output. If a test fails, fix the code, not the test. Something you couldn't run is "not verified", never passed.
@@ -36,7 +38,7 @@ Run these before reporting any task complete, and paste the output. If a test fa
 - Every action is a command in the registry (`cli/lib/commands/`), so the CLI, the app (`serve --stdio`) and agents (`serve --mcp`) can all take it. MCP edits become proposals the owner approves in the Agent window; `--direct` stays off by default.
 - Keep VoiceOver labels, visible focus, comfortable hit targets and Reduce Motion support on anything interactive or animated.
 - Commit messages end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. PR bodies end with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
-- No secrets, tokens or personal data in commits, PRs or comments. The repo is private, but the art it edits is published by the site.
+- No secrets, tokens or personal data in commits, PRs or comments. The repo is public, and so are the art it edits (published by the site) and the docs site.
 
 ## Architecture
 

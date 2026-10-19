@@ -16,7 +16,7 @@ Template and steps follow Stage 1 (Plan) of Anthropic's [AI-native SDLC playbook
 4. **Write `intent.md` with the template below**, keeping the section names and order exactly. Put what's out of scope under Constraints.
 5. **Check the draft for spec leakage** with the test in the next section, and take out anything that fails it.
 6. **Show the draft to the originator** and correct anything Claude misunderstood. Don't commit before they've reviewed it.
-7. **Check it's safe to commit** against `CLAUDE.md`: no secrets or personal data. The repo is private, but the Author line still names the owner only.
+7. **Check it's safe to commit** against `CLAUDE.md`: no secrets or personal data. The repo is public: the Author line names the owner only.
 8. **Commit it on its own branch and open a PR into `main`.** The owner accepts the intent by merging the PR, which is what starts the spec stage (`write-spec`). Closing the PR rejects it. Set `Status: accepted` in the PR before it merges.
 
 An intent can also come from a trigger rather than a person, such as a follow-up listed in a plan, a review finding, a failing check or a bug the owner hit in the app. Use the same template, and put the anomaly and its evidence under Problem.

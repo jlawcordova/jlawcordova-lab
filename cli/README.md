@@ -1,0 +1,102 @@
+# The CLI and servers (`cli/`)
+
+`pixellab` is a Node CLI (Node ≥ 22, ESM, Node built-ins only, no `node_modules`) and the two servers built on the same commands: `serve --stdio` for the Mac app and `serve --mcp` for agents. How it fits with the app and the site is in [Architecture](../docs/architecture.md); every command, flag, method and error code is in the generated [command reference](../docs/cli.md).
+
+```sh
+node cli/bin/pixellab.mjs help              # every command, from the registry
+node cli/bin/pixellab.mjs scene --help      # one group
+node cli/bin/pixellab.mjs site info --json  # a command, as JSON
+npm test                                    # the suites in cli/test/, must show "# fail 0"
+```
+
+## Module map
+
+| File | What it does |
+| --- | --- |
+| `bin/pixellab.mjs` | The entry point: calls `main()` from `lib/cli.mjs`. |
+| `lib/cli.mjs` | The command-line door: argv → command → human text or `--json`, exit codes 0, 1, 2. One-shot edits: runs the command in a fresh session, then saves (or prints the diff with `--dry-run`). `main()` takes its streams and env as arguments, so tests call it directly. |
+| `lib/argv.mjs` | Parses the command line against the registry: the longest run of words that names a command, positionals into the command's `args`, every param as a `--kebab-case` flag, the global flags (`GLOBAL_FLAGS`). |
+| `lib/params.mjs` | `checkParams()`: the JSON Schema subset every door checks params with (type, enum, pattern, minimum, maximum, minItems, maxItems, items, required, default). Refuses unknown params; with `coerce`, turns command-line strings into the declared types. |
+| `lib/registry.mjs` | The registry: `createRegistry()` checks each definition (`checkDefinition()`), sorts by name, and `call(ctx, name, params)` checks params and runs. `registry` is the built-in list. |
+| `lib/commands/*.mjs` | The commands, one file per area: `site` (site.info, palette.get), `scene` (read), `scene-edit`, `object` (read), `object-edit`, `check`, `art`, `doc` (session commands), `proposal` (proposals, activity.list). `common.mjs` holds shared params and helpers. |
+| `lib/context.mjs` | `createContext(site, { overlay })`: what a command runs against. `ctx.sources()`, `ctx.doc(kind, name)`, `ctx.names(kind)`, `ctx.find(query)`; memoized per call, `ctx.invalidate()` after an edit. Commands never read the disk themselves. |
+| `lib/session.mjs` | `Session`: open docs as in-memory working copies with undo and redo, plugged into the ctx as its overlay, plus `ctx.edit()`. Saving: validate, serialize, conflict check by hash, atomic write; in `'propose'` mode (MCP) a save writes a proposal. |
+| `lib/site.mjs` | Finds the site checkout, checks it looks like the site (`REQUIRED_FILES`), imports the engine modules from it, and loads the art sources. |
+| `lib/scene-ops.mjs` | The scene edits, ported from the site's web lab (`src/components/lab/scene-mode.ts`); each function names the lab function it follows. |
+| `lib/render.mjs` | Scenes and objects to transparent PNGs at an integer scale, with each item's bounds for hit-testing; poses moving items at a time; the night theme's shadow color. |
+| `lib/diff.mjs` | A unified line diff (Myers), for `--dry-run`, `doc.save` and proposals. |
+| `lib/errors.mjs` | `CommandError` (a stable `code`, an exit code, optional `details`), `UsageError`, `NotFoundError`, `SiteError`. |
+| `lib/serve.mjs` | `pixellab serve --stdio \| --mcp [--direct]`. |
+| `lib/jsonrpc.mjs` | Newline-delimited JSON-RPC 2.0 over two streams, shared by both servers; maps errors to JSON-RPC codes. |
+| `lib/server-stdio.mjs` | The app's server: one session, the commands as methods plus `session.info` and `shutdown`, and the notifications. `VERSION` here is the app's and the MCP server's version. |
+| `lib/server-mcp.mjs` | The MCP server: `initialize`, `ping`, `tools/list`, `tools/call`; tool names, `LEFT_OUT` (commands agents don't get), the activity log. |
+| `lib/state.mjs` | The state dir: proposals and `activity.jsonl`; `writeAtomic()`. |
+| `lib/watch.mjs` | File watching for the stdio server: the art sources and the state dir, debounced. |
+| `lib/activity-summary.mjs` | A few words per MCP tool call for the activity feed ("listed 15 scenes"). |
+| `lib/help.mjs` | Help text and usage lines, generated from the registry (also used by `scripts/docs-cli.mjs`). |
+
+## A command
+
+```js
+/** @type {import('../registry.mjs').Command} */
+const info = {
+  name: 'site.info',                 // dotted lowercase words; the MCP tool is site_info
+  summary: 'Show the site checkout in use and what it holds',
+  description: 'Longer help text…',  // optional
+  params: { type: 'object', properties: {} },  // a JSON Schema object
+  args: [],                          // params the CLI fills from positionals, in order
+  mutates: false,                    // true: it edits docs through ctx.edit
+  async run(ctx, params) {           // params are already checked and defaulted
+    const { sources } = await ctx.sources();
+    return { scenes: sources.scenes.size };    // plain JSON, the same through every door
+  },
+  format: (r) => `scenes ${r.scenes}`,          // optional: the CLI's human output
+};
+```
+
+Optional fields: `examples` (command lines for the help and the reference), `writesPng` (the result has a base64 `png`, so the CLI takes `--out`), `session: true` (only makes sense in `pixellab serve`, like `doc.undo`), `writes: 'direct'` (writes files itself, like `art.build`, so `--dry-run` doesn't apply). The `Command` typedef in `lib/registry.mjs` is the source.
+
+### Mutating commands
+
+A command that edits a doc sets `mutates: true` and changes the doc only through `ctx.edit()`:
+
+```js
+async run(ctx, params) {
+  return editOf(ctx)({ kind: 'scene', name }, (doc) => {
+    // change `doc` in place; throw a CommandError to refuse (the doc is restored)
+    return { message: 'pine placed at column 14, row 6, level 1', path: '198' };
+  }, { key: null });   // a key coalesces rapid repeats into one undo step
+}
+```
+
+`ctx.edit` opens the doc if it isn't open, snapshots it for undo, runs the function, and returns `{ doc, changed, summary, ...rest }`. An edit that changes nothing isn't an undo step. The door decides what happens next: the CLI saves at once (or diffs with `--dry-run`), the stdio server keeps the change in the session until `doc.save`, the MCP server turns `doc_save` into a proposal. So a command never writes the site itself (unless it's `writes: 'direct'`).
+
+## Adding a command
+
+1. Add the definition to the right file in `lib/commands/` and to its default export. A new area gets a new file, added to the list at the bottom of `lib/registry.mjs`.
+2. Use the engine for anything the art's format decides (validate, serialize, edit, starters), from `ctx.site.engine` and friends: never reimplement it here. Scene edits go in `lib/scene-ops.mjs`, following the web lab.
+3. Throw `CommandError` with a stable `code` for failures a person or agent can act on (`not_found`, `invalid`, `conflict`, …), `UsageError` for bad params beyond the schema.
+4. Test it in `cli/test/`, named after the requirement it proves (`R3: …`), against a copy of the site (`makeSite()` in `test/helpers.mjs`). See [Testing](../docs/testing.md).
+5. Run `npm run docs:cli` to regenerate [docs/cli.md](../docs/cli.md), and `npm test`. A test fails if the reference is out of date.
+6. It's now on the command line, in the stdio server and in MCP. If agents shouldn't have it, add it to `LEFT_OUT` in `lib/server-mcp.mjs` with the reason. If the app needs it, model its result in `app/Sources/PixelLab/Server/Protocol.swift` (or decode it where it's used) and call it through `ServerConnection` (see [the app's README](../app/README.md#adding-a-feature)).
+
+## Sessions, undo and saving
+
+- A **session** (`Session` in `lib/session.mjs`) holds open docs, each with an undo and a redo stack. A step is a snapshot of the doc before the edit; at most `UNDO_LIMIT` (200) are kept. Edits with the same `key` within `COALESCE_MS` (1 s) merge into one step: a held arrow key, one paint stroke sent as many `object.paint` calls.
+- **Saving** validates with the engine and refuses a doc with problems (`invalid`), serializes with the engine, and refuses (`conflict`) if the file's hash on disk changed since the doc was opened; `force` overrides both. The write is atomic. In `'propose'` mode it writes `proposals/<id>.json` to the state dir instead.
+- The stdio server watches the sources: a clean open doc reloads when its file changes; one with unsaved changes stays and is reported `stale`.
+
+## Errors and exit codes
+
+| | CLI exit | JSON-RPC |
+| --- | --- | --- |
+| ok | 0 | result |
+| `CommandError` (ran and failed; `check` found problems) | 1 | -32000, `data.code` = the error's code |
+| `UsageError` (bad params, unknown command or flag) | 2 | -32602 (`usage`), or -32601 for an unknown method |
+| a bug | 1 | -32603 (`internal`) |
+
+With `--json`, errors go to stderr as `{"error": {"code", "message", "details?"}}`. MCP reports a failed command as a tool result with `isError: true`.
+
+## Logs and output
+
+Both servers write nothing but JSON-RPC to stdout; logs go to stderr (`consoleToStderr()` makes sure a stray `console.log` can't corrupt the stream). The CLI writes results to stdout and errors to stderr, and stops quietly when stdout closes early (`| head`).
