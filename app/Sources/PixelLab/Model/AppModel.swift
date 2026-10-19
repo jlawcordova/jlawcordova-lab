@@ -72,6 +72,12 @@ final class AppModel {
     var lastEdit: String?
     /// Open docs with unsaved changes (from `doc.changed`), for Save/Don't Save on quit.
     var dirtyDocs: Set<String> = []
+    /// Open docs with unsaved changes whose file changed on disk (`doc.stale`): the stage shows a banner.
+    var staleDocs: Set<String> = []
+    /// Stale docs the owner chose Keep Mine for: no banner until the file changes again.
+    var keptStale: Set<String> = []
+    /// A merge from disk that clashed: the alert's text.
+    var mergeAlert: String?
     /// A save that failed in a way the user decides about.
     var saveAlert: SaveAlert?
     /// The Build art sheet.
@@ -223,7 +229,11 @@ final class AppModel {
     private func handle(_ event: ServerEvent) async {
         switch event {
         case .notification(.docChanged(let status)):
-            if status.dirty { dirtyDocs.insert(status.doc) } else { dirtyDocs.remove(status.doc) }
+            if status.dirty { dirtyDocs.insert(status.doc) } else {
+                dirtyDocs.remove(status.doc)
+                staleDocs.remove(status.doc)
+                keptStale.remove(status.doc)
+            }
             guard let doc = document, doc.ref.id == status.doc else { return }
             doc.status = status
             if doc.ref.kind == .object {
@@ -252,6 +262,9 @@ final class AppModel {
             requestRender()
             requestCheck()
             requestItems()
+        case .notification(.docStale(let doc, _)):
+            staleDocs.insert(doc)
+            keptStale.remove(doc)
         case .notification(.proposalsChanged(let proposals)):
             agent.proposalsChanged(proposals)
         case .notification(.activityAppended(let entries)):
@@ -266,6 +279,8 @@ final class AppModel {
             if let doc = document {
                 _ = try? await connection?.call("doc.open", ["doc": .string(doc.ref.id)])
                 dirtyDocs = []
+                staleDocs = []
+                keptStale = []
                 if doc.ref.kind == .object { objectEditor.docChanged() }
                 timeline.invalidate()
                 requestRender()
@@ -528,6 +543,8 @@ final class AppModel {
             let status = DocStatus(doc: r.doc, dirty: r.dirty, canUndo: r.canUndo, canRedo: r.canRedo)
             if let doc = document, doc.ref == ref { doc.status = status }
             if r.dirty { dirtyDocs.insert(r.doc) } else { dirtyDocs.remove(r.doc) }
+            staleDocs.remove(r.doc)
+            keptStale.remove(r.doc)
             notice = nil
             lastEdit = r.wrote == false ? "\(ref.name) was already saved" : "Saved \(r.file ?? ref.name)"
             return true
@@ -681,7 +698,50 @@ final class AppModel {
         await loadLists()
     }
 
-    func revert() async { await docCommand("doc.revert") }
+    func revert() async {
+        await docCommand("doc.revert")
+        if let ref = document?.ref.id, document?.status?.dirty == false { staleDocs.remove(ref); keptStale.remove(ref) }
+    }
+
+    // MARK: A doc that changed on disk (docs/intents/2026-10-mcp-gaps/spec.md, D5)
+
+    /// Whether the stage shows the changed-on-disk banner for the open doc.
+    var showsStaleBanner: Bool {
+        guard let id = document?.ref.id else { return false }
+        return Self.staleBannerShown(doc: id, stale: staleDocs, kept: keptStale)
+    }
+
+    nonisolated static func staleBannerShown(doc: String, stale: Set<String>, kept: Set<String>) -> Bool {
+        stale.contains(doc) && !kept.contains(doc)
+    }
+
+    /// Merge: `doc.merge` brings the file's change into the open copy, keeping the unsaved edits.
+    /// A clash leaves everything as it was and says so in an alert.
+    func mergeFromDisk() async {
+        guard let doc = document, let connection else { return }
+        let ref = doc.ref
+        do {
+            let r: UndoResult = try await connection.call("doc.merge", ["doc": .string(ref.id)])
+            doc.status = DocStatus(doc: r.doc, dirty: r.dirty, canUndo: r.canUndo, canRedo: r.canRedo)
+            if r.dirty { dirtyDocs.insert(r.doc) } else { dirtyDocs.remove(r.doc) }
+            staleDocs.remove(ref.id)
+            keptStale.remove(ref.id)
+            lastEdit = r.summary ?? "Merged \(ref.file)"
+        } catch let e as RPCError where e.dataCode == "merge_conflict" || e.dataCode == "merge_invalid" {
+            mergeAlert = e.message
+        } catch {
+            notice = "Couldn't merge \(ref.name): \(error.localizedDescription)"
+        }
+    }
+
+    /// Reload: the file as it is now, dropping the unsaved edits (one undoable step, as Revert).
+    func reloadFromDisk() async { await revert() }
+
+    /// Keep Mine: hide the banner. Saving later still asks before it overwrites the file.
+    func keepMine() {
+        guard let id = document?.ref.id else { return }
+        keptStale.insert(id)
+    }
     func undo() async { await docCommand("doc.undo") }
     func redo() async { await docCommand("doc.redo") }
 

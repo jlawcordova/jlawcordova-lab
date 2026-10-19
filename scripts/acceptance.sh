@@ -3,14 +3,16 @@
 # on a temp copy of the site: scene edits → save → publish, object paint →
 # save (scripts/acceptance/scene-object.txt), then an agent over MCP saves two
 # proposals (mcp-agent.mjs, through the app bundle's CLI) and the Agent window
-# ghosts, approves and rejects them (agent.txt), and the document is saved as a
+# ghosts, approves and rejects them (agent.txt); a doc with unsaved edits changes on
+# disk and is merged, reloaded and kept, and another agent's proposal is approved into an
+# unsaved copy (stale-agent.mjs, stale.txt); and the document is saved as a
 # copy, reopened and published into a folder (document.txt). The real checkout is only
 # read (copied). Exits 0 if every step passed.
 #
 #   scripts/acceptance.sh [out-dir]      (default: a new temp dir)
 #
 # Needs build/Pixel Lab.app (scripts/build-app.sh). The scripts expect the
-# site as it was on 2026-10-19 (15 scenes, 161 objects, the house at
+# site as it was on 2026-10-20 (15 scenes, 164 objects, the house at
 # px -59,59); update their `expect` lines when the art changes.
 set -euo pipefail
 
@@ -43,6 +45,9 @@ echo "==> an agent over MCP proposes"
 PIXELLAB_CLI_PATH="$app/Contents/Resources/cli/bin/pixellab.mjs" node "$root/scripts/acceptance/mcp-agent.mjs" "$site" "$state"
 echo "==> the Agent window: ghost, approve, reject"
 run agent.txt agent.log
+echo "==> a doc changed on disk under unsaved edits: merge, reload, keep; an approve merged in"
+PIXELLAB_CLI_PATH="$app/Contents/Resources/cli/bin/pixellab.mjs" node "$root/scripts/acceptance/stale-agent.mjs" "$site" "$state"
+run stale.txt stale.log
 echo "==> the document: save as, reopen the copy, publish into a folder"
 run document.txt document.log
 copied=$(ls "$shots"/copy-out/*.svg | wc -l | tr -d ' ')

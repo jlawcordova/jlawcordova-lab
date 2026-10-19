@@ -331,7 +331,7 @@ final class AgentModel {
             let a = await ask(AgentQuestion(
                 kind: .dirty,
                 title: "\(p.ref?.name ?? p.doc) has unsaved changes",
-                message: "Approving writes \(p.ref?.file ?? "the file") with the agent's version. Your open copy keeps your unsaved changes and won't reload; saving it later will conflict with the approved file.",
+                message: "Approving writes \(p.ref?.file ?? "the file") with the agent's version and merges it into your open copy, keeping your unsaved changes. If you both changed the same lines, Pixel Lab asks what to keep.",
                 buttons: [("Approve Anyway", .proceed), ("Cancel", .cancel)]))
             guard a == .proceed else { return }
         }
@@ -341,7 +341,7 @@ final class AgentModel {
             if force { params["force"] = true }
             let r: ProposalApplyResult = try await connection.call("proposal.apply", params)
             working = nil
-            lastResult = (r.summary ?? "Applied \(r.id)") + (r.reloaded ? "; the open copy reloaded" : "")
+            lastResult = "Applied \(r.id): wrote \(r.file)" + (r.reloaded ? "; the open copy reloaded" : r.merged == true ? "; merged into your open copy" : r.conflict == true ? "; couldn't merge into your open copy, so choose in the editor" : "")
             if let ref = DocRef(id: r.doc) { await app.docWritten(ref) }
             await refreshList()
         } catch let e as RPCError {

@@ -46,6 +46,10 @@ struct ProposalApplyResult: Codable, Sendable {
     var file: String
     var wrote: Bool
     var reloaded: Bool
+    /// The proposal was merged into the app's open copy, keeping its unsaved edits.
+    var merged: Bool?
+    /// The open copy's unsaved edits clash with it: the file is written, the copy is left stale.
+    var conflict: Bool?
     var summary: String?
     var forcedProblems: [String]?
 }

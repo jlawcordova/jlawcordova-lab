@@ -1,21 +1,22 @@
-# Acceptance 6: the document (spec R3, R4, R7, R10): a site checkout opens as
-# its legacy source folder, Save As copies the whole document and the app
-# reopens on the copy, and Publish writes the six SVGs into a folder.
+# Acceptance 6: the document (spec R3, R4, R7, R10): a site checkout opens the
+# .pixellab document inside it (the site's since 2026-10-20), Save As copies the
+# whole document and the app reopens on the copy, and Publish writes the six SVGs
+# into a folder.
 appearance dark
 open scene:hero-island
-expect document site
-expect documentkind legacy-site
-expect scenes 15
-expect objects 161
-# Save As: the copy is a real .pixellab, with the site's art and a manifest the CLI wrote for it.
-saveas @OUT@/copy.pixellab
-expect document copy
+expect document jlawcordova
 expect documentkind document
 expect scenes 15
-expect objects 161
+expect objects 164
+# Save As: the copy is a .pixellab with the site's art and its manifest (so its name).
+saveas @OUT@/copy.pixellab
+expect document jlawcordova
+expect documentkind document
+expect scenes 15
+expect objects 164
 open scene:hero-island
 expect at none
-# The copy got a manifest (publish next to itself, the site's budgets); the script publishes into its own folder instead.
+# The copy's manifest publishes next to itself; the script publishes into its own folder instead.
 publish @OUT@/copy-out
 expect build ok
 expect outputs 6

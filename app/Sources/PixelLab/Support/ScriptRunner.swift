@@ -18,8 +18,11 @@ import Foundation
 ///     undo redo save [force] revert publish [<dir>] done   saveas <path.pixellab>
 ///     time <ms>  play  pause  tracks on|off   zoom fit|1-4   sidebar library|items
 ///     search <text>   wait <ms>   snapshot <file.png>   log <text>
+///     cli <args…>  (the bundled CLI on the script's document: an outside edit to the files)
+///     stale merge|reload|keep     (the changed-on-disk banner's buttons)
 ///     expect dirty|selected|object|at|items|problems|build|outputs|publishdir|document|tool|time <value>
 ///     expect scenes|objects|zoom|badge|theme|ghosttime <value>   expect scenepixel <x>,<y> <#RRGGBB|empty>
+///     expect stale true|false     (the banner shows)   expect mergealert true|false
 ///
 /// Object mode (pixels are object.render pixels at scale 1: a sprite's map
 /// column and row, a block's render pixel):
@@ -280,6 +283,30 @@ final class ScriptRunner {
             if !ok, let a = model.saveAlert { return "refused (\(a.kind)): \(a.message)" }
             return ok ? model.lastEdit : "not saved"
         case "revert": await model.revert(); return nil
+        case "cli":
+            // An outside editor: the bundled CLI, one-shot, on the document the script runs on.
+            let nodeSetting = UserDefaults.standard.string(forKey: SettingsKey.node)
+            guard let node = Locator.findNode(setting: nodeSetting), let cli = Locator.findCLI() else { throw Failure("no node or CLI") }
+            let out = try await Locator.runCli(node: node, cli: cli, Array(words.dropFirst()) + model.documentLocation.arguments)
+            // Give the server's watcher time to see the file and tell the app.
+            let started = Date()
+            while Date().timeIntervalSince(started) < 2 {
+                try? await Task.sleep(for: .milliseconds(100))
+                if let id = model.document?.ref.id, model.staleDocs.contains(id) || model.document?.isDirty == false { break }
+            }
+            try? await Task.sleep(for: .milliseconds(300))
+            return out.split(separator: "\n").last.map(String.init)
+        case "stale":
+            switch try arg(words, 1) {
+            case "merge":
+                model.mergeAlert = nil
+                await model.mergeFromDisk()
+                if let a = model.mergeAlert { return "refused: \(a)" }
+                return model.lastEdit
+            case "reload": await model.reloadFromDisk(); return model.lastEdit
+            case "keep": model.keepMine(); return nil
+            default: throw Failure("stale merge|reload|keep")
+            }
         case "build", "publish":
             // `publish [dir]`: into the document's publish folder, or the given one (no panel opens under a script).
             await model.publish(dir: words.count > 1 ? words[1] : nil)
@@ -661,6 +688,8 @@ final class ScriptRunner {
         case "tool": got = doc?.ref.kind == .object ? model.objectEditor.tool.rawValue : model.editor.tool.rawValue
         case "time": got = String(model.timeline.renderTime)
         case "alert": got = model.saveAlert.map { "\($0.kind)" } ?? "none"
+        case "stale": got = String(model.showsStaleBanner)
+        case "mergealert": got = String(model.mergeAlert != nil)
         case "color": got = model.objectEditor.color
         case "layer": got = String(model.objectEditor.layer)
         case "frame": got = String(model.objectEditor.frame)

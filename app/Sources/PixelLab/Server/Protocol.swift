@@ -180,6 +180,8 @@ struct UndoResult: Codable, Sendable {
 /// A notification from the server.
 enum ServerNotification: Sendable {
     case docChanged(DocStatus)
+    /// An open doc with unsaved edits whose file changed on disk (docs/intents/2026-10-mcp-gaps/spec.md, D5).
+    case docStale(doc: String, file: String)
     case filesChanged([String])
     case proposalsChanged(JSONValue)
     case activityAppended(JSONValue)

@@ -41,6 +41,9 @@ struct DocumentWindow: View {
                 .navigationSplitViewColumnWidth(min: 220, ideal: 256, max: 340)
         } detail: {
             VStack(spacing: 0) {
+                if model.showsStaleBanner, let file = model.document?.ref.file {
+                    StaleBanner(file: file)
+                }
                 StageView()
                 if let notice = model.notice {
                     NoticeBar(text: notice) { model.notice = nil }
@@ -80,6 +83,7 @@ struct DocumentWindow: View {
             case .invalid:
                 Button("OK", role: .cancel) {}
             case .conflict:
+                Button("Merge") { Task { await model.mergeFromDisk() } }
                 Button("Revert") { Task { await model.revert() } }
                 Button("Save Anyway", role: .destructive) { Task { await model.save(alert.doc, force: true) } }
                 Button("Cancel", role: .cancel) {}
@@ -91,8 +95,19 @@ struct DocumentWindow: View {
                 let more = alert.problems.count > 8 ? "\n…and \(alert.problems.count - 8) more (see Checks)." : ""
                 Text("Fix these first; nothing was written.\n\n" + (shown.isEmpty ? alert.message : shown) + more)
             case .conflict:
-                Text("\(alert.doc.file) changed on disk since you opened it. Revert loads the file as it is now and drops your changes; Save Anyway overwrites it.")
+                Text("\(alert.doc.file) changed on disk since you opened it. Merge brings that change into your copy and keeps your edits; Revert loads the file as it is now and drops your changes; Save Anyway overwrites it.")
             }
+        }
+        .alert(
+            "Both you and the file changed the same lines",
+            isPresented: Binding(get: { model.mergeAlert != nil }, set: { if !$0 { model.mergeAlert = nil } }),
+            presenting: model.mergeAlert
+        ) { _ in
+            Button("Reload", role: .destructive) { Task { await model.reloadFromDisk() } }
+            Button("Keep Mine") { model.keepMine() }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Nothing was merged. Reload loads the file and drops your unsaved edits (Undo brings them back); Keep Mine keeps your copy, and saving it later asks before it overwrites the file.")
         }
         .sheet(isPresented: Binding(get: { model.build != nil }, set: { if !$0 { model.build = nil } })) {
             PublishSheet().environment(model)
