@@ -17,6 +17,14 @@
 // the engine; refuse with a conflict if the file changed on disk since the
 // doc was opened (by hash) unless forced; write atomically. In 'propose'
 // mode (MCP) a save writes a proposal to the state dir instead.
+//
+// Edits since disk (docs/intents/2026-10-mcp-gaps/spec.md, D1): every undo
+// step has a sequence number, and an entry's baseSeq is the number when the
+// doc last matched its file (open, save, reload, a settled proposal); a
+// proposal lists only the steps after it. sync() (D2) settles an MCP
+// session's proposals once the owner applies or rejects them, and reloads
+// clean docs whose files changed, before each tool call. merge() (D4) brings
+// a change on disk into a dirty working copy, three ways.
 
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -25,6 +33,8 @@ import { join } from 'node:path';
 import { createContext, docFile } from './context.mjs';
 import { unifiedDiff } from './diff.mjs';
 import { CommandError, NotFoundError } from './errors.mjs';
+import { merge3 } from './merge.mjs';
+import { unsavedInApp } from './open-docs.mjs';
 import { createState, newProposalId, stateDir, writeAtomic } from './state.mjs';
 
 export const UNDO_LIMIT = 200;
@@ -74,7 +84,7 @@ export async function problemsIn(ctx, file) {
 }
 
 /**
- * @typedef {{ before: string, labels: string[] }} Step
+ * @typedef {{ before: string, labels: string[], seq: number }} Step
  * @typedef {{
  *   kind: 'object' | 'scene',
  *   name: string,
@@ -86,8 +96,19 @@ export async function problemsIn(ctx, file) {
  *   undo: Step[],
  *   redo: Step[],
  *   last: { key: string, time: number } | null,
+ *   baseSeq: number,
+ *   undone: string[],
+ *   created?: string,
  *   proposal?: string,
+ *   proposed?: { id: string, text: string, seq: number },
+ *   synced?: Settled,
  * }} Entry
+ * @typedef {{
+ *   doc: string,
+ *   proposal: string,
+ *   outcome: 'applied' | 'rejected',
+ *   action: 'clean' | 'reloaded' | 'rebased' | 'kept' | 'discarded',
+ * }} Settled
  */
 
 export class Session {
@@ -111,6 +132,10 @@ export class Session {
     this.state = createState(stateDir(env));
     /** @type {Map<string, Entry>} */
     this.entries = new Map();
+    /** Undo steps take their sequence numbers from here. */
+    this.seq = 0;
+    /** @type {Settled[]} the proposals sync() settled lately, newest last */
+    this.settled = [];
     const entries = this.entries;
     this.overlay = {
       get: (/** @type {string} */ kind, /** @type {string} */ name) => entries.get(docRef(kind, name))?.doc,
@@ -164,6 +189,8 @@ export class Session {
       undo: [],
       redo: [],
       last: null,
+      baseSeq: this.seq,
+      undone: [],
     };
     this.entries.set(ref, entry);
     ctx.invalidate();
@@ -192,6 +219,8 @@ export class Session {
       undo: [],
       redo: [],
       last: null,
+      baseSeq: this.seq,
+      undone: [],
     };
     entry.created = label;
     this.entries.set(ref, entry);
@@ -236,7 +265,7 @@ export class Session {
       if (key !== null && entry.last?.key === key && time - entry.last.time < COALESCE_MS && top) {
         top.labels.push(message);
       } else {
-        entry.undo.push({ before, labels: [message] });
+        entry.undo.push({ before, labels: [message], seq: ++this.seq });
         if (entry.undo.length > UNDO_LIMIT) entry.undo.shift();
       }
       entry.last = key === null ? null : { key, time };
@@ -256,16 +285,22 @@ export class Session {
   /** The full status the doc.status command shows. */
   async details(/** @type {Entry} */ entry) {
     const disk = await readSource(this.site, entry.kind, entry.name);
-    const stale = entry.base.exists ? disk.hash !== entry.base.hash : disk.exists;
     return {
       ...this.status(entry),
       file: entry.file,
       exists: entry.base.exists,
-      stale,
+      stale: this.isStale(entry, disk),
       undo: entry.undo.flatMap((s) => s.labels),
       redo: entry.redo.flatMap((s) => s.labels).reverse(),
+      edits: this.edits(entry),
       ...(entry.proposal ? { proposal: entry.proposal } : {}),
+      ...(entry.synced ? { synced: entry.synced } : {}),
     };
+  }
+
+  /** Whether the file changed on disk since the doc's base. */
+  isStale(/** @type {Entry} */ entry, /** @type {{ exists: boolean, hash: string | null }} */ disk) {
+    return entry.base.exists ? disk.hash !== entry.base.hash : disk.exists;
   }
 
   /** @param {Entry} entry */
@@ -279,7 +314,12 @@ export class Session {
     const [from, to] = which === 'undo' ? [entry.undo, entry.redo] : [entry.redo, entry.undo];
     const snap = from.pop();
     if (!snap) return { doc: ref, changed: false, summary: which === 'undo' ? 'Nothing to undo' : 'Nothing to redo', ...this.status(entry) };
-    to.push({ before: JSON.stringify(entry.doc), labels: snap.labels });
+    to.push({ before: JSON.stringify(entry.doc), labels: snap.labels, seq: snap.seq });
+    // A step from before the doc last matched its file: undoing it is itself a change from disk.
+    if (snap.seq <= entry.baseSeq) {
+      if (which === 'undo') entry.undone.push(...snap.labels.map((l) => `Undid: ${l}`));
+      else entry.undone.splice(Math.max(0, entry.undone.length - snap.labels.length));
+    }
     entry.doc = JSON.parse(snap.before);
     entry.last = null;
     ctx.invalidate();
@@ -289,11 +329,51 @@ export class Session {
   }
 
   /**
-   * Every edit since the doc was opened (or created), in order.
+   * The edits since the doc last matched its file, in order: what a
+   * proposal lists (spec D1).
    * @param {Entry} entry
    */
   edits(entry) {
-    return [...(entry.created ? [entry.created] : []), ...entry.undo.flatMap((s) => s.labels)];
+    return [...(entry.created ? [entry.created] : []), ...entry.undone, ...entry.undo.filter((s) => s.seq > entry.baseSeq).flatMap((s) => s.labels)];
+  }
+
+  /**
+   * Marks the doc as matching its file: the next proposal lists only later
+   * edits, and no edit coalesces across the line.
+   * @param {Entry} entry
+   * @param {{ exists: boolean, hash: string | null, text: string }} disk
+   * @param {string} clean  the doc's canonical text as of the file
+   * @param {number} [seq]  the last step the file holds (default: every step)
+   */
+  matchDisk(entry, disk, clean, seq = this.seq) {
+    entry.base = { exists: disk.exists, hash: disk.hash, text: disk.text };
+    entry.clean = clean;
+    entry.baseSeq = seq;
+    entry.undone = [];
+    entry.last = null;
+    delete entry.created;
+  }
+
+  /** A source text as the engine would write it, or null if it doesn't load. */
+  async canonical(/** @type {string} */ text) {
+    try {
+      return this.serialize(await importSource(text));
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Replaces the working copy with the file, clearing its history.
+   * @param {Entry} entry
+   * @param {{ exists: boolean, hash: string | null, text: string }} disk
+   */
+  async loadFromDisk(entry, disk) {
+    const data = await importSource(disk.text);
+    entry.doc = data;
+    entry.undo = [];
+    entry.redo = [];
+    this.matchDisk(entry, disk, this.serialize(data) ?? '');
   }
 
   /**
@@ -343,10 +423,10 @@ export class Session {
     }
     const wrote = plan.text !== plan.disk.text || !plan.disk.exists;
     if (wrote) await writeAtomic(plan.disk.path, plan.text);
-    entry.base = { exists: true, hash: hashText(plan.text), text: plan.text };
-    entry.clean = plan.text;
-    delete entry.created;
+    this.matchDisk(entry, { exists: true, hash: hashText(plan.text), text: plan.text }, plan.text);
     delete entry.proposal;
+    delete entry.proposed;
+    delete entry.synced;
     this.changed(entry);
     return {
       doc: ref,
@@ -378,7 +458,10 @@ export class Session {
       agent: this.agent,
     };
     await this.state.writeProposal(proposal);
+    const inApp = (await unsavedInApp(this.state.dir, this.site.root).catch(() => [])).includes(entry.ref);
     entry.proposal = id;
+    entry.proposed = { id, text: plan.text, seq: this.seq };
+    delete entry.synced;
     this.changed(entry);
     return {
       doc: entry.ref,
@@ -388,6 +471,7 @@ export class Session {
       summary: `Proposed ${entry.ref} as ${id} (${proposal.summary.length} edit${proposal.summary.length === 1 ? '' : 's'})`,
       edits: proposal.summary,
       diff: plan.diff,
+      ...(inApp ? { warnings: [`${entry.ref} has unsaved edits in Pixel Lab; approving this proposal will merge it into them, and lines both of you changed will clash. Tell the owner.`] } : {}),
       ...this.status(entry),
     };
   }
@@ -408,14 +492,14 @@ export class Session {
     const data = await importSource(disk.text);
     const before = JSON.stringify(entry.doc);
     entry.doc = data;
-    entry.base = { exists: true, hash: disk.hash, text: disk.text };
-    entry.clean = this.serialize(data) ?? '';
     if (JSON.stringify(data) !== before) {
-      entry.undo.push({ before, labels: [`Reverted ${ref} to the file on disk`] });
+      entry.undo.push({ before, labels: [`Reverted ${ref} to the file on disk`], seq: ++this.seq });
       if (entry.undo.length > UNDO_LIMIT) entry.undo.shift();
       entry.redo = [];
     }
-    entry.last = null;
+    this.matchDisk(entry, disk, this.serialize(data) ?? '');
+    delete entry.proposal;
+    delete entry.proposed;
     ctx.invalidate();
     this.changed(entry);
     return { doc: ref, changed: JSON.stringify(data) !== before, summary: `Reverted ${ref} to the file on disk`, ...this.status(entry) };
@@ -440,13 +524,173 @@ export class Session {
       return false;
     }
     entry.doc = data;
-    entry.base = { exists: true, hash: disk.hash, text: disk.text };
-    entry.clean = this.serialize(data) ?? '';
     entry.undo = [];
     entry.redo = [];
-    entry.last = null;
+    this.matchDisk(entry, disk, this.serialize(data) ?? '');
     this.changed(entry);
     return true;
+  }
+
+  /**
+   * Brings every open doc in line with disk where nothing is lost (spec D2):
+   * settles the proposals this session saved once they're applied or
+   * rejected, reloads clean docs whose file changed, and marks clean a dirty
+   * doc that now matches its file. The MCP server runs it before each call.
+   */
+  async sync() {
+    for (const entry of [...this.entries.values()]) {
+      try {
+        await this.settle(entry);
+      } catch {
+        // an unreadable file or a broken source: left for doc.status and save to report
+      }
+    }
+  }
+
+  /** @param {Entry} entry */
+  async settle(entry) {
+    const disk = await readSource(this.site, entry.kind, entry.name);
+    const text = this.serialize(entry.doc);
+    if (entry.proposal) {
+      if (await this.state.hasProposal(entry.proposal)) return;
+      const proposed = entry.proposed;
+      const id = entry.proposal;
+      const outcome = disk.exists && proposed !== undefined && disk.text === proposed.text ? 'applied' : 'rejected';
+      delete entry.proposal;
+      delete entry.proposed;
+      const canon = disk.exists ? await this.canonical(disk.text) : null;
+      /** @type {Settled['action']} */
+      let action;
+      if (canon !== null && text === canon) {
+        this.matchDisk(entry, disk, canon);
+        action = 'clean';
+      } else if (proposed && text === proposed.text) {
+        // Nothing since the proposal: the file is all there is to keep.
+        if (disk.exists && canon !== null) {
+          await this.loadFromDisk(entry, disk);
+          action = 'reloaded';
+        } else {
+          this.entries.delete(entry.ref);
+          action = 'discarded';
+        }
+      } else if (outcome === 'applied' && canon !== null && proposed) {
+        // Later edits on top of the applied proposal: they stay, now over the file.
+        this.matchDisk(entry, disk, canon, proposed.seq);
+        action = 'rebased';
+      } else action = 'kept';
+      const settled = { doc: entry.ref, proposal: id, outcome, action };
+      if (action !== 'discarded') entry.synced = settled;
+      this.settled = [...this.settled, settled].slice(-20);
+      if (action !== 'discarded') this.changed(entry);
+      return;
+    }
+    if (!disk.exists || !this.isStale(entry, disk)) return;
+    if (text === entry.clean) {
+      await this.reloadIfClean(entry.ref);
+      return;
+    }
+    const canon = await this.canonical(disk.text);
+    if (canon !== null && canon === text) {
+      this.matchDisk(entry, disk, canon);
+      this.changed(entry);
+    }
+  }
+
+  /**
+   * Loads a doc from disk, but only if no unsaved work is lost (spec D3):
+   * it's clean, or it matches the file. Refused while its proposal waits.
+   * @param {any} ctx
+   * @param {string} ref
+   */
+  async reload(ctx, ref) {
+    const entry = this.entry(ref);
+    if (entry.proposal && (await this.state.hasProposal(entry.proposal))) {
+      throw new CommandError(
+        `${ref}'s edits are in proposal ${entry.proposal}, which is waiting for the owner; reloading would start over without them. Keep editing on top of it (doc.save updates the proposal), or wait until it's approved or rejected.`,
+        { code: 'proposed', details: { proposal: entry.proposal } },
+      );
+    }
+    const disk = await readSource(this.site, entry.kind, entry.name);
+    const text = this.serialize(entry.doc);
+    const dirty = text !== entry.clean;
+    const canon = disk.exists ? await this.canonical(disk.text) : null;
+    if (dirty && (canon === null || canon !== text)) {
+      const edits = this.edits(entry);
+      const n = edits.length;
+      throw new CommandError(
+        `${ref} has ${n || 'some'} unsaved edit${n === 1 ? '' : 's'} the file doesn't have; reloading would drop ${n === 1 ? 'it' : 'them'}. Save ${n === 1 ? 'it' : 'them'} (doc.save), or revert to drop ${n === 1 ? 'it' : 'them'} (doc.revert).`,
+        { code: 'dirty', details: edits },
+      );
+    }
+    if (!disk.exists) {
+      this.entries.delete(ref);
+      ctx.invalidate();
+      return { doc: ref, reloaded: false, closed: true, changed: true, summary: `Closed ${ref}: its file isn't on disk any more`, dirty: false, canUndo: false, canRedo: false };
+    }
+    if (canon === null) throw new CommandError(`${entry.file} on disk doesn't load; fix it first (pixellab check ${entry.name})`, { code: 'load_error' });
+    if (!this.isStale(entry, disk) && !dirty) {
+      return { doc: ref, reloaded: false, changed: false, summary: `${ref} already matches ${entry.file}`, ...this.status(entry) };
+    }
+    const before = JSON.stringify(entry.doc);
+    await this.loadFromDisk(entry, disk);
+    delete entry.proposal;
+    delete entry.proposed;
+    ctx.invalidate();
+    this.changed(entry);
+    return { doc: ref, reloaded: true, changed: JSON.stringify(entry.doc) !== before, summary: `Reloaded ${ref} from ${entry.file}`, ...this.status(entry) };
+  }
+
+  /**
+   * Merges the file's changes since the doc's base into its working copy,
+   * three ways (spec D4), as one undo step. A clean doc just reloads; a clash
+   * changes nothing and throws merge_conflict.
+   * @param {any} ctx
+   * @param {string} ref
+   */
+  async merge(ctx, ref) {
+    const entry = this.entry(ref);
+    const disk = await readSource(this.site, entry.kind, entry.name);
+    if (!disk.exists) throw new CommandError(`${entry.file} isn't on disk; there's nothing to merge`, { code: 'not_found' });
+    if (!this.isStale(entry, disk)) return { doc: ref, merged: false, changed: false, summary: `${entry.file} hasn't changed since ${ref} was opened`, ...this.status(entry) };
+    const theirs = await this.canonical(disk.text);
+    if (theirs === null) throw new CommandError(`${entry.file} on disk doesn't load, so it can't be merged; fix it first (pixellab check ${entry.name})`, { code: 'load_error' });
+    const ours = this.serialize(entry.doc);
+    if (ours === null) throw new CommandError(`${ref} can't be serialized; fix its shape first (pixellab check ${entry.name})`, { code: 'invalid' });
+    if (ours === entry.clean) {
+      await this.loadFromDisk(entry, disk);
+      ctx.invalidate();
+      this.changed(entry);
+      return { doc: ref, merged: true, changed: true, summary: `Reloaded ${ref}: it had no unsaved edits`, ...this.status(entry) };
+    }
+    const base = entry.base.exists ? (await this.canonical(entry.base.text)) ?? entry.base.text : '';
+    const { text, conflicts } = merge3(base, ours, theirs, { union: entry.kind === 'scene' });
+    if (conflicts.length) {
+      const n = conflicts.length;
+      throw new CommandError(
+        `Both the open copy and ${entry.file} changed the same line${n === 1 ? '' : 's'} (${n} place${n === 1 ? '' : 's'}); nothing merged. Reload the file (dropping the unsaved edits), or keep the open copy and save over the file.`,
+        { code: 'merge_conflict', details: conflicts },
+      );
+    }
+    let data;
+    try {
+      data = await importSource(text);
+    } catch (err) {
+      throw new CommandError(`the merge of ${entry.file} doesn't load (${/** @type {Error} */ (err).message.split('\n')[0]}); nothing merged`, { code: 'merge_invalid' });
+    }
+    const before = JSON.stringify(entry.doc);
+    entry.doc = data;
+    // The base is the file now. The edits since the old base stay unsaved;
+    // the merge itself isn't one (its step sits at the base, so undoing it is).
+    const keep = entry.baseSeq;
+    const undone = entry.undone;
+    entry.undo.push({ before, labels: [`Merged the changes to ${entry.file} from disk`], seq: keep });
+    if (entry.undo.length > UNDO_LIMIT) entry.undo.shift();
+    entry.redo = [];
+    this.matchDisk(entry, disk, theirs, keep);
+    entry.undone = undone;
+    ctx.invalidate();
+    this.changed(entry);
+    return { doc: ref, merged: true, changed: JSON.stringify(data) !== before, summary: `Merged the changes to ${entry.file} into ${ref}`, ...this.status(entry) };
   }
 
   /** @param {string} ref @param {{ force?: boolean }} [options] */

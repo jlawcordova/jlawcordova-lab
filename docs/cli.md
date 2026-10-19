@@ -21,8 +21,10 @@
 | [`art sizes`](#artsizes) | Bytes each object and each color adds to a compiled scene, against the document's git HEAD | read |
 | [`check`](#check) | Validate the sources with the engine, all of them or one doc | read |
 | [`doc close`](#docclose) | Close an open doc (refused with unsaved changes unless --force) | session |
+| [`doc merge`](#docmerge) | Merge the changes to a doc's file on disk into its working copy, keeping the unsaved edits | edit, session |
 | [`doc open`](#docopen) | Open a scene or object as a working copy, with undo and redo | session |
 | [`doc redo`](#docredo) | Redo the last undone edit to an open doc | edit, session |
+| [`doc reload`](#docreload) | Load an open doc from disk again, only if no unsaved work is lost | edit, session |
 | [`doc revert`](#docrevert) | Load an open doc from disk again, dropping its changes (as one undo step) | edit, session |
 | [`doc save`](#docsave) | Save an open doc: validate, serialize with the engine and write its source (MCP: write a proposal) | edit, session |
 | [`doc status`](#docstatus) | Whether open docs have unsaved changes, and can undo or redo | session |
@@ -303,6 +305,22 @@ read-only · session only (`serve`) · MCP tool `doc_close`
 | `doc` (positional) | string | required | the doc: scene:<name>, object:<name>, or a name (scenes/<name>, objects/<name>) |
 | `--force` | boolean | default `false` | drop unsaved changes |
 
+#### doc.merge
+
+Merge the changes to a doc's file on disk into its working copy, keeping the unsaved edits.
+
+```
+pixellab doc merge <doc>
+```
+
+A three-way line merge: the file as the doc was opened or last saved, the file now, and the working copy. One undo step; the doc stays dirty with its own edits. A doc with no unsaved edits just reloads. When both sides changed the same lines it refuses with code merge_conflict (details: [{ base: [from, to], ours: [lines], theirs: [lines] }]) and changes nothing. Returns { doc, merged, changed, summary, dirty, canUndo, canRedo }.
+
+edits docs · session only (`serve`) · MCP tool `doc_merge`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `doc` (positional) | string | required | the doc: scene:<name>, object:<name>, or a name (scenes/<name>, objects/<name>) |
+
 #### doc.open
 
 Open a scene or object as a working copy, with undo and redo.
@@ -333,6 +351,22 @@ edits docs · session only (`serve`) · MCP tool `doc_redo`
 | --- | --- | --- | --- |
 | `doc` (positional) | string | required | the doc: scene:<name>, object:<name>, or a name (scenes/<name>, objects/<name>) |
 
+#### doc.reload
+
+Load an open doc from disk again, only if no unsaved work is lost.
+
+```
+pixellab doc reload <doc>
+```
+
+Reloads when the working copy has no edits its file lacks: it is clean, or it matches the file (as after its proposal was applied). Refuses with code dirty (details: the edits that would be lost) when there are unsaved edits, and with code proposed while its proposal waits for the owner. Returns { doc, reloaded, changed, summary, dirty, canUndo, canRedo }; reloaded is false when the doc already matched the file. doc.revert is the one that drops edits.
+
+edits docs · session only (`serve`) · MCP tool `doc_reload`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `doc` (positional) | string | required | the doc: scene:<name>, object:<name>, or a name (scenes/<name>, objects/<name>) |
+
 #### doc.revert
 
 Load an open doc from disk again, dropping its changes (as one undo step).
@@ -341,7 +375,7 @@ Load an open doc from disk again, dropping its changes (as one undo step).
 pixellab doc revert <doc>
 ```
 
-A doc that was never saved (made by scene.new or object.new) is discarded.
+A doc that was never saved (made by scene.new or object.new) is discarded. To reload without dropping anything, use doc.reload.
 
 edits docs · session only (`serve`) · MCP tool `doc_revert`
 
@@ -357,7 +391,7 @@ Save an open doc: validate, serialize with the engine and write its source (MCP:
 pixellab doc save <doc> [--force]
 ```
 
-Refuses a doc with validation problems (code invalid, details: the problems) and a file that changed on disk since the doc was opened (code conflict), unless --force. In the MCP server it writes a proposal to the state dir for a person to approve instead (unless started with --direct). Returns { doc, file, wrote, hash, diff, dirty, canUndo, canRedo }, or { doc, proposal, file, summary, diff, … } for a proposal.
+Refuses a doc with validation problems (code invalid, details: the problems) and a file that changed on disk since the doc was opened (code conflict), unless --force. In the MCP server it writes a proposal to the state dir for a person to approve instead (unless started with --direct). Returns { doc, file, wrote, hash, diff, dirty, canUndo, canRedo }, or { doc, proposal, file, summary, edits, diff, warnings?, … } for a proposal: edits lists the edits since the doc last matched its file, and warnings says when Pixel Lab has the doc open with unsaved edits.
 
 edits docs · session only (`serve`) · MCP tool `doc_save`
 
@@ -374,7 +408,7 @@ Whether open docs have unsaved changes, and can undo or redo.
 pixellab doc status [doc]
 ```
 
-With a doc: { doc, dirty, canUndo, canRedo, file, exists, stale, undo: [edits], redo: [edits], proposal? }; stale means the file changed on disk since it was opened. Without: { docs: [{ doc, dirty, canUndo, canRedo }] } for every open doc.
+With a doc: { doc, dirty, canUndo, canRedo, file, exists, stale, undo: [edits], redo: [edits], edits, proposal?, synced?, unsavedInApp }. stale: the file changed on disk since the doc was opened or last matched it. edits: the edits since the doc last matched its file (what a proposal lists). synced: how the doc was brought in line with disk after its proposal was applied or rejected ({ proposal, outcome, action }). unsavedInApp: Pixel Lab has this doc open with unsaved edits, so a proposal for it will clash with them. Without a doc: { docs: [{ doc, dirty, canUndo, canRedo }], unsavedInApp: [docs Pixel Lab has open with unsaved edits], settled: [proposals settled lately] }.
 
 read-only · session only (`serve`) · MCP tool `doc_status`
 
@@ -818,7 +852,7 @@ Apply a proposal: check its base, validate it, write the doc's source and remove
 pixellab proposal apply <id> [--force]
 ```
 
-Refuses (code conflict) if the file changed since the proposal was made, and (code invalid) if the proposed doc has validation problems, unless --force. An open, unchanged working copy of the doc reloads from the new file.
+Refuses (code conflict) if the file changed since the proposal was made, and (code invalid) if the proposed doc has validation problems, unless --force. An open working copy of the doc with no unsaved edits reloads from the new file (reloaded: true); one with unsaved edits has the proposal merged into it, keeping them (merged: true), or, when both changed the same lines, stays as it is and is reported stale (conflict: true). The file is written either way.
 
 edits docs · writes files directly · not an MCP tool
 
