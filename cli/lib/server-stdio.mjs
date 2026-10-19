@@ -14,6 +14,8 @@
 //   proposals.changed  { proposals: [...] }              when the state dir's proposals change (as proposal.list)
 //   activity.appended  { entries: [...] }                new lines of activity.jsonl
 
+import { readFileSync } from 'node:fs';
+
 import { consoleToStderr, METHOD_NOT_FOUND, RpcError, serveLines } from './jsonrpc.mjs';
 import { openDocsWriter } from './open-docs.mjs';
 import { registry as defaultRegistry } from './registry.mjs';
@@ -21,7 +23,12 @@ import { readSource, Session } from './session.mjs';
 import { watchSources, watchState } from './watch.mjs';
 
 export const PROTOCOL_VERSION = 1;
-export const VERSION = '0.4.0';
+/**
+ * The package's version, from its package.json: 0.0.0-dev in the repo, and
+ * the release's (the tag's) in an app bundle, which scripts/build-app.sh
+ * stamps. Nothing in the repo is bumped for a release.
+ */
+export const VERSION = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 
 /**
  * @param {{

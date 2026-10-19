@@ -32,7 +32,7 @@ npm test                                    # the suites in cli/test/, must show
 | `lib/errors.mjs` | `CommandError` (a stable `code`, an exit code, optional `details`), `UsageError`, `NotFoundError`, `DocumentError`. |
 | `lib/serve.mjs` | `pixellab serve --stdio \| --mcp [--direct]`. |
 | `lib/jsonrpc.mjs` | Newline-delimited JSON-RPC 2.0 over two streams, shared by both servers; maps errors to JSON-RPC codes. |
-| `lib/server-stdio.mjs` | The app's server: one session, the commands as methods plus `session.info` and `shutdown`, and the notifications. `VERSION` here is the app's and the MCP server's version. |
+| `lib/server-stdio.mjs` | The app's server: one session, the commands as methods plus `session.info` and `shutdown`, and the notifications. `VERSION` here (read from `package.json`) is the app's and the MCP server's version: `0.0.0-dev` in the repo, the release's in an app bundle. |
 | `lib/server-mcp.mjs` | The MCP server: `initialize`, `ping`, `tools/list`, `tools/call`; tool names, `LEFT_OUT` (commands agents don't get), the annotations, the activity log, and `session.sync()` before each call. |
 | `lib/state.mjs` | The state dir: proposals and `activity.jsonl`; `writeAtomic()`. |
 | `lib/watch.mjs` | File watching for the stdio server: the art sources and the state dir, debounced. |
