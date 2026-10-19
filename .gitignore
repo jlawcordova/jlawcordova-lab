@@ -1,0 +1,7 @@
+node_modules/
+.build/
+build/
+*.xcodeproj/xcuserdata/
+.swiftpm/
+.DS_Store
+.tmp/

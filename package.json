@@ -1,0 +1,10 @@
+{
+  "name": "jlawcordova-lab",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "bin": { "pixellab": "cli/bin/pixellab.mjs" },
+  "scripts": {
+    "test": "node --test \"cli/test/**/*.test.mjs\""
+  }
+}
