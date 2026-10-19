@@ -105,6 +105,7 @@ const make = {
   args: ['path'],
   mutates: true,
   writes: 'direct',
+  document: false,
   examples: ['pixellab document new ~/Art/meadow.pixellab'],
   async run(_ctx, { path, name }) {
     let root = expandPath(path);

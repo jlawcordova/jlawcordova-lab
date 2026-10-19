@@ -58,7 +58,7 @@ const info = {
 };
 ```
 
-Optional fields: `examples` (command lines for the help and the reference), `writesPng` (the result has a base64 `png`, so the CLI takes `--out`), `session: true` (only makes sense in `pixellab serve`, like `doc.undo`), `writes: 'direct'` (writes files itself, like `art.build`, so `--dry-run` doesn't apply). The `Command` typedef in `lib/registry.mjs` is the source.
+Optional fields: `examples` (command lines for the help and the reference), `writesPng` (the result has a base64 `png`, so the CLI takes `--out`), `session: true` (only makes sense in `pixellab serve`, like `doc.undo`), `writes: 'direct'` (writes files itself, like `art.build`, so `--dry-run` doesn't apply), `document: false` (needs no open document, like `document.new`, so the CLI doesn't look for one). The `Command` typedef in `lib/registry.mjs` is the source.
 
 ### Mutating commands
 

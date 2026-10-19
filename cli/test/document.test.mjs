@@ -177,6 +177,24 @@ describe('the manifest (R2)', () => {
 });
 
 describe('document.new and document.copy (R4)', () => {
+  test('R4: document new needs no open document, so it works on a Mac with no site checkout', async () => {
+    // A child process with an empty home: no config, no default site to fall back on (as in CI).
+    const base = await tempDir();
+    try {
+      const env = { ...process.env, HOME: base };
+      delete env.PIXELLAB_DOC;
+      delete env.PIXELLAB_SITE;
+      const r = await spawnCli(['document', 'new', join(base, 'fresh'), '--json'], { env });
+      assert.equal(r.code, 0, r.stderr);
+      assert.equal(JSON.parse(r.stdout).root, join(base, 'fresh.pixellab'));
+      const other = await spawnCli(['scene', 'list'], { env });
+      assert.equal(other.code, 1, 'a command that needs a document still says how to name one');
+      assert.match(other.stderr, /Pass --document <path\.pixellab>/);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
   test('R4: document new makes an empty document with the starter palette and a manifest, and refuses an existing path', async () => {
     const base = await tempDir();
     try {
