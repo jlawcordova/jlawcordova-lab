@@ -21,6 +21,20 @@ The site checkout stays the source of truth: the CLI imports the site's own pixe
 
 ## Install
 
+### From a release
+
+Each [release](https://github.com/jlawcordova/jlawcordova-lab/releases) has Pixel Lab.app for Apple silicon as a disk image (`PixelLab-darwin-arm64.dmg`) and a zip of the same app (`PixelLab-darwin-arm64.zip`). The repo is private, so download them signed in to GitHub, or with `gh`:
+
+```sh
+gh release download --repo jlawcordova/jlawcordova-lab --pattern 'PixelLab-darwin-arm64.dmg' --dir /tmp
+```
+
+Open the disk image and drag Pixel Lab to `~/Applications` (create the folder if needed). Then connect Claude Code with the `claude mcp add` command below. The app is ad-hoc signed and the download is quarantined, so the first launch is blocked: allow it under System Settings › Privacy & Security › Open Anyway. To update, quit Pixel Lab and replace the app with the newer one.
+
+On an Intel Mac, install from source.
+
+### From source
+
 ```sh
 git clone git@github.com:jlawcordova/jlawcordova-lab.git ~/Projects/jlawcordova-lab
 cd ~/Projects/jlawcordova-lab
@@ -125,7 +139,7 @@ Every tool call is logged to `activity.jsonl` in the same folder and shown in th
 - **Build art fails.** The sheet shows npm's output and, for known causes, what to do: npm not next to node or on the PATH, or no `node_modules` in the site (`npm install` there). Unsaved docs aren't in a build; save first.
 - **"The file changed on disk" when saving.** Someone (git, another editor, an approved proposal) changed the source while you had unsaved edits. Revert loads the file; Save Anyway overwrites it.
 - **A proposal's base changed.** The file changed since the agent opened it. Approve asks whether to apply anyway (overwriting those changes) or reject; the diff shows what would change against the file as it is now.
-- **The app won't open the first time.** It's ad-hoc signed; Control-click › Open, or allow it in System Settings › Privacy & Security.
+- **The app won't open the first time.** It's ad-hoc signed; Control-click › Open, or allow it in System Settings › Privacy & Security (Open Anyway, which a downloaded release always needs).
 
 ## Development
 
@@ -140,5 +154,16 @@ npm run docs:cli                           # regenerate docs/cli.md from the com
 ```
 
 **Script hook.** `PIXELLAB_SCRIPT=<file> PIXELLAB_SITE=<temp copy of the site> PIXELLAB_STATE=<temp dir> "build/Pixel Lab.app/Contents/MacOS/PixelLab"` drives the app's model headlessly, one action per line (`open scene:hero-island`, `library pine`, `place 4 -1 1`, `move 1 0`, `save`, `build`, `mode object`, `px 23 20`, `agent open`, `approve`, `snapshot <png>`, `expect …`); it refuses the real checkout, logs each step and exits 0 only if every step passed. The action list is at the top of `app/Sources/PixelLab/Support/ScriptRunner.swift`; [CLAUDE.md](CLAUDE.md) says how to make the temp site.
+
+**Releases.** Tags `v<version>` publish a GitHub Release ([`.github/workflows/release.yml`](.github/workflows/release.yml)). The version is `VERSION` in `cli/lib/server-stdio.mjs`, which is also the app's `CFBundleShortVersionString` and the MCP server's version.
+
+1. Bump `VERSION`, run `scripts/build-app.sh` and `scripts/acceptance.sh` (CI doesn't run the acceptance pass: it pins today's art), and merge to `main`.
+2. Tag the merge on `main` and push the tag:
+
+   ```sh
+   git fetch origin && git tag -a v<version> -m "Pixel Lab <version>" origin/main && git push origin v<version>
+   ```
+
+The **Release Pixel Lab** workflow checks that the tag matches `VERSION` and that the commit is on `main`, runs the CLI tests (against a fresh clone of the site) and the app's unit tests, builds the app on Apple silicon, packages it, installs it from the disk image and smoke-tests it (signature, the bundled MCP server's version, the app opening `scene:hero-island` through the script hook), then publishes the release with generated notes. If it fails, delete the tag (`git push origin :refs/tags/v<version>`), fix it, and tag again.
 
 Layout: `cli/` (Node ≥ 22, ESM, Node built-ins only), `app/` (SwiftPM, SwiftUI + AppKit, macOS 15+), `scripts/`, `docs/intents/` (each change's intent, spec and plan; `2026-10-mac-app/plan.md` is the architecture and design record), `docs/cli.md` (the command reference). No dependencies beyond Node and Swift.
