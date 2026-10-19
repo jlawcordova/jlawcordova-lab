@@ -6,7 +6,7 @@
 
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,7 +23,14 @@ export const HAVE_SITE = existsSync(join(SITE_SOURCE, 'src', 'lib', 'pixel-art',
 /** node:test's skip option: the suites need a site checkout to copy. */
 export const needsSite = HAVE_SITE ? {} : { skip: `no site checkout at ${SITE_SOURCE} (set PIXELLAB_TEST_SITE)` };
 
-export const SITE_PARTS = ['src/lib/pixel-art', 'scripts/pixel-art-preview.mjs', 'src/styles/variables.css', 'src/assets/pixel-art/source', 'package.json'];
+export const SITE_PARTS = [
+  'src/lib/pixel-art',
+  'scripts/pixel-art-preview.mjs',
+  'scripts/optimize-pixel-art.mjs',
+  'src/styles/variables.css',
+  'src/assets/pixel-art/source',
+  'package.json',
+];
 
 /** A temp folder, removed by cleanup(). */
 export async function tempDir(prefix = 'pixellab-test-') {
@@ -142,4 +149,98 @@ export function decodePng(png) {
     return minX === Infinity ? null : [minX, minY, maxX - minX + 1, maxY - minY + 1];
   };
   return { ...header, types, alpha, rgba, opaqueBox };
+}
+
+/**
+ * A source file's data, read fresh from disk (as a module, the way the
+ * engine reads it).
+ * @param {string} path
+ */
+export async function readDoc(path) {
+  const text = await readFile(path, 'utf8');
+  const mod = await import(`data:text/javascript;base64,${Buffer.from(text).toString('base64')}`);
+  return structuredClone(mod.default);
+}
+
+/**
+ * Starts `pixellab serve …` as a child process and speaks newline-delimited
+ * JSON-RPC to it: request() resolves with the response, notifications are
+ * collected, and waitFor() waits for one.
+ * @param {string[]} args
+ * @param {{ env?: Record<string, string | undefined> }} [options]
+ */
+export function startServer(args, { env = process.env } = {}) {
+  const child = spawn(process.execPath, [BIN, 'serve', ...args], { env, cwd: REPO, stdio: ['pipe', 'pipe', 'pipe'] });
+  let buffer = '';
+  let stderr = '';
+  let nextId = 1;
+  /** @type {Map<number, (msg: any) => void>} */
+  const pending = new Map();
+  /** @type {any[]} */
+  const notifications = [];
+  /** @type {any[]} */
+  const lines = [];
+  /** @type {{ test: (n: any) => boolean, resolve: (n: any) => void }[]} */
+  const waiters = [];
+  child.stdout.setEncoding('utf8').on('data', (chunk) => {
+    buffer += chunk;
+    let nl;
+    while ((nl = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, nl);
+      buffer = buffer.slice(nl + 1);
+      const msg = JSON.parse(line); // anything but JSON on stdout fails the test
+      lines.push(msg);
+      if ('id' in msg && pending.has(msg.id)) {
+        /** @type {(msg: any) => void} */ (pending.get(msg.id))(msg);
+        pending.delete(msg.id);
+      } else if (msg.method) {
+        notifications.push(msg);
+        for (const w of [...waiters]) {
+          if (w.test(msg)) {
+            waiters.splice(waiters.indexOf(w), 1);
+            w.resolve(msg);
+          }
+        }
+      }
+    }
+  });
+  child.stderr.setEncoding('utf8').on('data', (d) => (stderr += d));
+  const exited = new Promise((resolve) => child.on('close', (code) => resolve(code)));
+  return {
+    child,
+    lines,
+    notifications,
+    get stderr() {
+      return stderr;
+    },
+    exited,
+    /** Sends a raw line. */
+    send(/** @type {string} */ line) {
+      child.stdin.write(`${line}\n`);
+    },
+    /** @returns {Promise<any>} the whole response message */
+    request(/** @type {string} */ method, /** @type {any} */ params = {}) {
+      const id = nextId++;
+      return new Promise((resolve) => {
+        pending.set(id, resolve);
+        child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+      });
+    },
+    notify(/** @type {string} */ method, /** @type {any} */ params = {}) {
+      child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`);
+    },
+    /** Waits for a notification (one already received counts if `since` covers it). */
+    waitFor(/** @type {(n: any) => boolean} */ test, { since = 0, timeout = 5000 } = {}) {
+      const seen = notifications.slice(since).find(test);
+      if (seen) return Promise.resolve(seen);
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`timed out waiting for a notification; got ${JSON.stringify(notifications.slice(since).map((n) => n.method))}`)), timeout);
+        waiters.push({ test, resolve: (n) => (clearTimeout(timer), resolve(n)) });
+      });
+    },
+    async close() {
+      child.stdin.end();
+      return exited;
+    },
+  };
 }

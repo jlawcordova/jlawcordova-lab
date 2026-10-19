@@ -5,6 +5,7 @@
   "engines": { "node": ">=22" },
   "bin": { "pixellab": "cli/bin/pixellab.mjs" },
   "scripts": {
-    "test": "node --test \"cli/test/**/*.test.mjs\""
+    "test": "node --test \"cli/test/**/*.test.mjs\"",
+    "docs:cli": "node scripts/docs-cli.mjs"
   }
 }

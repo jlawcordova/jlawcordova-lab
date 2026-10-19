@@ -31,7 +31,7 @@ describe('help', () => {
   test('group help: pixellab scene --help, pixellab help scene', async () => {
     const r = await spawnCli(['scene', '--help']);
     assert.equal(r.code, 0);
-    assert.match(r.stdout, /^pixellab scene: 4 commands$/m);
+    assert.match(r.stdout, /^pixellab scene: 13 commands$/m);
     assert.match(r.stdout, /^ {2}pixellab scene render <name> \[--scale <n>\] \[--time <n>\] \[--show <text>\] \[--out <file\.png>\]$/m);
     assert.match(r.stdout, /^ {2}pixellab scene list$/m);
     assert.equal((await spawnCli(['help', 'scene'])).stdout, r.stdout);
@@ -105,5 +105,18 @@ describe('exit codes', needsSite, () => {
       child.on('close', (c) => resolve({ c, stderr }));
     });
     assert.equal(/** @type {any} */ (code).stderr, '');
+  });
+});
+
+describe('docs/cli.md', () => {
+  test('is generated from the registry and up to date (npm run docs:cli)', async () => {
+    const { spawn } = await import('node:child_process');
+    const { join } = await import('node:path');
+    const { REPO } = await import('./helpers.mjs');
+    const code = await new Promise((resolve) => {
+      const child = spawn(process.execPath, [join(REPO, 'scripts', 'docs-cli.mjs'), '--check'], { stdio: 'inherit' });
+      child.on('close', resolve);
+    });
+    assert.equal(code, 0, 'docs/cli.md is out of date: run npm run docs:cli');
   });
 });

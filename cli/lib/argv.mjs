@@ -14,7 +14,8 @@
 // - Lists: comma-separated (`--at 14,6,1`) or the flag repeated.
 // - Objects: JSON (`--data '{"a": 1}'`).
 // - `--` ends the flags; everything after it is positional.
-// - Global flags go anywhere: --json, --site <path>, --out <file>, -h/--help.
+// - Global flags go anywhere: --json, --site <path>, --out <file>, --dry-run,
+//   --force, -h/--help.
 // Values stay strings here; checkParams() coerces them to the schema's types.
 
 import { UsageError } from './errors.mjs';
@@ -24,6 +25,8 @@ export const GLOBAL_FLAGS = {
   json: { value: false, help: "print the command's result as JSON" },
   site: { value: true, help: 'the site checkout (else $PIXELLAB_SITE, ~/.config/pixellab/config.json, ~/Projects/jlawcordova.github.io)' },
   out: { value: true, help: 'write the PNG of a render command to this file' },
+  'dry-run': { value: false, help: 'an edit command shows what it would write (a diff) and writes nothing' },
+  force: { value: false, help: 'an edit command writes despite validation problems or a file changed on disk' },
   help: { value: false, help: 'help for the command or group' },
 };
 
@@ -34,7 +37,7 @@ export const kebab = (/** @type {string} */ name) => name.replace(/[A-Z]/g, (c) 
 export const commandWords = (/** @type {string} */ name) => name.split('.').join(' ');
 
 /**
- * @typedef {{ json: boolean, help: boolean, site?: string, out?: string }} Globals
+ * @typedef {{ json: boolean, help: boolean, site?: string, out?: string, 'dry-run'?: boolean, force?: boolean }} Globals
  * @typedef {
  *   | { kind: 'help', topic: string[], globals: Globals, usage?: boolean }
  *   | { kind: 'command', command: import('./registry.mjs').Command, params: Record<string, string | string[]>, globals: Globals }

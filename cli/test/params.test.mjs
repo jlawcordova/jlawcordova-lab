@@ -148,20 +148,26 @@ describe('parseCommandLine', () => {
 describe('registry', () => {
   test('every command is well formed and has a group', () => {
     const names = [...registry.commands.keys()];
-    assert.deepEqual(names, [
-      'check',
-      'object.list',
-      'object.render',
-      'object.show',
-      'palette.get',
-      'scene.items',
-      'scene.list',
-      'scene.render',
-      'scene.show',
-      'site.info',
-    ]);
-    for (const cmd of registry.commands.values()) assert.equal(cmd.mutates, false, cmd.name);
-    assert.deepEqual([...registry.groups().keys()], ['check', 'object', 'palette', 'scene', 'site']);
+    const readOnly = [
+      'activity.list', 'check', 'doc.close', 'doc.open', 'doc.status', 'object.list', 'object.pick', 'object.render', 'object.show',
+      'palette.get', 'proposal.list', 'proposal.show', 'scene.items', 'scene.list', 'scene.render', 'scene.show', 'site.info',
+    ];
+    const mutating = [
+      'doc.redo', 'doc.revert', 'doc.save', 'doc.undo',
+      'object.animate', 'object.erase', 'object.fill', 'object.frame.add', 'object.frame.delete', 'object.frame.duplicate', 'object.frame.move',
+      'object.layer.add', 'object.layer.delete', 'object.layer.duplicate', 'object.layer.move', 'object.new', 'object.paint', 'object.resize', 'object.still',
+      'proposal.apply', 'proposal.reject',
+      'scene.duplicate', 'scene.lower', 'scene.move', 'scene.new', 'scene.place', 'scene.raise', 'scene.remove', 'scene.set', 'scene.snap',
+    ];
+    assert.deepEqual(names, [...readOnly, ...mutating, 'art.build'].sort());
+    for (const name of readOnly) assert.equal(registry.get(name)?.mutates, false, name);
+    for (const name of mutating) assert.equal(registry.get(name)?.mutates, true, name);
+    assert.deepEqual(
+      names.filter((n) => registry.get(n)?.session),
+      ['doc.close', 'doc.open', 'doc.redo', 'doc.revert', 'doc.save', 'doc.status', 'doc.undo'],
+    );
+    assert.deepEqual(names.filter((n) => registry.get(n)?.writes), ['art.build', 'proposal.apply', 'proposal.reject']);
+    assert.deepEqual([...registry.groups().keys()], ['activity', 'art', 'check', 'doc', 'object', 'palette', 'proposal', 'scene', 'site']);
   });
 
   test('malformed definitions are refused', () => {

@@ -137,6 +137,11 @@ export function coerceValue(schema, value) {
       const list = typeof value === 'string' ? [value] : value;
       if (!Array.isArray(list)) return value;
       const items = schema.items ?? {};
+      // A list of lists ([[3, 4], [5, 6]]): "3,4 5,6" or "3,4;5,6", or the
+      // flag (or positional) repeated, one inner list each.
+      if (items.type === 'array') {
+        return list.flatMap((v) => (typeof v === 'string' ? v.split(/[\s;]+/).filter(Boolean).map((group) => coerceValue(items, group)) : [coerceValue(items, v)]));
+      }
       // "14,6,1" or repeated flags; strings split on commas.
       const flat = list.flatMap((v) => (typeof v === 'string' ? (v === '' ? [] : v.split(',').map((s) => s.trim())) : [v]));
       return flat.map((v) => coerceValue(items, v));
