@@ -212,7 +212,7 @@ describe('document.new and document.copy (R4)', () => {
       const to = join(doc.base, 'copy');
       const r = await runCli(['document', 'copy', '--to', to, '--document', doc.root, '--json'], { env: doc.env() });
       assert.equal(r.code, 0, r.stderr);
-      assert.deepEqual(JSON.parse(r.stdout), { from: doc.root, to: `${to}.pixellab`, summary: `Copied ${doc.root} to ${to}.pixellab` });
+      assert.deepEqual(JSON.parse(r.stdout), { from: doc.root, to: `${to}.pixellab`, wroteManifest: false, summary: `Copied ${doc.root} to ${to}.pixellab` });
       assert.equal(await readFile(join(`${to}.pixellab`, 'objects', 'pebble.mjs'), 'utf8'), await readFile(join(doc.root, 'objects', 'pebble.mjs'), 'utf8'));
       const opened = await openDocument({ doc: `${to}.pixellab`, env: {} });
       assert.equal(opened.name, 'sample', 'the manifest comes along');
@@ -246,6 +246,21 @@ describe('a site checkout (R3, legacy)', needsSite, () => {
     assert.deepEqual(opened.budgets, SITE_BUDGETS);
     assert.deepEqual(opened.previewColors, { card: '#E9DCC6', grid: 'rgba(90, 62, 43, 0.06)' }, "from the checkout's variables.css");
     assert.deepEqual(opened.theme, { darkPage: '#1C1712' });
+  });
+
+  test("R4: a copy of a legacy source folder gets a manifest with the site's budgets and publish folder", async () => {
+    const to = join(site.base, 'from-legacy.pixellab');
+    const r = await runCli(['document', 'copy', '--to', to, '--site', site.root, '--json'], { env: site.env() });
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(JSON.parse(r.stdout).wroteManifest, true);
+    const manifest = JSON.parse(await readFile(join(to, 'manifest.json'), 'utf8'));
+    assert.equal(manifest.format, 1);
+    assert.deepEqual(manifest.publish, { dir: '..', budgets: SITE_BUDGETS });
+    assert.deepEqual(manifest.preview, { card: '#E9DCC6', grid: 'rgba(90, 62, 43, 0.06)' });
+    const opened = await openDocument({ doc: to, env: {} });
+    assert.equal(opened.kind, 'document');
+    assert.equal(opened.publishDir, site.base, 'a relative publish.dir points next to the copy');
+    assert.deepEqual(opened.budgets, SITE_BUDGETS);
   });
 
   test('R3: a *.pixellab under src/assets/pixel-art/ wins over source/', async () => {

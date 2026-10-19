@@ -65,9 +65,35 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>NSSupportsAutomaticTermination</key><false/>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key><string>Pixel Lab Document</string>
+      <key>CFBundleTypeRole</key><string>Editor</string>
+      <key>LSHandlerRank</key><string>Owner</string>
+      <key>LSTypeIsPackage</key><true/>
+      <key>LSItemContentTypes</key>
+      <array><string>com.jlawcordova.pixellab.document</string></array>
+    </dict>
+  </array>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key><string>com.jlawcordova.pixellab.document</string>
+      <key>UTTypeDescription</key><string>Pixel Lab Document</string>
+      <key>UTTypeConformsTo</key>
+      <array><string>com.apple.package</string></array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array><string>pixellab</string></array>
+      </dict>
+    </dict>
+  </array>
 </dict>
 </plist>
 PLIST
+plutil -lint "$app/Contents/Info.plist"
 
 echo "==> codesign (ad hoc)"
 codesign --force --deep -s - "$app"

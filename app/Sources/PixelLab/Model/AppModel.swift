@@ -11,18 +11,18 @@ enum Zoom: Hashable, Sendable {
     static func levels(for kind: DocRef.Kind) -> [Int] { kind == .scene ? [1, 2, 3, 4] : [4, 8, 12, 16] }
 }
 
-/// Why the app can't open the site yet; the setup screen shows it.
+/// Why the app can't open the document yet; the setup screen shows it.
 struct SetupProblem: Equatable {
     var node: String?
-    var site: String?
+    var document: String?
     var cli: String?
     var server: String?
-    var isEmpty: Bool { node == nil && site == nil && cli == nil && server == nil }
+    var isEmpty: Bool { node == nil && document == nil && cli == nil && server == nil }
 }
 
-/// The app's state: the server connection, the site's scenes and objects, the
-/// open doc and the stage's view settings. One per app; the views read it from
-/// the environment.
+/// The app's state: the server connection, the document's scenes and objects,
+/// the open doc and the stage's view settings. One per app; the views read it
+/// from the environment.
 @MainActor @Observable
 final class AppModel {
     static let shared = AppModel()
@@ -95,10 +95,27 @@ final class AppModel {
 
     // MARK: Settings
 
-    var sitePath: String {
-        if let env = ProcessInfo.processInfo.environment["PIXELLAB_SITE"], !env.isEmpty { return NSString(string: env).expandingTildeInPath }
-        let saved = UserDefaults.standard.string(forKey: SettingsKey.site) ?? ""
-        return saved.isEmpty ? Locator.defaultSitePath : NSString(string: saved).expandingTildeInPath
+    /// The document the server opens: `PIXELLAB_DOC`, else `PIXELLAB_SITE`
+    /// (the script hook and snapshots), else Settings, else the default site's.
+    var documentLocation: DocumentLocation {
+        if let opened = openedDocument { return .document(opened) }
+        return DocumentLocation.resolve(environment: ProcessInfo.processInfo.environment, saved: UserDefaults.standard.string(forKey: SettingsKey.document))
+    }
+
+    /// A document opened in this run (Open, New, Save As, Finder): it beats the
+    /// environment, so the script hook's `saveas` switches too.
+    @ObservationIgnored private var openedDocument: String?
+
+    /// The path the setup screen and Settings show.
+    var documentPath: String { Locator.path(of: documentLocation) }
+
+    /// The document's name (its manifest's, else its folder's), once the server is up.
+    var documentName: String? { sessionInfo?.document?.name }
+
+    /// The main window's title: the open doc, then the document.
+    var windowTitle: String {
+        let parts = [document?.title, documentName].compactMap { $0 }
+        return parts.isEmpty ? "Pixel Lab" : parts.joined(separator: " — ")
     }
 
     var appearanceSetting: AppearanceSetting {
@@ -149,14 +166,14 @@ final class AppModel {
         }
         let nodeSetting = UserDefaults.standard.string(forKey: SettingsKey.node)
         let node = await Task.detached { Locator.findNode(setting: nodeSetting) }.value
-        let site = sitePath
+        let location = documentLocation
         var problem = SetupProblem()
         if node == nil {
             problem.node = (nodeSetting ?? "").isEmpty
                 ? "Pixel Lab needs Node.js 22 or later, and couldn't find node in your shell's PATH, /opt/homebrew/bin or /usr/local/bin."
                 : "There's no node at \(nodeSetting ?? "")."
         }
-        problem.site = Locator.siteProblem(site)
+        problem.document = Locator.documentProblem(location)
         let cli = Locator.findCLI()
         if cli == nil { problem.cli = "The pixellab CLI is missing from the app (Contents/Resources/cli)." }
         guard problem.isEmpty, let node, let cli else {
@@ -165,7 +182,7 @@ final class AppModel {
         }
 
         phase = .starting("Starting the pixellab server…")
-        let conn = ServerConnection(launch: ServerLaunch(node: node, cli: cli, site: site))
+        let conn = ServerConnection(launch: ServerLaunch(node: node, cli: cli, location: location))
         do {
             sessionInfo = try await conn.start()
         } catch {
@@ -566,16 +583,83 @@ final class AppModel {
         }
     }
 
-    /// ⌘B: runs the site's `npm run art` and shows the report.
-    func buildArt() async {
+    /// ⌘B: `art.build` compiles every scene with an output and writes the SVGs
+    /// into the document's publish folder, or into a folder the owner picks
+    /// (`askFolder`, or when the manifest names none); the sheet shows the report.
+    /// `dir` is the script hook's folder, so no panel opens.
+    func publish(askFolder: Bool = false, dir: String? = nil) async {
         guard let connection, build?.running != true else { return }
+        var folder = dir
+        if folder == nil, askFolder || sessionInfo?.document?.publishDir == nil {
+            guard script == nil, snapshot == nil else {
+                build = BuildState(running: false, error: "This document has no publish folder; the script passes one with `publish <dir>`.")
+                return
+            }
+            guard let picked = SetupView.chooseFolder(title: "Publish to a folder", message: "The compiled SVGs are written into this folder.", start: sessionInfo?.document?.publishDir ?? documentPath) else { return }
+            folder = picked
+        }
         build = BuildState(running: true)
         do {
-            let r: ArtBuildResult = try await connection.call("art.build")
+            let params: [String: JSONValue] = folder.map { ["dir": .string($0)] } ?? [:]
+            let r: ArtBuildResult = try await connection.call("art.build", params)
             build = BuildState(running: false, result: r)
         } catch {
             build = BuildState(running: false, error: error.localizedDescription)
         }
+    }
+
+    // MARK: Documents
+
+    /// New Document…: a save panel for the `.pixellab`, `document new` through
+    /// the CLI (the server needn't be up), then a switch to it.
+    func newDocument(at path: String? = nil) async {
+        guard let path = path ?? SetupView.chooseNewDocument(title: "New Pixel Lab document", name: "Untitled.pixellab", start: documentPath) else { return }
+        let nodeSetting = UserDefaults.standard.string(forKey: SettingsKey.node)
+        guard let node = Locator.findNode(setting: nodeSetting), let cli = Locator.findCLI() else {
+            notice = "Pixel Lab needs Node.js and its CLI to make a document."
+            return
+        }
+        do {
+            let out = try await Locator.runCli(node: node, cli: cli, ["document", "new", path, "--json"])
+            let made = try JSONDecoder().decode(DocumentNewResult.self, from: Data(out.utf8))
+            await switchDocument(to: made.root)
+        } catch {
+            notice = "Couldn't make the document: \(error.localizedDescription)"
+            if case .setup(var p) = phase {
+                p.document = "Couldn't make the document: \(error.localizedDescription)"
+                phase = .setup(p)
+            }
+        }
+    }
+
+    /// Open Document… (⌘O): a `.pixellab` folder, or a site checkout holding one.
+    func openDocument() async {
+        guard let path = SetupView.chooseDocumentFolder(start: documentPath) else { return }
+        await switchDocument(to: path)
+    }
+
+    /// Save As… (⇧⌘S): `document.copy` the open document whole, then switch to the copy.
+    func saveAs(to path: String? = nil) async {
+        guard let connection, phase == .ready else { return }
+        guard let path = path ?? SetupView.chooseNewDocument(title: "Save a copy of the document", name: "\(documentName ?? "Untitled").pixellab", start: sessionInfo?.document?.root) else { return }
+        do {
+            let r: DocumentCopyResult = try await connection.call("document.copy", ["to": .string(path)])
+            await switchDocument(to: r.to)
+        } catch {
+            notice = "Couldn't save a copy: \(error.localizedDescription)"
+        }
+    }
+
+    /// Makes `path` the document (Settings, so it's remembered) and restarts
+    /// the server on it, after any unsaved work is dealt with.
+    func switchDocument(to path: String) async {
+        guard await confirmUnsaved(window: mainWindow) else { return }
+        discardConfirmed = false
+        openedDocument = path
+        // Remembered in Settings, except under the script hook or a snapshot run, which must leave the owner's settings alone.
+        if script == nil, snapshot == nil { UserDefaults.standard.set(path, forKey: SettingsKey.document) }
+        settingsNeedRestart = false
+        await bootstrap()
     }
 
     /// A doc's file was written outside the editor (an approved proposal):

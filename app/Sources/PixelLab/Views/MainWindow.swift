@@ -57,7 +57,7 @@ struct DocumentWindow: View {
             InspectorView()
                 .inspectorColumnWidth(min: 230, ideal: 264, max: 360)
         }
-        .navigationTitle(model.document?.title ?? "Pixel Lab")
+        .navigationTitle(model.windowTitle)
         .navigationSubtitle(model.document == nil ? "" : (model.document?.isDirty == true ? "Edited" : "Saved"))
         .toolbar { DocumentToolbar() }
         .toolbarBackground(Theme.hero, for: .windowToolbar)
@@ -95,7 +95,7 @@ struct DocumentWindow: View {
             }
         }
         .sheet(isPresented: Binding(get: { model.build != nil }, set: { if !$0 { model.build = nil } })) {
-            BuildArtSheet().environment(model)
+            PublishSheet().environment(model)
         }
         .sheet(item: Binding(get: { model.newDoc }, set: { model.newDoc = $0 })) { draft in
             NewDocSheet(draft: draft).environment(model)
@@ -180,12 +180,12 @@ struct DocumentToolbar: ToolbarContent {
             .accessibilityLabel(model.mode == .object ? "Pixel grid" : "Grid")
 
             Button {
-                Task { await model.buildArt() }
+                Task { await model.publish() }
             } label: {
-                Label("Build Art", systemImage: "hammer")
+                Label("Publish", systemImage: "square.and.arrow.up.on.square")
             }
-            .help("Build art: run npm run art in the site (⌘B)")
-            .accessibilityLabel("Build Art")
+            .help("Publish: compile every scene and write the SVGs to the document's publish folder (⌘B)")
+            .accessibilityLabel("Publish")
             .disabled(model.build?.running == true)
 
             Button {

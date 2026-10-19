@@ -1,9 +1,10 @@
 #!/bin/zsh
 # The acceptance pass of docs/intents/2026-10-mac-app/plan.md ("What ready to use means"), end to end
-# on a temp copy of the site: scene edits → save → build art, object paint →
+# on a temp copy of the site: scene edits → save → publish, object paint →
 # save (scripts/acceptance/scene-object.txt), then an agent over MCP saves two
 # proposals (mcp-agent.mjs, through the app bundle's CLI) and the Agent window
-# ghosts, approves and rejects them (agent.txt). The real checkout is only
+# ghosts, approves and rejects them (agent.txt), and the document is saved as a
+# copy, reopened and published into a folder (document.txt). The real checkout is only
 # read (copied). Exits 0 if every step passed.
 #
 #   scripts/acceptance.sh [out-dir]      (default: a new temp dir)
@@ -20,7 +21,7 @@ app="$root/build/Pixel Lab.app"
 [[ -x "$app/Contents/MacOS/PixelLab" ]] || { echo "no $app: run scripts/build-app.sh" >&2; exit 1; }
 
 site="$out/site" state="$out/state" shots="$out/shots"
-rm -rf "$site" "$state" && mkdir -p "$site" "$state" "$shots"
+rm -rf "$site" "$state" "$shots" && mkdir -p "$site" "$state" "$shots"
 cp -R "$real/src" "$real/scripts" "$real/package.json" "$real/package-lock.json" "$site/"
 [[ -d "$real/node_modules" ]] && ln -s "$real/node_modules" "$site/node_modules"
 git -C "$site" init -q && git -C "$site" add -A && git -C "$site" -c user.email=t@t -c user.name=t commit -qm base
@@ -32,13 +33,21 @@ run() { # run <script> <log>
   grep -q 'all steps passed' "$out/$2"
 }
 
-echo "==> scene and object mode, save, build art"
+echo "==> scene and object mode, save, publish"
 run scene-object.txt scene-object.log
+svgs=$(ls "$site"/src/assets/pixel-art/*.svg | wc -l | tr -d ' ')
+[[ $svgs == 6 ]] || { echo "expected 6 published SVGs in the temp site, found $svgs" >&2; exit 1; }
+echo "published $svgs SVGs into the temp site"
 git -C "$site" add -A && git -C "$site" -c user.email=t@t -c user.name=t commit -qm "after scene-object"
 echo "==> an agent over MCP proposes"
 PIXELLAB_CLI_PATH="$app/Contents/Resources/cli/bin/pixellab.mjs" node "$root/scripts/acceptance/mcp-agent.mjs" "$site" "$state"
 echo "==> the Agent window: ghost, approve, reject"
 run agent.txt agent.log
+echo "==> the document: save as, reopen the copy, publish into a folder"
+run document.txt document.log
+copied=$(ls "$shots"/copy-out/*.svg | wc -l | tr -d ' ')
+[[ $copied == 6 ]] || { echo "expected 6 SVGs published from the copy, found $copied" >&2; exit 1; }
+[[ -f "$shots/copy.pixellab/manifest.json" ]] || { echo "the copy has no manifest.json" >&2; exit 1; }
 echo "==> the temp site after the run"
 git -C "$site" diff --stat HEAD~1 HEAD
 git -C "$site" diff --stat

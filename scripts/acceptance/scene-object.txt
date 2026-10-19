@@ -75,14 +75,17 @@ play
 wait 1200
 pause
 time 0
-# 4. checks, save, build art
+# 4. checks, save, publish
 expect problems 0
 save
 expect dirty false
+appearance dark
 build
 expect build ok
-expect hint none
+expect outputs 6
+snapshot @OUT@/publish-sheet-dark.png
 done
+appearance light
 # 3. object mode: paint, erase, fill, pick, layers, frames, preview
 open object:house
 expect mode object

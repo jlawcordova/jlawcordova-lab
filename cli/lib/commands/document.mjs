@@ -125,7 +125,9 @@ const make = {
 const copy = {
   name: 'document.copy',
   summary: 'Save a copy of the open document at another path (Save As)',
-  description: 'Copies the whole .pixellab folder (manifest, palette, objects, scenes) to --to. Refuses an existing path. The copy keeps its publish.dir, so a relative one now points next to the copy.',
+  description:
+    'Copies the whole .pixellab folder (manifest, palette, objects, scenes) to --to. Refuses an existing path. The copy keeps its publish.dir, so a relative one now points next to the copy. ' +
+    "A legacy source/ folder has no manifest: the copy gets one with the site's budgets, publish folder (..) and colors, so it publishes as the site did.",
   params: { type: 'object', properties: { to: { type: 'string', description: 'the new path (.pixellab is added when missing)' } }, required: ['to'] },
   args: [],
   mutates: true,
@@ -139,7 +141,12 @@ const copy = {
     if (dest === from || dest.startsWith(`${from}/`)) throw new CommandError(`${dest} is inside the document itself`, { code: 'usage', exitCode: 2 });
     await mkdir(dirname(dest), { recursive: true });
     await cp(from, dest, { recursive: true });
-    return { from, to: dest, summary: `Copied ${from} to ${dest}` };
+    let wroteManifest = false;
+    if (!existsSync(join(dest, 'manifest.json'))) {
+      await writeFile(join(dest, 'manifest.json'), `${JSON.stringify({ ...ctx.site.manifest, name: basename(dest, EXTENSION) }, null, 2)}\n`);
+      wroteManifest = true;
+    }
+    return { from, to: dest, wroteManifest, summary: `Copied ${from} to ${dest}${wroteManifest ? ' (with a manifest.json for it)' : ''}` };
   },
   format: (r) => r.summary,
 };
