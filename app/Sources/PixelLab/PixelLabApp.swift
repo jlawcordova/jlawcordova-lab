@@ -18,10 +18,13 @@ struct PixelLabApp: App {
         .windowToolbarStyle(.unified)
         .commands { PixelLabCommands(model: model) }
 
+        // A Window scene is single and listed in the Window menu (Window › Agent);
+        // SwiftUI remembers its frame.
         Window("Agent", id: WindowID.agent) {
             AgentWindow().environment(model)
         }
-        .defaultSize(width: 560, height: 640)
+        .defaultSize(width: 860, height: 760)
+        .defaultPosition(.trailing)
 
         Settings {
             SettingsView().environment(model)
@@ -97,7 +100,7 @@ struct PixelLabCommands: Commands {
             }
                 .keyboardShortcut("'")
             Divider()
-            Button("Agent") { openWindow(id: WindowID.agent) }
+            Button(model.agent.pendingCount > 0 ? "Show Agent (\(model.agent.pendingCount) to review)" : "Show Agent") { openWindow(id: WindowID.agent) }
                 .keyboardShortcut("a", modifiers: [.command, .option])
             Divider()
         }

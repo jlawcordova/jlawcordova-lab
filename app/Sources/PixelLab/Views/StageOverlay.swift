@@ -129,3 +129,117 @@ struct SelectionOutline: View {
         }
     }
 }
+
+/// A proposal on the stage (the Agent window's preview): the proposed doc's
+/// render at 60% over the current one, and what it changes outlined in gold:
+/// added and moved items solid with a small tag, removed items dashed, and
+/// for objects every changed pixel.
+struct ProposalGhostLayer: View {
+    var geometry: StageGeometry
+    var ghost: ProposalGhost
+    /// The stage's current render (removed items' boxes are in it).
+    var current: StageImage
+    var changes: (items: [GhostChange], pixels: [PixelPoint])
+    @Environment(\.displayScale) private var displayScale
+
+    var body: some View {
+        let image = ghost.image
+        let o = geometry.viewPoint(fromScene: image.viewBox.origin)
+        ZStack(alignment: .topLeading) {
+            image.image.view(pointsPerPixel: geometry.zoom, displayScale: displayScale)
+                .opacity(0.6)
+                .offset(x: o.x, y: o.y)
+            Canvas(opaque: false, rendersAsynchronously: false) { context, _ in
+                for p in changes.pixels {
+                    let r = geometry.viewRect(fromScene: CGRect(x: CGFloat(p.x), y: CGFloat(p.y), width: 1, height: 1))
+                    let inset = r.insetBy(dx: min(1, r.width / 4), dy: min(1, r.height / 4))
+                    context.stroke(Path(inset), with: .color(Theme.halo), lineWidth: 2.5)
+                    context.stroke(Path(inset), with: .color(Theme.gold), lineWidth: 1.25)
+                }
+                for change in changes.items {
+                    guard let r = rect(change) else { continue }
+                    let path = Path(r.insetBy(dx: -2, dy: -2))
+                    context.stroke(path, with: .color(Theme.halo), lineWidth: 3.5)
+                    context.stroke(path, with: .color(Theme.gold),
+                                   style: StrokeStyle(lineWidth: 1.5, dash: change.kind == .removed ? [4, 3] : []))
+                }
+            }
+            .frame(width: geometry.contentSize.width, height: geometry.contentSize.height)
+            ForEach(Array(changes.items.enumerated()), id: \.offset) { _, change in
+                if let r = rect(change) {
+                    Text(change.kind.rawValue)
+                        .font(Theme.monoFont(10).weight(.medium))
+                        .foregroundStyle(Theme.hexColor("#2E2418"))
+                        .fixedSize()
+                        .padding(.horizontal, 5)
+                        .frame(height: 15)
+                        .background(Theme.gold)
+                        .offset(x: r.minX - 2, y: max(r.minY - 19, 0))
+                }
+            }
+        }
+        .frame(width: geometry.contentSize.width, height: geometry.contentSize.height, alignment: .topLeading)
+        .allowsHitTesting(false)
+        .accessibilityElement()
+        .accessibilityLabel(summary)
+    }
+
+    /// A change's box in view points: from the proposed render, or the current one for removed items.
+    private func rect(_ change: GhostChange) -> CGRect? {
+        guard let b = change.bounds, b.count == 4 else { return nil }
+        let image = change.kind == .removed ? current : ghost.image
+        let s = CGFloat(max(image.scale, 1))
+        return geometry.viewRect(fromScene: CGRect(x: image.viewBox.minX + b[0] / s, y: image.viewBox.minY + b[1] / s, width: b[2] / s, height: b[3] / s))
+    }
+
+    private var summary: String {
+        if ghost.ref.kind == .object { return "Proposal ghost: \(changes.pixels.count) pixels change" }
+        let n = { (k: GhostChange.Kind) in changes.items.filter { $0.kind == k }.count }
+        return "Proposal ghost: \(n(.added)) added, \(n(.moved)) moved, \(n(.removed)) removed"
+    }
+}
+
+/// Over the stage while a proposal is ghosted: who proposed it, and Approve,
+/// Reject and Hide (Esc).
+struct ProposalBanner: View {
+    var agent: AgentModel
+    var proposal: ProposalSummary
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "sparkles").foregroundStyle(Theme.gold)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Previewing proposal from \(proposal.agentName)").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
+                Text(detail).font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(1)
+            }
+            Spacer(minLength: 12)
+            Button("Hide") { agent.setGhostShown(false) }
+                .keyboardShortcut(.escape, modifiers: [])
+                .help("Hide the ghost (Esc)")
+            Button("Reject") { Task { await agent.reject() } }
+                .disabled(agent.working != nil)
+                .help("Reject the proposal (asks first)")
+            Button("Approve") { Task { await agent.approve() } }
+                .buttonStyle(AccentButtonStyle())
+                .disabled(agent.working != nil)
+                .help("Approve: write the proposal to \(proposal.ref?.file ?? "the file")")
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 8)
+        .padding(.vertical, 7)
+        .frame(maxWidth: 640)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+        .shadow(color: .black.opacity(0.18), radius: 8, y: 2)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Previewing proposal from \(proposal.agentName)")
+    }
+
+    private var detail: String {
+        var parts = [proposal.editsLabel]
+        if !proposal.baseMatches { parts.append("the file changed since") }
+        if let e = agent.ghostError { parts.append("couldn't render: \(e)") }
+        if let r = agent.working { parts.append(r) }
+        return parts.joined(separator: " · ")
+    }
+}

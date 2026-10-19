@@ -198,18 +198,3 @@ struct SettingsView: View {
         .onChange(of: nodePath) { model.settingsNeedRestart = true }
     }
 }
-
-/// The Agent window (⌥⌘A): activity and proposals arrive in slice 6.
-struct AgentWindow: View {
-    var body: some View {
-        ContentUnavailableView {
-            Label("Agent", systemImage: "sparkles")
-        } description: {
-            Text("What agents do over MCP, and the edits they propose for you to approve, will show here.")
-        }
-        .foregroundStyle(Theme.ink)
-        .frame(minWidth: 420, maxWidth: .infinity, minHeight: 360, maxHeight: .infinity)
-        .background(Theme.page)
-        .tint(Theme.accent)
-    }
-}

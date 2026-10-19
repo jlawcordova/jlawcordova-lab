@@ -60,6 +60,8 @@ final class AppModel {
     let editor = SceneEditor()
     let objectEditor = ObjectEditor()
     let timeline = TimelineModel()
+    /// The Agent window: proposals, activity and the ghost preview.
+    let agent = AgentModel()
     /// The palette (`palette.get`), in its order, and by name and hex.
     var palette: [PaletteColor] = []
     var paletteByName: [String: PaletteColor] = [:]
@@ -83,6 +85,7 @@ final class AppModel {
         editor.app = self
         objectEditor.app = self
         timeline.app = self
+        agent.app = self
     }
     @ObservationIgnored private(set) var connection: ServerConnection?
     @ObservationIgnored private var eventsTask: Task<Void, Never>?
@@ -153,6 +156,7 @@ final class AppModel {
         listen(to: conn)
         await loadPalette()
         await loadLists()
+        await agent.load()
         document = nil
         phase = .ready
         await openInitialDoc()
@@ -208,12 +212,17 @@ final class AppModel {
             requestRender()
             requestCheck()
             requestItems()
+        case .notification(.proposalsChanged(let proposals)):
+            agent.proposalsChanged(proposals)
+        case .notification(.activityAppended(let entries)):
+            agent.activityAppended(entries)
         case .notification:
-            break // proposals and activity: the Agent window (slice 6)
+            break
         case .restarted(let info):
             sessionInfo = info
             notice = "The pixellab server restarted."
             thumbnails.reset(connection: connection)
+            await agent.load()
             if let doc = document {
                 _ = try? await connection?.call("doc.open", ["doc": .string(doc.ref.id)])
                 dirtyDocs = []
@@ -388,6 +397,7 @@ final class AppModel {
             } while doc.needsRender && document === doc
             doc.rendering = false
             if doc.ref.kind == .object, document === doc, !objectEditor.playing { objectEditor.requestExtras() }
+            if document === doc { agent.syncGhost() }
         }
     }
 
@@ -542,6 +552,25 @@ final class AppModel {
         } catch {
             build = BuildState(running: false, error: error.localizedDescription)
         }
+    }
+
+    /// A doc's file was written outside the editor (an approved proposal):
+    /// the open copy reloads if it was clean (the server says so with
+    /// doc.changed); render, check and list again either way.
+    func docWritten(_ ref: DocRef) async {
+        if ref.kind == .object { thumbnails.invalidate([ref.name]) }
+        if let doc = document, doc.ref == ref {
+            if let status: DocStatus = try? await connection?.call("doc.status", ["doc": .string(ref.id)]) {
+                doc.status = DocStatus(doc: status.doc, dirty: status.dirty, canUndo: status.canUndo, canRedo: status.canRedo)
+                if status.dirty { dirtyDocs.insert(status.doc) } else { dirtyDocs.remove(status.doc) }
+            }
+            if ref.kind == .object { objectEditor.docChanged() }
+            timeline.invalidate()
+            requestRender()
+            requestCheck()
+            requestItems()
+        }
+        await loadLists()
     }
 
     func revert() async { await docCommand("doc.revert") }

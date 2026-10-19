@@ -36,6 +36,13 @@ import Foundation
 ///     expect color|layer|frame|layers|frames|doc|mode|hidden|calls <value>
 ///     expect pixel <x>,<y> <color name|empty>   (the rendered pixel)
 ///
+/// The Agent window (proposals are numbered from 1, oldest first, as listed):
+///
+///     agent open|close|size <w>x<h>   proposal select <n>|<id>|none   proposal next|prev|open
+///     approve [force]   reject   ghost on|off   answer proceed|force|reject|cancel (the next question)
+///     snapshot agent <file.png>   menus (logs the View and Window menus)
+///     expect proposals|ghost|ghostchanges|base|activity|question|proposal <value>
+///
 /// Each action waits until renders, checks and edits settle. The app logs
 /// each step to stderr and quits at the end: exit 0 if every step and
 /// expectation passed, 1 if any failed, 2 if it couldn't start.
@@ -369,10 +376,14 @@ final class ScriptRunner {
         case "log":
             return words.dropFirst().joined(separator: " ")
         case "snapshot":
-            let out = URL(fileURLWithPath: NSString(string: try arg(words, 1)).expandingTildeInPath)
+            let agentWindow = words.count > 2 && words[1] == "agent"
+            let out = URL(fileURLWithPath: NSString(string: try arg(words, agentWindow ? 2 : 1)).expandingTildeInPath)
             try? await Task.sleep(for: .milliseconds(300))
-            guard let window = Snapshotter.mainWindow(), Snapshotter.capture(window, to: out) else { throw Failure("couldn't capture") }
+            let window = agentWindow ? model.agent.window.flatMap { $0.isVisible ? $0 : nil } : Snapshotter.mainWindow()
+            guard let window, Snapshotter.capture(window, to: out) else { throw Failure(agentWindow ? "no Agent window (agent open first)" : "couldn't capture") }
             return out.path
+        case "agent", "proposal", "approve", "reject", "ghost", "answer", "menus":
+            return try await performAgent(words, model: model)
         case "expect":
             return try expect(words, model: model)
         default:
@@ -511,6 +522,82 @@ final class ScriptRunner {
         }
     }
 
+    /// The Agent window's actions.
+    private func performAgent(_ words: [String], model: AppModel) async throws -> String? {
+        let agent = model.agent
+        func result() -> String? { agent.lastResult.map { r in agent.lastQuestion.map { "asked \($0.rawValue); \(r)" } ?? r } }
+        switch words[0] {
+        case "agent":
+            switch try arg(words, 1) {
+            case "open":
+                agent.showWindow()
+                let started = Date()
+                while agent.window?.isVisible != true, Date().timeIntervalSince(started) < 5 { try? await Task.sleep(for: .milliseconds(50)) }
+                guard let w = agent.window, w.isVisible else { throw Failure("the Agent window didn't open") }
+                w.setFrame(NSRect(origin: w.frame.origin, size: CGSize(width: 860, height: 760)), display: true)
+                return "Agent window \(Int(w.frame.width))×\(Int(w.frame.height)), autosave \(w.frameAutosaveName.isEmpty ? "none" : w.frameAutosaveName)"
+            case "close":
+                agent.window?.performClose(nil)
+                try? await Task.sleep(for: .milliseconds(200))
+                return agent.window?.isVisible == true ? "still open" : "closed"
+            case "size":
+                let parts = try arg(words, 2).split(separator: "x").compactMap { Double($0) }
+                guard parts.count == 2, let w = agent.window else { throw Failure("agent size WxH (agent open first)") }
+                w.setFrame(NSRect(origin: w.frame.origin, size: CGSize(width: parts[0], height: parts[1])), display: true)
+                return nil
+            default: throw Failure("agent open|close|size")
+            }
+        case "proposal":
+            switch try arg(words, 1) {
+            case "select":
+                let what = try arg(words, 2)
+                if what == "none" { agent.select(nil) }
+                else if let n = Int(what) {
+                    guard agent.proposals.indices.contains(n - 1) else { throw Failure("no proposal \(n) (\(agent.proposals.count) listed)") }
+                    agent.select(agent.proposals[n - 1].id)
+                } else {
+                    guard agent.proposals.contains(where: { $0.id == what }) else { throw Failure("no proposal \(what)") }
+                    agent.select(what)
+                }
+            case "next": agent.move(by: 1)
+            case "prev": agent.move(by: -1)
+            case "open": await agent.openInEditor()
+            default: throw Failure("proposal select|next|prev|open")
+            }
+            return agent.selected.map { "\($0.id) \($0.doc) from \($0.agentName), \($0.editsLabel)" } ?? "none selected"
+        case "approve":
+            guard agent.selected != nil else { throw Failure("no proposal selected") }
+            agent.lastQuestion = nil
+            await agent.approve(force: words.count > 1 && words[1] == "force")
+            return result()
+        case "reject":
+            guard agent.selected != nil else { throw Failure("no proposal selected") }
+            agent.lastQuestion = nil
+            await agent.reject()
+            return result()
+        case "ghost":
+            agent.setGhostShown((try arg(words, 1)) == "on")
+            return nil
+        case "answer":
+            guard let a = AgentAnswer(rawValue: try arg(words, 1)) else { throw Failure("answer proceed|force|reject|cancel") }
+            agent.scriptAnswer = a
+            return nil
+        case "menus":
+            for title in ["View", "Window"] {
+                guard let menu = NSApp.mainMenu?.items.first(where: { $0.title == title })?.submenu else { continue }
+                let items = menu.items.filter { !$0.isSeparatorItem }.map { item in
+                    let mods = item.keyEquivalentModifierMask
+                    let key = item.keyEquivalent.isEmpty ? "" : " [\(mods.contains(.command) ? "⌘" : "")\(mods.contains(.option) ? "⌥" : "")\(item.keyEquivalent)]"
+                    return item.title + key
+                }
+                log("\(title) menu: \(items.joined(separator: " | "))")
+            }
+            return nil
+        default:
+            throw Failure("unknown action \(words[0])")
+        }
+    }
+
     /// Waits for a stroke's paint calls to be answered (at most 10 s).
     private func waitIdle(_ objects: ObjectEditor) async {
         let started = Date()
@@ -545,6 +632,19 @@ final class ScriptRunner {
         case "calls": got = String(model.objectEditor.lastStrokeCalls)
         case "doc": got = doc?.ref.id ?? "none"
         case "mode": got = model.mode.rawValue
+        case "proposals": got = String(model.agent.proposals.count)
+        case "proposal": got = model.agent.selected?.doc ?? "none"
+        case "ghost": got = model.agent.visibleGhost != nil ? "on" : "off"
+        case "ghostchanges":
+            guard let render = doc?.render, model.agent.visibleGhost != nil else { throw Failure("no ghost on the stage") }
+            let c = model.agent.changes(current: render, renderCount: doc?.renderCount ?? 0)
+            let n = { (k: GhostChange.Kind) in c.items.filter { $0.kind == k }.count }
+            got = String(c.items.count + c.pixels.count)
+            guard got == want else { throw Failure("expected ghostchanges \(want), got \(got)") }
+            return doc?.ref.kind == .object ? "\(c.pixels.count) pixels change" : "added \(n(.added)), moved \(n(.moved)), removed \(n(.removed)): \(c.items.map { "\($0.kind.rawValue) \($0.object) \($0.path ?? "")" }.joined(separator: ", "))"
+        case "base": got = model.agent.selected.map { $0.baseMatches ? "matches" : "changed" } ?? "none"
+        case "activity": got = String(model.agent.visibleActivity.count)
+        case "question": got = model.agent.lastQuestion?.rawValue ?? "none"
         case "pixel":
             let parts = words.dropFirst(2)
             guard let p = parts.first.flatMap(PixelPoint.init(spec:)) else { throw Failure("expect pixel x,y <color|empty>") }
@@ -570,6 +670,7 @@ final class ScriptRunner {
             let busy: Bool = {
                 if model.editor.pendingEdits > 0 || model.build?.running == true || model.objectEditor.busy { return true }
                 if model.newDoc?.creating == true { return true }
+                if model.agent.busy { return true }
                 guard let doc = model.document else { return false }
                 return doc.rendering || doc.checking || doc.loadingItems || doc.render == nil || !model.thumbnails.isIdle
             }()
