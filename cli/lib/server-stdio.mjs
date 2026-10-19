@@ -16,7 +16,7 @@ import { Session } from './session.mjs';
 import { watchSources, watchState } from './watch.mjs';
 
 export const PROTOCOL_VERSION = 1;
-export const VERSION = '0.2.0';
+export const VERSION = '0.3.0';
 
 /**
  * @param {{
