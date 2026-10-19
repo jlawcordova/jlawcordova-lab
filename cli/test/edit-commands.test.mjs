@@ -132,6 +132,10 @@ describe('edit commands (one-shot CLI)', needsSite, () => {
     assert.equal(r.path, '5');
     assert.deepEqual(r.saved, [{ doc: 'scene:zz-test', file: SCENE, wrote: true, hash: r.saved[0].hash }]);
     assert.deepEqual((await readDoc(path(SCENE))).items[5], { object: 'tree', id: 'tall', at: { px: [3, 4] } });
+    // With no --at or --px: the level-0 tile at the middle of the view, where the lab's cursor starts.
+    const middle = JSON.parse((await cli(['scene', 'place', 'zz-test', 'pine', '--dry-run', '--json'])).stdout);
+    assert.deepEqual(middle.item.at, { tile: [0, 0, 0] });
+    assert.equal(middle.dryRun[0].file, SCENE);
     const bad = await cli(['scene', 'place', 'zz-test', 'no-such-thing']);
     assert.equal(bad.code, 1);
     assert.match(bad.stderr, /no object named no-such-thing/);

@@ -9,13 +9,13 @@
 import { randomBytes } from 'node:crypto';
 import { appendFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 import { CommandError, NotFoundError } from './errors.mjs';
 
 /** The state dir for an environment. */
 export function stateDir(env = process.env) {
-  if (env.PIXELLAB_STATE) return env.PIXELLAB_STATE;
+  if (env.PIXELLAB_STATE) return resolve(env.PIXELLAB_STATE);
   return join(env.HOME ?? homedir(), 'Library', 'Application Support', 'Pixel Lab');
 }
 
