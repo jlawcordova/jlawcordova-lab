@@ -1,5 +1,5 @@
 // The site checkout: where it is, whether it looks like the site, and the
-// engine and art sources loaded from it at runtime (docs/plan.md, "The site is
+// engine and art sources loaded from it at runtime (docs/intents/2026-10-mac-app/plan.md, "The site is
 // the source of truth"). The engine is never copied: it's imported from the
 // checkout, so the CLI validates and renders with exactly what `npm run art`
 // uses. Sources are imported with `?v=<mtime>-<size>`, so an edit on disk is

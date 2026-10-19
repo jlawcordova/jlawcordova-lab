@@ -12,7 +12,7 @@
 // by pixel) within COALESCE_MS merge into one step, as the lab merges a
 // drag or a stroke by its `group`.
 //
-// Saving (docs/plan.md, "The site is the source of truth"): validate with
+// Saving (docs/intents/2026-10-mac-app/plan.md, "The site is the source of truth"): validate with
 // the engine and refuse a doc with problems unless forced; serialize with
 // the engine; refuse with a conflict if the file changed on disk since the
 // doc was opened (by hash) unless forced; write atomically. In 'propose'

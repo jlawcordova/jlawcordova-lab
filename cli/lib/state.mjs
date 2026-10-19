@@ -1,4 +1,4 @@
-// The state dir (docs/plan.md, "Agents propose, people approve"): where MCP
+// The state dir (docs/intents/2026-10-mac-app/plan.md, "Agents propose, people approve"): where MCP
 // saves become proposals and every MCP tool call is logged, for the app's
 // Agent window to show. PIXELLAB_STATE overrides the default,
 // ~/Library/Application Support/Pixel Lab/.

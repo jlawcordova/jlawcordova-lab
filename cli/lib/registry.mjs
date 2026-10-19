@@ -1,4 +1,4 @@
-// The command registry (docs/plan.md, "One command registry, three doors").
+// The command registry (docs/intents/2026-10-mac-app/plan.md, "One command registry, three doors").
 // Every action is a command: a dotted name, a summary, its params as a JSON
 // Schema object, whether it mutates, and run(ctx, params) → plain JSON. The
 // CLI, the app server and the MCP server all list and call commands from

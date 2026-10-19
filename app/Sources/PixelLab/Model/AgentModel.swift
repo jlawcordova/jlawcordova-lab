@@ -1,7 +1,7 @@
 import AppKit
 import Observation
 
-/// The Agent window's state (docs/plan.md, "Agents propose, people approve"):
+/// The Agent window's state (docs/intents/2026-10-mac-app/plan.md, "Agents propose, people approve"):
 /// the proposals agents saved over MCP, the activity log of their tool calls,
 /// the selected proposal's diff, and its ghost on the main window's stage.
 /// Lists load with `proposal.list` and `activity.list` and stay live through
