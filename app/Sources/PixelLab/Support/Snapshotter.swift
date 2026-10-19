@@ -50,6 +50,7 @@ enum Snapshotter {
             guard let doc = model.document else { return false }
             if let want = request.doc, doc.ref != want { return false }
             return doc.render != nil && !doc.rendering && doc.problems != nil && !doc.checking && model.thumbnails.isIdle
+                && !model.objectEditor.busy
                 && model.stageViewport.width > 0
         }
     }

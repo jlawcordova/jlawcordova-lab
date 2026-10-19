@@ -33,6 +33,12 @@ enum Theme {
     /// A selected row: the accent, faint.
     static let selection = dynamic(night: 0x8CBC86, nightAlpha: 0.18, day: 0x3F6B45, dayAlpha: 0.16)
 
+    /// A palette color, "#RRGGBB".
+    static func hexColor(_ hex: String) -> Color {
+        let v = UInt32(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) ?? 0
+        return Color(nsColor: NSColor(hex: v))
+    }
+
     static func dynamic(night: UInt32, nightAlpha: CGFloat = 1, day: UInt32, dayAlpha: CGFloat = 1) -> Color {
         Color(nsColor: dynamicNS(night: night, nightAlpha: nightAlpha, day: day, dayAlpha: dayAlpha))
     }

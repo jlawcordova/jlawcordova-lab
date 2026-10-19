@@ -37,7 +37,8 @@ struct StageView: View {
                     // lets the pointer through, and AppKit-hosted views drawn
                     // under SwiftUI layers keep the art and overlays in order
                     // (on screen and in cacheDisplay snapshots).
-                    StageInput(geometry: geometry, editor: model.editor, tool: model.editor.effectiveTool, isScene: doc.ref.kind == .scene)
+                    StageInput(geometry: geometry, editor: model.editor, objects: model.objectEditor, tool: model.editor.effectiveTool,
+                               paintTool: model.objectEditor.tool, isScene: doc.ref.kind == .scene)
                         .frame(width: geometry.contentSize.width, height: geometry.contentSize.height)
                     if doc.ref.kind == .scene {
                         if model.showGrid {
@@ -45,13 +46,24 @@ struct StageView: View {
                         }
                     } else {
                         ObjectGround(geometry: geometry)
+                        if let onion = model.objectEditor.onionImage {
+                            // The onion skin: the layer's previous frame at 30%.
+                            let o = geometry.viewPoint(fromScene: onion.viewBox.origin)
+                            onion.image.view(pointsPerPixel: geometry.zoom, displayScale: displayScale)
+                                .opacity(0.3)
+                                .offset(x: o.x, y: o.y)
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                        }
                     }
                     render.image.view(pointsPerPixel: geometry.zoom, displayScale: displayScale)
                         .offset(x: geometry.artOrigin.x, y: geometry.artOrigin.y)
                         .allowsHitTesting(false)
                         .accessibilityLabel("\(doc.ref.name), \(doc.ref.kind.rawValue) at \(zoom)×")
                     if doc.ref.kind == .object {
-                        AnchorMark(geometry: geometry)
+                        ObjectStageOverlay(geometry: geometry, objects: model.objectEditor, focused: model.editor.stageFocused,
+                                           hairline: 1 / max(displayScale, 1))
+                        if !model.objectEditor.isBlock { AnchorMark(geometry: geometry) }
                     } else {
                         StageOverlay(geometry: geometry, doc: doc, render: render)
                     }
@@ -132,6 +144,55 @@ struct AnchorMark: View {
         }
         .stroke(Theme.gold, lineWidth: 1.5)
         .frame(width: geometry.contentSize.width, height: geometry.contentSize.height, alignment: .topLeading)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+/// What the stage draws over an object: pixels painted but not rendered yet
+/// (so a stroke shows at once), the pixel grid from 8×, the dashed bounds and
+/// the pixel under the pointer (or the keyboard cursor).
+struct ObjectStageOverlay: View {
+    var geometry: StageGeometry
+    var objects: ObjectEditor
+    var focused: Bool
+    var hairline: CGFloat
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let overlay = objects.visibleOverlay
+        let grid = objects.pixelGrid && geometry.zoom >= 8
+        let mark = objects.hover ?? (focused ? objects.cursor : nil)
+        let art = geometry.artRect
+        Canvas(opaque: false, rendersAsynchronously: false) { context, _ in
+            for (p, hex) in overlay {
+                let r = StrokeMath.viewRect(of: p, geometry: geometry)
+                context.fill(Path(r), with: .color(hex.map(Theme.hexColor) ?? Theme.card))
+            }
+            if grid {
+                var path = Path()
+                let w = Int(geometry.viewBox.width), h = Int(geometry.viewBox.height)
+                for x in 1..<max(w, 1) {
+                    let vx = art.minX + CGFloat(x) * geometry.zoom
+                    path.move(to: CGPoint(x: vx, y: art.minY))
+                    path.addLine(to: CGPoint(x: vx, y: art.maxY))
+                }
+                for y in 1..<max(h, 1) {
+                    let vy = art.minY + CGFloat(y) * geometry.zoom
+                    path.move(to: CGPoint(x: art.minX, y: vy))
+                    path.addLine(to: CGPoint(x: art.maxX, y: vy))
+                }
+                context.stroke(path, with: .color(Theme.ink.opacity(0.15)), lineWidth: hairline)
+            }
+            context.stroke(Path(art.insetBy(dx: -0.5, dy: -0.5)), with: .color(Theme.ink.opacity(0.35)),
+                           style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+            if let mark {
+                let r = StrokeMath.viewRect(of: mark, geometry: geometry).insetBy(dx: 1, dy: 1)
+                context.stroke(Path(r), with: .color(Theme.halo), lineWidth: 3)
+                context.stroke(Path(r), with: .color(Theme.ink), lineWidth: 1.5)
+            }
+        }
+        .frame(width: geometry.contentSize.width, height: geometry.contentSize.height)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }

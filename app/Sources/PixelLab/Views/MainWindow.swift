@@ -40,7 +40,11 @@ struct DocumentWindow: View {
                 if let notice = model.notice {
                     NoticeBar(text: notice) { model.notice = nil }
                 }
-                TimelineStrip()
+                if model.document?.ref.kind == .object {
+                    ObjectStatusBar()
+                } else {
+                    TimelineStrip()
+                }
             }
             .background(Theme.hero)
         }
@@ -88,6 +92,9 @@ struct DocumentWindow: View {
         .sheet(isPresented: Binding(get: { model.build != nil }, set: { if !$0 { model.build = nil } })) {
             BuildArtSheet().environment(model)
         }
+        .sheet(item: Binding(get: { model.newDoc }, set: { model.newDoc = $0 })) { draft in
+            NewDocSheet(draft: draft).environment(model)
+        }
     }
 
     private var saveAlertTitle: String {
@@ -119,17 +126,29 @@ struct DocumentToolbar: ToolbarContent {
             .help("Edit scenes or objects")
         }
         ToolbarItemGroup(placement: .primaryAction) {
-            Picker("Tool", selection: Binding(get: { model.editor.tool }, set: { model.editor.setTool($0); model.editor.focusStage() })) {
-                ForEach(StageTool.allCases) { tool in
-                    Label("\(tool.title) (\(String(tool.key).uppercased()))", systemImage: tool.symbol)
-                        .labelStyle(.iconOnly)
-                        .tag(tool)
-                        .accessibilityLabel("\(tool.title) tool")
+            if model.mode == .object {
+                Picker("Tool", selection: Binding(get: { model.objectEditor.tool }, set: { model.objectEditor.setTool($0); model.editor.focusStage() })) {
+                    ForEach(PaintTool.allCases) { tool in
+                        Label("\(tool.title) (\(String(tool.key).uppercased()))", systemImage: tool.symbol)
+                            .labelStyle(.iconOnly)
+                            .tag(tool)
+                            .accessibilityLabel("\(tool.title) tool")
+                    }
                 }
+                .pickerStyle(.segmented)
+                .help("Pencil (B) · Eraser (E) · Fill (G) · Picker (I); Option-click with the pencil picks; Shift-click draws a line; hold Space to pan")
+            } else {
+                Picker("Tool", selection: Binding(get: { model.editor.tool }, set: { model.editor.setTool($0); model.editor.focusStage() })) {
+                    ForEach(StageTool.allCases) { tool in
+                        Label("\(tool.title) (\(String(tool.key).uppercased()))", systemImage: tool.symbol)
+                            .labelStyle(.iconOnly)
+                            .tag(tool)
+                            .accessibilityLabel("\(tool.title) tool")
+                    }
+                }
+                .pickerStyle(.segmented)
+                .help("Select (V) · Place (A) · Pan (H); hold Space to pan")
             }
-            .pickerStyle(.segmented)
-            .help("Select (V) · Place (A) · Pan (H); hold Space to pan")
-            .disabled(model.mode != .scene)
 
             Menu {
                 Button("Fit") { model.zoom = .fit }
@@ -146,12 +165,14 @@ struct DocumentToolbar: ToolbarContent {
             .accessibilityLabel("Zoom, \(zoomLabel)")
 
             Button {
-                model.showGrid.toggle()
+                if model.mode == .object { model.objectEditor.pixelGrid.toggle() } else { model.showGrid.toggle() }
             } label: {
-                Label("Grid", systemImage: model.showGrid ? "square.grid.3x3.fill" : "square.grid.3x3")
+                Label("Grid", systemImage: gridOn ? "square.grid.3x3.fill" : "square.grid.3x3")
             }
-            .help(model.showGrid ? "Hide the iso grid" : "Show the iso grid")
-            .disabled(model.mode != .scene)
+            .help(model.mode == .object
+                  ? (gridOn ? "Hide the pixel grid" : "Show the pixel grid (from 8×)")
+                  : (gridOn ? "Hide the iso grid" : "Show the iso grid"))
+            .accessibilityLabel(model.mode == .object ? "Pixel grid" : "Grid")
 
             Button {
                 Task { await model.buildArt() }
@@ -179,6 +200,8 @@ struct DocumentToolbar: ToolbarContent {
             .help(model.showInspector ? "Hide the inspector" : "Show the inspector")
         }
     }
+
+    private var gridOn: Bool { model.mode == .object ? model.objectEditor.pixelGrid : model.showGrid }
 
     private var zoomLabel: String {
         switch model.zoom {

@@ -252,12 +252,73 @@ struct SceneShowMotion: Codable, Sendable {
     var doc: Doc?
 }
 
-/// A scene edit's result: `{ doc, changed, summary, path?, item? }`.
+/// An edit's result: `{ doc, changed, summary, path?, item? }`; object edits
+/// add `pixels` (paint), `layer` (layer edits) or `frame` (frame edits).
 struct EditResult: Codable, Sendable {
     var doc: String
     var changed: Bool?
     var summary: String?
     var path: String?
+    var pixels: Int?
+    var layer: Int?
+    var frame: Int?
+}
+
+// MARK: Object editing (slice 5)
+
+/// One color of `palette.get`.
+struct PaletteColor: Codable, Sendable, Hashable, Identifiable {
+    var name: String
+    var hex: String
+    /// "world" or "outfit".
+    var tier: String
+    var id: String { name }
+}
+
+/// `palette.get`: `colors` keeps the palette's order (world, then outfit).
+struct PaletteResult: Codable, Sendable {
+    var colors: [PaletteColor]
+}
+
+/// A layer of `object.show`.
+struct ObjectLayerInfo: Codable, Sendable, Hashable {
+    var index: Int
+    var frames: Int
+    var surface: Bool?
+    var `class`: String?
+    /// ff, wf or hf for a frame loop (nil: a still map).
+    var loop: String?
+    var prefix: String?
+
+    var isLoop: Bool { loop != nil }
+}
+
+/// `object.show`: what the object panels need.
+struct ObjectShowResult: Codable, Sendable {
+    var name: String
+    var kind: String
+    var `extends`: String?
+    var size: [Int]
+    var blockSize: [Int]?
+    var layers: [ObjectLayerInfo]
+    var frames: Int
+    var colors: Int
+    var description: String?
+    var file: String?
+    var anchor: [Int]
+    var character: Bool?
+    /// The hex values the object paints (the colors meter counts them).
+    var usedColors: [String]
+
+    var isBlock: Bool { kind == "block" }
+    /// Layers and frames can change: a sprite with layers of its own.
+    var layersEditable: Bool { !isBlock && `extends` == nil }
+}
+
+/// `object.pick`: `{ color, hex }`, both nil for a transparent pixel.
+struct PickResult: Codable, Sendable {
+    var color: String?
+    var hex: String?
 }
 
 /// `art.build`: `{ ok, code, report, errors, ms, unsaved }`.

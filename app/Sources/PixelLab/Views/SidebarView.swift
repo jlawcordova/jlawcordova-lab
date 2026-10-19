@@ -36,9 +36,20 @@ struct SidebarView: View {
                         .labelsHidden()
                         .padding(.top, 12)
                         .padding(.horizontal, 4)
+                    } else if showPaletteTab {
+                        Picker("Show", selection: Binding(get: { model.objectEditor.sidebarTab }, set: { model.objectEditor.sidebarTab = $0 })) {
+                            Text("Palette").tag(ObjectEditor.SidebarTab.palette)
+                            Text("Library").tag(ObjectEditor.SidebarTab.library)
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .padding(.top, 12)
+                        .padding(.horizontal, 4)
                     }
                     if showItemsTab, model.editor.sidebarTab == .items, let doc = model.document {
                         ItemsTree(doc: doc, query: query)
+                    } else if showPaletteTab, model.objectEditor.sidebarTab == .palette {
+                        PalettePanel()
                     } else {
                         library
                     }
@@ -65,11 +76,12 @@ struct SidebarView: View {
     }
 
     private var showItemsTab: Bool { model.document?.ref.kind == .scene && model.mode == .scene }
+    private var showPaletteTab: Bool { model.document?.ref.kind == .object && model.mode == .object }
 
     @ViewBuilder
     private var library: some View {
         sectionHeader("Library", count: filteredObjects.count)
-            .padding(.top, showItemsTab ? 4 : 14)
+            .padding(.top, showItemsTab || showPaletteTab ? 4 : 14)
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
             ForEach(filteredObjects) { object in
                 LibraryCell(
