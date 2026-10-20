@@ -7,14 +7,14 @@
 // document with scenes of blocks that overlap on purpose.
 
 import assert from 'node:assert/strict';
-import { readFile, writeFile } from 'node:fs/promises';
+import { cp, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { after, before, beforeEach, describe, test } from 'node:test';
 
 import { openDocument } from '../lib/document.mjs';
 import { registry } from '../lib/registry.mjs';
 import { Session } from '../lib/session.mjs';
-import { makeDocument, readDoc, runCli, startServer, tempDir } from './helpers.mjs';
+import { decodePng, makeDocument, readDoc, REPO, runCli, startServer, tempDir } from './helpers.mjs';
 
 // Four blocks side by side, listed back to front, and a pebble nothing overlaps.
 const STAND = `export default {
@@ -208,6 +208,22 @@ describe('R4: every edit keeps the list sorted', () => {
     assert.equal(merged.sorted, 1);
     assert.match(merged.summary, /the result was sorted by depth/);
     assert.deepEqual(await order(s), ['a', 'b', 'c', 'd', 'far', 'near']);
+  });
+
+  test('R4: two edits of a sorted scene, one of which moved an item, still merge; the same item changed both ways clashes', async () => {
+    const s = owner();
+    await call(s, 'scene.move', { item: 'd', by: [-2, -2] });
+    // On disk someone else gave block a a class: a different line from the ones the move touched.
+    await writeFile(file('stand'), STAND.replace("id: 'a'", "id: 'a', class: 'sway'"));
+    const merged = await registry.call(s.context(), 'doc.merge', { doc: 'scene:stand' });
+    assert.deepEqual([merged.merged, merged.sorted], [true, undefined], 'nothing needed sorting again');
+    assert.deepEqual(await order(s), ['d', 'a', 'b', 'c', 'far']);
+    assert.equal((await call(s, 'scene.items', {})).items.find((/** @type {any} */ i) => i.id === 'a').class, 'sway');
+    // Both sides changed d's own line: that is a clash, as before.
+    const t = owner();
+    await call(t, 'scene.move', { item: 'd', by: [-2, -2] });
+    await writeFile(file('stand'), STAND.replace("id: 'd', at: { tile: [1, 1, 0] }", "id: 'd', at: { tile: [3, 3, 0] }"));
+    await assert.rejects(registry.call(t.context(), 'doc.merge', { doc: 'scene:stand' }), { code: 'merge_conflict' });
   });
 
   test('R4: a file found out of order on reload is sorted as a step of its own: unsaved, and one undo gives the file back', async () => {
@@ -479,5 +495,63 @@ describe('R13: every new action is a command on all three doors', () => {
     } finally {
       server.child.kill();
     }
+  });
+});
+
+describe('R15: the harbor\'s pine moved behind the red house', () => {
+  /** @type {string} */
+  let tmp;
+  /** @type {Session} */
+  let s;
+  /** @type {any} */
+  let sources;
+  before(async () => {
+    tmp = await tempDir('pixellab-harbor-');
+    const root = join(tmp, 'harbor.pixellab');
+    await cp(join(REPO, 'examples', 'harbor.pixellab'), root, { recursive: true });
+    const harbor = await openDocument({ doc: root, env: { ...process.env, HOME: tmp } });
+    s = new Session(harbor, { env: { ...process.env, PIXELLAB_STATE: join(tmp, 'state') } });
+    sources = (await s.context().sources()).sources;
+  });
+  after(async () => {
+    const { rm } = await import('node:fs/promises');
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  const h = (/** @type {string} */ name, /** @type {any} */ params) => registry.call(s.context(), name, { name: 'harbor-flat', ...params });
+  /** The color name at a scene pixel of the PNG scene.render makes, by palette lookup. */
+  const colorAt = async (/** @type {number} */ x, /** @type {number} */ y) => {
+    const view = (await h('scene.show', {})).viewBox;
+    const png = decodePng(Buffer.from((await h('scene.render', {})).png, 'base64'));
+    const [r, g, b] = png.rgba(x - view[0], y - view[1]);
+    const hex = `#${[r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')}`.toUpperCase();
+    return [...sources.colors].find(([, c]) => c.hex.toUpperCase() === hex)?.[0];
+  };
+
+  test('R15: moved −5,−5 to tile 0,1,0 it draws behind the red house; moved back, it draws in front again, as it did', async () => {
+    await h('scene.sort', {});
+    const tile = (/** @type {string} */ t) => (/** @type {any} */ i) => i.object === 'pine' && i.at.tile.join() === t;
+    const start = (await h('scene.items', {})).items.find(tile('5,6,0'));
+    // Standing alone in front of the island, its trunk is the front-most thing at its foot (x −16, y 88).
+    assert.equal(await colorAt(-16, 88), 'wood-3');
+    const picture = async () => (await h('scene.render', {})).png;
+    const startPicture = await picture();
+    const out = await h('scene.move', { item: start.path, by: [-5, -5] });
+    assert.deepEqual(out.item.at, { tile: [0, 1, 0] });
+    // The pine's crown at x −14, y −6 is behind the red house's roof, so that pixel shows the roof.
+    assert.equal(await colorAt(-14, -6), 'roof-2', 'the red house is in front of the pine');
+    assert.equal(await colorAt(-15, -8), 'roof-4');
+    // Marking the pine's wrapper to draw in front puts the pine over the house at the same pixel, so that pixel was the house hiding it.
+    const wrapper = out.path.split('.')[0];
+    const fronted = await h('scene.set', { item: wrapper, depth: 'front' });
+    assert.equal(await colorAt(-14, -6), 'grass-4', 'the pine\'s own color');
+    // The wrapper now draws last, so its path is the one the result gives, not the old one.
+    await h('scene.set', { item: fronted.path, depth: 'auto' });
+    assert.equal(await colorAt(-14, -6), 'roof-2');
+    // Moving it back: the scene draws as it did, and the pine is in front again. (The list needn't match: items the first move displaced stay where the sort put them.)
+    const back = await h('scene.move', { item: (await h('scene.items', {})).items.find(tile('0,1,0')).path, by: [5, 5] });
+    assert.deepEqual(back.item.at, { tile: [5, 6, 0] });
+    assert.equal(await picture(), startPicture, 'out and back draws the scene as it was, pixel for pixel');
+    assert.equal(await colorAt(-16, 88), 'wood-3');
   });
 });
