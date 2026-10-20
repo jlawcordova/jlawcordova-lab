@@ -63,7 +63,7 @@
 | [`scene items`](#sceneitems) | List a scene's items in paint order, with stable paths | read |
 | [`scene key delete`](#scenekeydelete) | Delete a key of an item's track (not the one at 0: remove the track for that) | edit |
 | [`scene key move`](#scenekeymove) | Move a key of an item's track to another time | edit |
-| [`scene key set`](#scenekeyset) | Set a key of an item's track: its move, show and pose at a time (made if there's no key there) | edit |
+| [`scene key set`](#scenekeyset) | Set a key of an item's track: its move, show and pose at a time (made if there's no key there); no values pins the item there | edit |
 | [`scene list`](#scenelist) | List every scene | read |
 | [`scene lower`](#scenelower) | Lower an item: paint it one earlier, behind the item before it | edit |
 | [`scene motion path`](#scenemotionpath) | Key an item along a polyline on the grid, at a steady speed or between two times | edit |
@@ -1063,13 +1063,13 @@ edits docs · MCP tool `scene_key_move`
 
 #### scene.key.set
 
-Set a key of an item's track: its move, show and pose at a time (made if there's no key there).
+Set a key of an item's track: its move, show and pose at a time (made if there's no key there); no values pins the item there.
 
 ```
 pixellab scene key set <name> <item> --time <n> [--move <n,…>] [--show] [--pose <text>] [--clear <move|show|pose,…>]
 ```
 
---move x,y is pixels from where the scene places the item; --show false hides it from that key on; --pose <object> draws another object from that key on. --clear move,show,pose removes those values from the key, so they carry on from the key before. Returns the key and the track's off-grid warnings (moves whose steps aren't 1 px straight, 1:1 or 2:1).
+--move x,y is pixels from where the scene places the item; --show false hides it from that key on; --pose <object> draws another object from that key on. --clear move,show,pose removes those values from the key, so they carry on from the key before. With none of them, the key pins the item where it is at that time (its move at --time, stepping between the keys around it), as a keyframe editor's Add Key does: the motion looks the same until the key is edited, and the result says pinned; a key already there is left as it is (changed false). Returns the key and the track's off-grid warnings (moves whose steps aren't 1 px straight, 1:1 or 2:1).
 
 edits docs · MCP tool `scene_key_set`
 
@@ -1087,6 +1087,7 @@ edits docs · MCP tool `scene_key_set`
 pixellab scene key set hero-island truck-a --time 4200 --move 32,16
 pixellab scene key set hero-island crane-hook --time 9000 --pose crane-hook-down
 pixellab scene key set hero-island parcel --time 12000 --no-show
+pixellab scene key set hero-island cart --time 8000
 ```
 
 #### scene.list

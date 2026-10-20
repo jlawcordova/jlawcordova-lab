@@ -129,16 +129,25 @@ export function removeTrack(/** @type {any} */ doc, /** @type {string} */ id) {
 
 /**
  * Sets a key's values, making the key (in time order) if there isn't one.
+ * With no values, the key pins the item where it is at `t`: `pin` is the
+ * item's move at that time (the engine's stateAt), written as the new key's
+ * move; a key already there is left as it is.
  * @param {any} doc
  * @param {string} id
  * @param {number} t
- * @param {{ move?: number[], show?: boolean, pose?: string, clear?: string[] }} values
+ * @param {{ move?: number[], show?: boolean, pose?: string, clear?: string[], pin?: number[] }} values
  */
-export function setKey(doc, id, t, { move, show, pose, clear = [] }) {
+export function setKey(doc, id, t, { move, show, pose, clear = [], pin }) {
   const track = needTrack(doc, id);
   checkTime(doc, t);
   let i = track.keys.findIndex((/** @type {any} */ k) => k.t === t);
   const made = i < 0;
+  const pinning = move === undefined && show === undefined && pose === undefined && clear.length === 0;
+  if (pinning) {
+    if (!made) return { key: track.keys[i], made: false, pinned: false, message: `${id} already has a key at ${ms(t)}` };
+    if (!pin) throw new SceneOpError('a key needs a move, show or pose, or a pin', 'usage');
+    move = pin;
+  }
   if (made) {
     i = track.keys.filter((/** @type {any} */ k) => k.t < t).length;
     track.keys.splice(i, 0, { t });
@@ -152,8 +161,9 @@ export function setKey(doc, id, t, { move, show, pose, clear = [] }) {
   if (show !== undefined) key.show = show;
   if (pose !== undefined) key.pose = pose;
   track.keys[i] = canonicalKey(key);
+  if (pinning) return { key: track.keys[i], made, pinned: true, message: `Made ${id}'s key at ${ms(t)}, pinned at ${move.join(', ')}` };
   const said = [move ? `move ${move.join(', ')}` : '', show !== undefined ? `show ${show}` : '', pose ? `pose ${pose}` : '', clear.length ? `cleared ${clear.join(', ')}` : ''].filter(Boolean);
-  return { key: track.keys[i], message: `${made ? 'Made' : 'Set'} ${id}'s key at ${ms(t)}${said.length ? `: ${said.join(', ')}` : ''}` };
+  return { key: track.keys[i], made, pinned: false, message: `${made ? 'Made' : 'Set'} ${id}'s key at ${ms(t)}${said.length ? `: ${said.join(', ')}` : ''}` };
 }
 
 /** Moves a key to another time (not the first key, not onto another). */

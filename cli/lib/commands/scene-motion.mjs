@@ -85,11 +85,13 @@ export default [
   },
   {
     name: 'scene.key.set',
-    summary: "Set a key of an item's track: its move, show and pose at a time (made if there's no key there)",
+    summary: "Set a key of an item's track: its move, show and pose at a time (made if there's no key there); no values pins the item there",
     description:
       '--move x,y is pixels from where the scene places the item; --show false hides it from that key on; --pose <object> draws another object from that key on. ' +
-      '--clear move,show,pose removes those values from the key, so they carry on from the key before. Returns the key and the track\'s off-grid warnings ' +
-      '(moves whose steps aren\'t 1 px straight, 1:1 or 2:1).',
+      '--clear move,show,pose removes those values from the key, so they carry on from the key before. ' +
+      'With none of them, the key pins the item where it is at that time (its move at --time, stepping between the keys around it), as a keyframe editor\'s Add Key does: ' +
+      'the motion looks the same until the key is edited, and the result says pinned; a key already there is left as it is (changed false). ' +
+      'Returns the key and the track\'s off-grid warnings (moves whose steps aren\'t 1 px straight, 1:1 or 2:1).',
     params: {
       type: 'object',
       properties: {
@@ -105,14 +107,16 @@ export default [
     },
     args: ['name', 'item'],
     mutates: true,
-    examples: ['pixellab scene key set hero-island truck-a --time 4200 --move 32,16', 'pixellab scene key set hero-island crane-hook --time 9000 --pose crane-hook-down', 'pixellab scene key set hero-island parcel --time 12000 --no-show'],
+    examples: ['pixellab scene key set hero-island truck-a --time 4200 --move 32,16', 'pixellab scene key set hero-island crane-hook --time 9000 --pose crane-hook-down', 'pixellab scene key set hero-island parcel --time 12000 --no-show', 'pixellab scene key set hero-island cart --time 8000'],
     async run(ctx, params) {
-      needOne(params, ['move', 'show', 'pose', 'clear'], 'scene.key.set');
       if (params.pose !== undefined && !(await ctx.names('object')).includes(params.pose)) throw new UsageError(`scene.key.set: no object named ${params.pose} to pose as (pixellab object list)`);
       return motionEdit(ctx, params.name, (doc, name) => {
-        const { id } = idOf(ctx, doc, params.item);
-        const r = motionOps.setKey(doc, id, params.time, { move: params.move, show: params.show, pose: params.pose, clear: params.clear });
-        return { message: r.message, key: structuredClone(r.key), warnings: warningsFor(ctx, doc, name, id) };
+        const { id, item } = idOf(ctx, doc, params.item);
+        // Pinning (no values): the item's move at that time, by the engine.
+        const track = motionOps.needTrack(doc, id);
+        const pin = doc.motion ? ctx.site.motion.stateAt(track, item.object, doc.motion.duration, params.time).move : undefined;
+        const r = motionOps.setKey(doc, id, params.time, { move: params.move, show: params.show, pose: params.pose, clear: params.clear, pin });
+        return { message: r.message, key: structuredClone(r.key), made: r.made, pinned: r.pinned, warnings: warningsFor(ctx, doc, name, id) };
       });
     },
     format: (r) => [r.summary, ...(r.warnings ?? []).map((/** @type {string} */ w) => `warning: ${w}`)].join('\n'),

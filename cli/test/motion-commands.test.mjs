@@ -87,6 +87,32 @@ describe('tracks and keys (R12)', () => {
     await assert.rejects(call(s, 'scene.track.remove', { item: 'bird' }), { code: 'no_track' });
   });
 
+  test('R12 (animation pane): scene.key.set with no values pins the item where it is at that time; a key already there is left alone', async () => {
+    const s = session();
+    await call(s, 'scene.track.add', { item: 'bird' });
+    await call(s, 'scene.key.set', { item: 'bird', time: 1000, move: [8, 4] });
+    // 8,4 is a 2:1 run of 4 steps; halfway through it the bird has taken 2.
+    const pinned = await call(s, 'scene.key.set', { item: 'bird', time: 500 });
+    assert.equal(pinned.changed, true);
+    assert.equal(pinned.pinned, true);
+    assert.deepEqual(pinned.key, { t: 500, move: [4, 2] });
+    assert.match(pinned.summary, /Made bird's key at 500 ms, pinned at 4, 2/);
+    const again = await call(s, 'scene.key.set', { item: 'bird', time: 500 });
+    assert.equal(again.changed, false, 'a key already there is left as it is');
+    assert.equal(again.pinned, false);
+    assert.deepEqual(again.key, { t: 500, move: [4, 2] });
+    const rest = await call(s, 'scene.key.set', { item: 'bird', time: 1000 });
+    assert.equal(rest.changed, false);
+    assert.deepEqual(await keysOf(s, 'bird'), [{ t: 0 }, { t: 500, move: [4, 2] }, { t: 1000, move: [8, 4] }]);
+    // The second pin changed nothing, so one undo takes the pinned key away.
+    await registry.call(s.context(), 'doc.undo', { doc: 'scene:moving' });
+    assert.deepEqual((await keysOf(s, 'bird')).map((/** @type {any} */ k) => k.t), [0, 1000]);
+    await assert.rejects(call(s, 'scene.key.set', { item: '3', time: 500 }), { code: 'no_id' });
+    const cli = await runCli(['scene', 'key', 'set', 'moving', 'cart', '--time', '500', '--document', doc.root, '--dry-run'], { env: doc.env });
+    assert.equal(cli.code, 0, cli.stderr);
+    assert.match(cli.stdout, /pinned at 0, 0/);
+  });
+
   test("R12: a scene with no motion gets one from scene.track.add --duration or scene.motion.set; the loop's length can't cut off keys", async () => {
     const s = session();
     const still = (/** @type {string} */ name, /** @type {any} */ params) => registry.call(s.context(), name, { name: 'still', ...params });
