@@ -154,8 +154,8 @@ describe('compileScene and compileAll (spec R7)', () => {
   });
 });
 
-describe("the site's art (spec R7)", needsSite, () => {
-  it("R7: every committed SVG in the site checkout is what the ported compiler produces from its sources", async () => {
+describe("the site's art (spec R7, depth order spec R3)", needsSite, () => {
+  it("R7: in list order, every committed SVG in the site checkout is what the ported compiler produces from its sources", async () => {
     const site = await makeSite();
     try {
       const { sources, loadErrors } = await readSources(site.sourceDir);
@@ -164,10 +164,33 @@ describe("the site's art (spec R7)", needsSite, () => {
       assert.ok(outputs.length >= 6);
       for (const [name, scene] of outputs) {
         const committed = await readFile(join(SITE_SOURCE, 'src/assets/pixel-art', scene.output), 'utf8');
-        const { output, over } = compileScene(sources, name, SITE_BUDGETS);
+        // The committed SVGs were made by engines that drew items in the order the file lists them.
+        const { output, over } = compileScene(sources, name, SITE_BUDGETS, { order: 'list' });
         assert.ok(committed === output, `${scene.output} differs from scenes/${name}.mjs compiled here`);
         assert.equal(over, false, `${scene.output} is within its budget`);
       }
+    } finally {
+      await site.cleanup();
+    }
+  });
+
+  it("R3: in depth order, every scene of the site's art compiles lossless; the scenes whose output changed and any over budget are listed, not failed", async (t) => {
+    const site = await makeSite();
+    try {
+      const { sources, loadErrors } = await readSources(site.sourceDir);
+      assert.deepEqual(loadErrors, []);
+      const changed = [];
+      const over = [];
+      for (const [name, scene] of sources.scenes) {
+        const before = compileScene(sources, name, SITE_BUDGETS, { order: 'list' });
+        const after = compileScene(sources, name, SITE_BUDGETS); // throws unless lossless
+        if (after.output !== before.output) changed.push(`${name} ${before.raw} → ${after.raw} bytes`);
+        if (after.over) over.push(`${scene.output ?? `${name} (preview only)`} ${after.report}`);
+        assert.equal(compileScene(sources, name, SITE_BUDGETS).output, after.output, `${name} compiles to the same bytes twice`);
+      }
+      // The site adopts the new order under its own workflow (docs/intents/2026-10-depth-order/spec.md, Areas of concern).
+      t.diagnostic(`scenes whose output changes in depth order: ${changed.join('; ') || 'none'}`);
+      t.diagnostic(`scenes over budget in depth order: ${over.join('; ') || 'none'}`);
     } finally {
       await site.cleanup();
     }

@@ -4,7 +4,8 @@
 // layer trees. It uses no Node or DOM APIs, so `npm run art` and the editor
 // run the same code.
 
-import { blockFaces, blockSize, footprint, LEVEL_H, tilePixels, TILE_H, TILE_W, tileToPx } from './iso.mjs';
+import { blockBox, sortNodes, spriteBox, spriteHeight, unionBounds, unionBox } from './depth.mjs';
+import { blockFaces, blockSize, footprint, LEVEL_H, pxToTileExact, tilePixels, TILE_H, TILE_W, tileToPx } from './iso.mjs';
 import { filledKeys, itemsById, loopFrame, motionClass, motionCss, poseClass, posesOf, validateMotion } from './motion.mjs';
 
 /**
@@ -33,6 +34,8 @@ import { filledKeys, itemsById, loopFrame, motionClass, motionCss, poseClass, po
  * }} Resolved
  * @typedef {{ pixels: Map<string, string>, colors: Set<string> }} Layer
  * @typedef {{ attrs: [string, string][], frame?: number, frames?: number, hidden?: boolean, children: (Group | Layer)[] }} Group
+ * @typedef {import('./depth.mjs').Box} DepthBox
+ * @typedef {import('./depth.mjs').Bounds} DepthBounds
  */
 
 export const TIERS = /** @type {const} */ (['world', 'outfit']);
@@ -942,23 +945,204 @@ function draw(obj, ox, oy, group) {
 
 /**
  * Renders a scene to a tree that mirrors its groups, placement classes and
- * frame loops. Items paint in source order.
+ * frame loops. Every list of items (the scene's, and each group's) paints in
+ * depth order, back to front (depth.mjs): of two items whose pixels could
+ * overlap, the one behind paints first, whatever order the file lists them in.
  * @param {Sources} sources
  * @param {string} name
  * A scene with motion also returns the CSS that plays it, and each tracked
  * item is drawn at its rest frame in its own group (motion.mjs).
+ * With `order: 'list'` the items paint in the order the file lists them, as
+ * engines before the depth order did (what `scene.sort` compares against, and
+ * a preview that has already put its items in order).
+ * @param {{ order?: 'depth' | 'list' }} [options]
  * @returns {{ viewBox: number[], root: Group, style?: string }}
  */
-export function renderScene(sources, name) {
+export function renderScene(sources, name, { order = 'depth' } = {}) {
   const scene = sources.scenes.get(name);
   if (!scene) throw new Error(`scene ${q(name)} does not exist`);
   /** @type {Group} */
   const root = { attrs: [], children: [] };
-  const tracks = new Map((scene.motion?.tracks ?? []).map((/** @type {any} */ track) => [track.item, track]));
-  placeItems(sources, scene.items, root, scene.origin ?? [0, 0], tracks);
+  const tracks = tracksOf(scene);
+  const origin = scene.origin ?? [0, 0];
+  const items = order === 'list' ? scene.items : arrange(sources, scene.items, origin, tracks).items;
+  placeItems(sources, items, root, origin, tracks);
   if (!tracks.size) return { viewBox: scene.viewBox, root };
   return { viewBox: scene.viewBox, root, style: motionCss(scene.motion, itemsById(scene.items)) };
 }
+
+// --------------------------------------------------------------------- depth
+
+/** A scene's motion tracks by item id. @param {any} scene @returns {Map<string, any>} */
+const tracksOf = (scene) => new Map((scene.motion?.tracks ?? []).map((/** @type {any} */ track) => [track.item, track]));
+
+/**
+ * What the depth order needs of an object, cached per set of sources: where
+ * its pixels fall with its anchor at (0, 0), over every layer and frame (a
+ * block's faces and sides), and the sizes its box comes from.
+ * @typedef {{ bounds: DepthBounds | null, footprint: [number, number], height: number, block?: number[] }} Extent
+ */
+/** @type {WeakMap<object, Map<string, Extent>>} */
+const EXTENTS = new WeakMap();
+
+/**
+ * @param {Sources} sources
+ * @param {string} name
+ * @returns {Extent}
+ */
+function extentOf(sources, name) {
+  let byName = EXTENTS.get(sources.objects);
+  if (!byName) EXTENTS.set(sources.objects, (byName = new Map()));
+  let found = byName.get(name);
+  if (!found) {
+    const obj = resolve(sources, name);
+    found = {
+      bounds: treeBounds(renderObject(sources, name)),
+      footprint: obj.footprint,
+      height: spriteHeight(obj.anchor[1]),
+      ...(obj.block ? { block: obj.block.size } : {}),
+    };
+    byName.set(name, found);
+  }
+  return found;
+}
+
+/**
+ * The bounds of every pixel in a tree, in every group (every frame and pose).
+ * @param {Group} group
+ * @returns {DepthBounds | null}
+ */
+function treeBounds(group) {
+  /** @type {DepthBounds | null} */
+  let out = null;
+  for (const child of group.children) {
+    if ('pixels' in child) out = unionBounds([out, bounds(child.pixels.keys())]);
+    else out = unionBounds([out, treeBounds(child)]);
+  }
+  return out;
+}
+
+/**
+ * A placed object's node for the sort: the box it stands in and the pixels it
+ * can draw on. A tracked item rests where the SVG draws it, at its placement
+ * plus its first key's move, and its pixels cover all its poses.
+ * @param {Sources} sources
+ * @param {any} item
+ * @param {number[]} origin
+ * @param {Map<string, any>} tracks
+ * @returns {{ box: DepthBox, bounds: DepthBounds | null }}
+ */
+function itemNode(sources, item, origin, tracks) {
+  const track = item.id !== undefined ? tracks.get(item.id) : undefined;
+  let [x, y] = item.at.tile ? tileToPx(item.at.tile, origin) : item.at.px;
+  const level = item.at.tile ? item.at.tile[2] : (item.at.level ?? 0);
+  let standing = item.object;
+  let poses = [item.object];
+  if (track) {
+    const rest = filledKeys(track, item.object)[0];
+    [x, y] = [x + rest.move[0], y + rest.move[1]];
+    standing = rest.pose;
+    poses = posesOf(track, item.object);
+  }
+  const [c, r] = item.at.tile && !track ? item.at.tile : pxToTileExact([x, y], level, origin);
+  const extent = extentOf(sources, standing);
+  const box = extent.block ? blockBox(c, r, level, extent.block) : spriteBox(c, r, level, extent.footprint, extent.height);
+  const shifted = poses.map((pose) => {
+    const b = extentOf(sources, pose).bounds;
+    return b && { minX: b.minX + x, minY: b.minY + y, maxX: b.maxX + x, maxY: b.maxY + y };
+  });
+  return { box, bounds: unionBounds(shifted) };
+}
+
+/** A group that is one variant of a run (the site shows one at a time). @param {any} item */
+const isVariantGroup = (item) => 'group' in item && isRecord(item.group) && 'data-class' in item.group;
+
+/**
+ * Puts one list in depth order: groups sort as one object (their box is the
+ * union of their members' boxes at rest) with their members sorted inside,
+ * and a run of consecutive variant groups sorts as one unit and keeps its own
+ * order. Back-marked items come first, front-marked last. Returns copies of
+ * the groups, the same item objects, the new order, and whether the list and
+ * every list inside it already were in order.
+ * @param {Sources} sources
+ * @param {any[]} items
+ * @param {number[]} origin
+ * @param {Map<string, any>} tracks
+ * @returns {{ items: any[], order: number[], sorted: boolean, box: DepthBox | null, bounds: DepthBounds | null }}
+ */
+function arrange(sources, items, origin, tracks) {
+  let inside = true;
+  const parts = items.map((item, index) => {
+    if ('group' in item) {
+      const inner = arrange(sources, item.items ?? [], origin, tracks);
+      inside &&= inner.sorted;
+      return { index, item: inner.sorted ? item : { ...item, items: inner.items }, box: inner.box, bounds: inner.bounds, depth: item.depth };
+    }
+    return { index, item, ...itemNode(sources, item, origin, tracks), depth: item.depth };
+  });
+  /** @param {typeof parts} list */
+  const runs = (list) => {
+    /** @type {(typeof parts)[]} */
+    const out = [];
+    list.forEach((part, i) => {
+      if (isVariantGroup(part.item) && i > 0 && isVariantGroup(list[i - 1].item)) out[out.length - 1].push(part);
+      else out.push([part]);
+    });
+    return out;
+  };
+  let list = parts;
+  // Sorting can bring two variant groups side by side, which then make a run
+  // of their own; sort again until the runs stop merging, so a sorted list
+  // sorts to itself.
+  for (;;) {
+    const units = runs(list);
+    const order = sortNodes(units.map((u) => ({ box: unionBox(u.map((p) => p.box)), bounds: unionBounds(u.map((p) => p.bounds)), depth: u[0].depth })));
+    list = order.flatMap((i) => units[i]);
+    if (runs(list).length === units.length) break;
+  }
+  const order = list.map((p) => p.index);
+  return {
+    items: list.map((p) => p.item),
+    order,
+    sorted: inside && order.every((index, i) => index === i),
+    box: unionBox(parts.map((p) => p.box)),
+    bounds: unionBounds(parts.map((p) => p.bounds)),
+  };
+}
+
+/**
+ * The order one list of items draws in, as indices into it: its groups count
+ * as one object each, and the members inside are not sorted. A tracked item
+ * rests at its first key; give the scene's tracks, by item id, to count them.
+ * @param {Sources} sources
+ * @param {any[]} items
+ * @param {number[]} [origin]
+ * @param {Map<string, any>} [tracks]
+ * @returns {number[]}
+ */
+export function depthOrder(sources, items, origin = [0, 0], tracks = new Map()) {
+  return arrange(sources, items, origin, tracks).order;
+}
+
+/**
+ * A copy of the scene with every list of items, the scene's and each group's,
+ * in depth order.
+ * @param {Sources} sources
+ * @param {any} scene
+ * @returns {any}
+ */
+export function sceneInOrder(sources, scene) {
+  const copy = structuredClone(scene);
+  copy.items = arrange(sources, copy.items, copy.origin ?? [0, 0], tracksOf(copy)).items;
+  return copy;
+}
+
+/**
+ * Whether every list of the scene's items is in depth order already.
+ * @param {Sources} sources
+ * @param {any} scene
+ */
+export const isInDepthOrder = (sources, scene) => arrange(sources, scene.items, scene.origin ?? [0, 0], tracksOf(scene)).sorted;
 
 /**
  * @param {Sources} sources
