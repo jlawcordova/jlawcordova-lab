@@ -55,7 +55,7 @@ docs/plan.md         this file (now docs/intents/2026-10-mac-app/plan.md)
 - Sources are loaded with `import(url + '?v=' + mtimeMs)` so edits on disk are picked up.
 - Writes: validate with the engine first, serialize with the engine's `serialize`, write atomically (temp file + rename). Never touch generated SVGs; `art build` runs `npm run art` in the site for that.
 - **Never write to the real site checkout in tests.** Tests copy the site's `src/lib/pixel-art/`, `scripts/pixel-art-preview.mjs`, `src/styles/variables.css` and `src/assets/pixel-art/source/` into a temp dir and point `--site` at it.
-- Scene editing logic (place, move, raise, lower, duplicate, remove, snap, insert order) currently lives in the web lab's client code, `src/components/lab/scene-mode.ts`, not the engine. Port it to `cli/lib/scene-ops.mjs` and keep the behavior the same (for example `insertIndex` keeps tile items sorted by row + col, then level). Object painting uses the engine's `edit.mjs`.
+- Scene editing logic (place, move, raise, lower, duplicate, remove, snap, insert order) currently lives in the web lab's client code, `src/components/lab/scene-mode.ts`, not the engine. Port it to `cli/lib/scene-ops.mjs` and keep the behavior the same (for example `insertIndex` keeps tile items sorted by row + col, then level). *(Superseded by [2026-10-depth-order](../2026-10-depth-order/spec.md): items sort by where they stand, `insertIndex`, raise and lower are gone.)* Object painting uses the engine's `edit.mjs`.
 
 ## One command registry, three doors
 

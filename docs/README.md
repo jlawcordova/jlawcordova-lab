@@ -28,5 +28,6 @@ Each change lives in `docs/intents/YYYY-MM-<slug>/`, with its intent, spec and p
 
 - [2026-10-mac-app](intents/2026-10-mac-app/plan.md): the first build, Pixel Lab for Mac. Its plan is the architecture and design record, including the look (mood board 03, "Field notebook") and the follow-ups list.
 - [2026-10-dev-docs](intents/2026-10-dev-docs/intent.md): these developer docs and their site ([spec](intents/2026-10-dev-docs/spec.md), [plan](intents/2026-10-dev-docs/plan.md)).
+- [2026-10-depth-order](intents/2026-10-depth-order/intent.md): scenes draw their items by where they stand ([spec](intents/2026-10-depth-order/spec.md), [plan](intents/2026-10-depth-order/plan.md), [the site's migration notes](intents/2026-10-depth-order/site-notes.md)).
 
 Screenshots from each build are in `docs/screenshots/`.
