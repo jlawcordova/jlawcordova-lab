@@ -10,6 +10,7 @@
   "exports": {
     "./engine": "./cli/lib/engine/engine.mjs",
     "./iso": "./cli/lib/engine/iso.mjs",
+    "./depth": "./cli/lib/engine/depth.mjs",
     "./motion": "./cli/lib/engine/motion.mjs",
     "./serialize": "./cli/lib/engine/serialize.mjs",
     "./edit": "./cli/lib/engine/edit.mjs",

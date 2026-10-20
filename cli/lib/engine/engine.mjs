@@ -25,6 +25,7 @@ import { filledKeys, itemsById, loopFrame, motionClass, motionCss, poseClass, po
  *   block?: Block,
  *   character: boolean,
  *   anchor: [number, number],
+ *   footprint: [number, number],
  *   keys: Record<string, string>,
  *   layers: SpriteLayer[],
  *   width: number,
@@ -142,7 +143,9 @@ function validatePalette({ palette }, problems) {
   }
 }
 
-const OBJECT_PROPS = ['kind', 'extends', 'anchor', 'keys', 'rows', 'layers'];
+const OBJECT_PROPS = ['kind', 'extends', 'anchor', 'footprint', 'keys', 'rows', 'layers'];
+/** A sprite's footprint is whole tiles, 1 to this many each way. */
+export const MAX_FOOTPRINT = 16;
 const BLOCK_PROPS = ['kind', 'size', 'faces', 'surface', 'sides'];
 const SIDES_PROPS = ['keys', 'left', 'right'];
 /** A side map is one tile's face wide (its 16-pixel period along the face) and one level high. */
@@ -172,6 +175,9 @@ function validateObjectShape(sources, name, problems) {
   for (const key of Object.keys(obj)) if (!OBJECT_PROPS.includes(key)) add(`unknown property ${q(key)}`);
   if (obj.kind !== 'sprite') add(`kind must be 'sprite' or 'block', got ${q(obj.kind)}`);
   if ('anchor' in obj && !isWhole(obj.anchor, 2)) add('anchor must be two whole numbers');
+  if ('footprint' in obj && !(isWhole(obj.footprint, 2) && obj.footprint.every((/** @type {number} */ n) => n >= 1 && n <= MAX_FOOTPRINT))) {
+    add(`footprint must be two whole numbers, tiles wide and deep, from 1 to ${MAX_FOOTPRINT}`);
+  }
 
   const keys = obj.keys ?? {};
   if ('keys' in obj && !isRecord(obj.keys)) add('keys must be an object of key: color name');
@@ -249,7 +255,10 @@ function validateObjectShape(sources, name, problems) {
  * @param {(msg: string) => void} add
  */
 function validateBlockShape(sources, obj, add) {
-  for (const key of Object.keys(obj)) if (!BLOCK_PROPS.includes(key)) add(`unknown property ${q(key)}`);
+  for (const key of Object.keys(obj)) {
+    if (key === 'footprint') add('footprint is for sprites; a block\'s size is its footprint');
+    else if (!BLOCK_PROPS.includes(key)) add(`unknown property ${q(key)}`);
+  }
   const sized = isWhole(obj.size, 3) && obj.size[0] >= 1 && obj.size[1] >= 1 && obj.size[2] >= 0;
   if (!sized) add('size must be three whole numbers: tiles wide, tiles deep (both at least 1) and levels high (0 is a flat tile)');
   if (!isRecord(obj.faces)) add('faces must be an object of face: color name');
@@ -456,6 +465,8 @@ function extendsChain(sources, name) {
   return { names, cycle: false };
 }
 
+/** An item's or group's override: draw in front of, or behind, the rest of its list (depth.mjs). */
+const DEPTHS = ['front', 'back'];
 const SCENE_PROPS = ['output', 'viewBox', 'origin', 'layers', 'items', 'motion'];
 const LAYER_PROPS = ['id', 'name', 'parent'];
 /** A layer's name: 1–64 characters on one line, no spaces at either end. */
@@ -553,7 +564,8 @@ function validateItems(sources, items, path, add, ids, layers) {
     const where = `${path}[${i}]`;
     if (!isRecord(item)) return add(`${where}: must be { object, at } or { group, items }`);
     if ('group' in item) {
-      for (const key of Object.keys(item)) if (key !== 'group' && key !== 'items') add(`${where}: unknown property ${q(key)}`);
+      for (const key of Object.keys(item)) if (!['group', 'depth', 'items'].includes(key)) add(`${where}: unknown property ${q(key)}`);
+      if ('depth' in item && !DEPTHS.includes(item.depth)) add(`${where}: depth must be 'front' or 'back'`);
       if (!isRecord(item.group)) add(`${where}: group must be an object of attributes`);
       else {
         for (const [attr, value] of Object.entries(item.group)) {
@@ -567,7 +579,8 @@ function validateItems(sources, items, path, add, ids, layers) {
       if (!Array.isArray(item.items)) return add(`${where}: items must be a list`);
       return validateItems(sources, item.items, `${where}.items`, add, ids, layers);
     }
-    for (const key of Object.keys(item)) if (!['object', 'id', 'class', 'layer', 'at'].includes(key)) add(`${where}: unknown property ${q(key)}`);
+    for (const key of Object.keys(item)) if (!['object', 'id', 'class', 'layer', 'depth', 'at'].includes(key)) add(`${where}: unknown property ${q(key)}`);
+    if ('depth' in item && !DEPTHS.includes(item.depth)) add(`${where}: depth must be 'front' or 'back'`);
     if ('layer' in item && (typeof item.layer !== 'string' || !layers.has(item.layer))) add(`${where}: layer ${q(item.layer)} is no layer of this scene`);
     if ('id' in item) {
       if (typeof item.id !== 'string' || !NAME.test(item.id)) add(`${where}: id must be lowercase kebab-case`);
@@ -579,10 +592,15 @@ function validateItems(sources, items, path, add, ids, layers) {
       add(`${where}: class must be lowercase class names separated by single spaces`);
     }
     const at = item.at;
-    if (!isRecord(at) || Object.keys(at).length !== 1 || !('px' in at || 'tile' in at)) {
-      add(`${where}: at must be { px: [x, y] } or { tile: [col, row, level] }`);
+    const placed = isRecord(at) ? Object.keys(at).filter((key) => key !== 'level') : [];
+    if (!isRecord(at) || placed.length !== 1 || !(placed[0] === 'px' || placed[0] === 'tile') || Object.keys(at).some((key) => key !== 'level' && key !== placed[0])) {
+      add(`${where}: at must be { px: [x, y], level? } or { tile: [col, row, level] }`);
     } else if ('px' in at && !isWhole(at.px, 2)) add(`${where}: at.px must be two whole numbers`);
     else if ('tile' in at && !isWhole(at.tile, 3)) add(`${where}: at.tile must be three whole numbers`);
+    if (isRecord(at) && 'level' in at) {
+      if ('tile' in at) add(`${where}: at.level is only for at.px; a tile's level is its third number`);
+      else if (!Number.isInteger(at.level)) add(`${where}: at.level must be a whole number`);
+    }
   });
 }
 
@@ -612,6 +630,7 @@ export function resolve(sources, name, seen = []) {
       name,
       character: name === 'character',
       anchor: anchor ?? [0, 0],
+      footprint: ownFootprint(obj) ?? [1, 1],
       keys: { ...obj.keys },
       layers,
       width: first[0].length,
@@ -635,12 +654,20 @@ export function resolve(sources, name, seen = []) {
     name,
     character: name === 'character' || base.character,
     anchor: anchor ?? base.anchor,
+    footprint: ownFootprint(obj) ?? base.footprint,
     keys: { ...base.keys, ...obj.keys },
     layers,
     width: base.width,
     height: base.height,
   };
 }
+
+/**
+ * A sprite's own `footprint`, copied, or undefined.
+ * @param {any} obj
+ * @returns {[number, number] | undefined}
+ */
+const ownFootprint = (obj) => (Array.isArray(obj.footprint) ? [obj.footprint[0], obj.footprint[1]] : undefined);
 
 /**
  * A block as a Resolved: its surface is the one layer, and its size is the
@@ -660,6 +687,7 @@ function resolveBlock(name, obj) {
     block: { size: obj.size, faces: { ...obj.faces }, surface, ...(sides ? { sides } : {}) },
     character: false,
     anchor: [0, 0],
+    footprint: [obj.size[0], obj.size[1]],
     keys: { ...surface?.keys },
     layers,
     width,

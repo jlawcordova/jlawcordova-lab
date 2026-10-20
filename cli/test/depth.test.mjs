@@ -6,8 +6,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { openDocument } from '../lib/document.mjs';
 import { behind, blockBox, keyOf, overlaps, shiftBox, sortNodes, spriteBox, spriteHeight, unionBounds, unionBox } from '../lib/engine/depth.mjs';
+import { loadSources, resolve, validate } from '../lib/engine/engine.mjs';
 import { pxToTile, pxToTileExact, tileToPx } from '../lib/engine/iso.mjs';
+import { serialize } from '../lib/engine/serialize.mjs';
+import { flattenItems } from '../lib/render.mjs';
+import { FIXTURE_DOC } from './helpers.mjs';
 
 /** Deterministic pseudo-random numbers (mulberry32), so a failure can be replayed from its seed. */
 function rng(seed) {
@@ -21,6 +26,18 @@ function rng(seed) {
   };
 }
 const SEEDS = [1, 7, 42, 2026, 31337];
+
+const PALETTE = {
+  world: { ink: '#2E2418', cream: '#F4EDE0', 'grass-2': '#8FA56E', 'grass-4': '#4E6B3A', 'wood-3': '#7A4E2D' },
+  outfit: {},
+};
+const sprite = (map, extra = {}) => ({ kind: 'sprite', keys: { g: 'grass-2', i: 'ink' }, layers: [{ map }], ...extra });
+const block = (extra = {}) => ({ kind: 'block', size: [1, 1, 1], faces: { top: 'grass-2', left: 'grass-4', right: 'wood-3' }, ...extra });
+const scene = (items, extra = {}) => ({ viewBox: [0, 0, 8, 8], items, ...extra });
+/** Sources from inline objects and scenes. */
+const src = (objects = {}, scenes = {}) => loadSources({ palette: PALETTE, objects, scenes });
+/** Imports source text as a module, the way `npm run art` loads a file. */
+const load = async (text) => (await import(`data:text/javascript,${encodeURIComponent(text)}`)).default;
 
 /** Pixel bounds big enough that every pair of nodes is tested. */
 const EVERYWHERE = { minX: -1000, minY: -1000, maxX: 1000, maxY: 1000 };
@@ -274,3 +291,182 @@ function randomBoxes(r, n, span = 8) {
     return spriteBox(c + Math.floor(r() * 32) / 32, row + Math.floor(r() * 32) / 32, l, [1 + Math.floor(r() * 2), 1], spriteHeight(Math.floor(r() * 40)));
   });
 }
+
+describe('the scene format: depth and level (R5, R7, D1)', () => {
+  const dot = sprite(['g']);
+  const problems = (items) => validate(src({ dot }, { demo: scene(items) }));
+
+  it('R5: an item or a group may carry depth front or back, and nothing else', () => {
+    assert.deepEqual(problems([{ object: 'dot', depth: 'front', at: { px: [0, 0] } }, { group: {}, depth: 'back', items: [{ object: 'dot', depth: 'back', at: { tile: [0, 0, 0] } }] }]), []);
+    assert.deepEqual(problems([{ object: 'dot', depth: 'above', at: { px: [0, 0] } }]), ["scenes/demo.mjs: items[0]: depth must be 'front' or 'back'"]);
+    assert.deepEqual(problems([{ object: 'dot', depth: 'auto', at: { px: [0, 0] } }]), ["scenes/demo.mjs: items[0]: depth must be 'front' or 'back'"], 'auto is the absence of the key');
+    assert.deepEqual(problems([{ group: {}, depth: 1, items: [] }]), ["scenes/demo.mjs: items[0]: depth must be 'front' or 'back'"]);
+    assert.deepEqual(problems([{ group: {}, order: 1, items: [] }]), ["scenes/demo.mjs: items[0]: unknown property 'order'"]);
+    assert.deepEqual(problems([{ object: 'dot', zIndex: 1, at: { px: [0, 0] } }]), ["scenes/demo.mjs: items[0]: unknown property 'zIndex'"]);
+  });
+
+  it('R7: at.px takes a whole-number level, and only at.px does', () => {
+    assert.deepEqual(problems([{ object: 'dot', at: { px: [40, -12], level: 4 } }, { object: 'dot', at: { px: [0, 0], level: -2 } }, { object: 'dot', at: { px: [0, 0], level: 0 } }]), []);
+    assert.deepEqual(problems([{ object: 'dot', at: { px: [0, 0], level: 1.5 } }]), ['scenes/demo.mjs: items[0]: at.level must be a whole number']);
+    assert.deepEqual(problems([{ object: 'dot', at: { px: [0, 0], level: '2' } }]), ['scenes/demo.mjs: items[0]: at.level must be a whole number']);
+    assert.deepEqual(problems([{ object: 'dot', at: { tile: [0, 0, 0], level: 1 } }]), ["scenes/demo.mjs: items[0]: at.level is only for at.px; a tile's level is its third number"]);
+    const shape = 'scenes/demo.mjs: items[0]: at must be { px: [x, y], level? } or { tile: [col, row, level] }';
+    assert.deepEqual(problems([{ object: 'dot', at: { level: 1 } }]), [shape]);
+    assert.deepEqual(problems([{ object: 'dot', at: { px: [0, 0], tile: [0, 0, 0] } }]), [shape]);
+    assert.deepEqual(problems([{ object: 'dot', at: { px: [0, 0], height: 2 } }]), [shape]);
+  });
+
+  it('R5, R7: the serializer writes depth after layer and level after px, and leaves level out at 0', () => {
+    const s = {
+      viewBox: [0, 0, 8, 8],
+      items: [
+        { object: 'dot', id: 'a', class: 'x', layer: 'yard', depth: 'front', at: { px: [40, -12], level: 4 } },
+        { object: 'dot', depth: 'back', at: { tile: [1, 2, 3] } },
+        { object: 'dot', at: { px: [1, 2], level: 0 } },
+        { object: 'dot', at: { px: [1, 2], level: -1 } },
+        { group: { class: 'enter' }, depth: 'back', items: [{ object: 'dot', at: { px: [0, 0] } }] },
+        { group: {}, items: [] },
+      ],
+    };
+    assert.equal(
+      serialize(s),
+      `// Pixel-art scene. How to edit it: .claude/skills/pixel-art/SKILL.md
+export default {
+  viewBox: [0, 0, 8, 8],
+  items: [
+    { object: 'dot', id: 'a', class: 'x', layer: 'yard', depth: 'front', at: { px: [40, -12], level: 4 } },
+    { object: 'dot', depth: 'back', at: { tile: [1, 2, 3] } },
+    { object: 'dot', at: { px: [1, 2] } },
+    { object: 'dot', at: { px: [1, 2], level: -1 } },
+    {
+      group: { class: 'enter' },
+      depth: 'back',
+      items: [
+        { object: 'dot', at: { px: [0, 0] } },
+      ],
+    },
+    {
+      group: {},
+      items: [],
+    },
+  ],
+};
+`,
+    );
+  });
+
+  it('R5, R7: every new key survives save and reload byte for byte, and files without them are unchanged', async () => {
+    const full = {
+      viewBox: [0, 0, 8, 8],
+      items: [
+        { object: 'dot', id: 'jib', layer: 'crane', depth: 'front', at: { px: [40, -12], level: 4 } },
+        { group: { 'data-class': '1' }, depth: 'back', items: [{ object: 'dot', depth: 'front', at: { tile: [0, 0, 0] } }] },
+        { object: 'dot', at: { px: [3, 4], level: -2 } },
+      ],
+    };
+    const text = serialize(full);
+    assert.deepEqual(await load(text), full);
+    assert.equal(serialize(await load(text)), text);
+    // A file with none of the new keys writes the same text it always did.
+    const plain = scene([{ object: 'dot', at: { px: [1, 2] } }, { group: { class: 'a' }, items: [{ object: 'dot', class: 'b c', at: { tile: [0, 1, 2] } }] }]);
+    assert.equal(
+      serialize(plain),
+      `// Pixel-art scene. How to edit it: .claude/skills/pixel-art/SKILL.md
+export default {
+  viewBox: [0, 0, 8, 8],
+  items: [
+    { object: 'dot', at: { px: [1, 2] } },
+    {
+      group: { class: 'a' },
+      items: [
+        { object: 'dot', class: 'b c', at: { tile: [0, 1, 2] } },
+      ],
+    },
+  ],
+};
+`,
+    );
+  });
+
+  it('R5, R7: scene.items lists an item\'s depth, a pixel item\'s level, and a group\'s depth', async () => {
+    const site = await openDocument({ doc: FIXTURE_DOC });
+    const flat = flattenItems(
+      site,
+      scene([
+        { object: 'dot', depth: 'front', at: { px: [40, -12], level: 4 } },
+        { object: 'dot', at: { px: [1, 2] } },
+        { object: 'dot', at: { tile: [1, 2, 3] } },
+        { group: { class: 'enter' }, depth: 'back', items: [{ object: 'dot', at: { tile: [0, 0, 0] } }] },
+        { group: {}, items: [] },
+      ]),
+    );
+    assert.deepEqual(flat.items.map((i) => [i.path, i.depth, i.level]), [['0', 'front', 4], ['1', undefined, 0], ['2', undefined, undefined], ['3.0', undefined, undefined]]);
+    assert.deepEqual(flat.items[0].at, { px: [40, -12], level: 4 });
+    assert.deepEqual(flat.groups.map((g) => [g.path, g.depth]), [['3', 'back'], ['4', undefined]]);
+  });
+
+  it('D2: a document carries the depth module with the rest of the engine', async () => {
+    const site = await openDocument({ doc: FIXTURE_DOC });
+    assert.equal(site.depth.sortNodes, sortNodes);
+    assert.equal(typeof site.depth.behind, 'function');
+  });
+});
+
+describe('sprite footprints (R8, D1)', () => {
+  const problems = (objects) => validate(src(objects));
+
+  it('R8: a sprite may say how many tiles it covers, whole numbers from 1 to 16', () => {
+    assert.deepEqual(problems({ house: sprite(['g'], { footprint: [3, 2] }), tall: sprite(['g'], { footprint: [16, 1] }) }), []);
+    const rule = 'footprint must be two whole numbers, tiles wide and deep, from 1 to 16';
+    for (const bad of [[0, 1], [1, 17], [1.5, 1], [1], [1, 1, 1], '2,2', { w: 1 }, [-1, 2]]) {
+      assert.deepEqual(problems({ house: sprite(['g'], { footprint: bad }) }), [`objects/house.mjs: ${rule}`], JSON.stringify(bad));
+    }
+  });
+
+  it('R8: a block refuses a footprint, since its size is its footprint', () => {
+    assert.deepEqual(problems({ b: block({ footprint: [1, 1] }) }), ["objects/b.mjs: footprint is for sprites; a block's size is its footprint"]);
+    assert.deepEqual(problems({ b: block() }), []);
+  });
+
+  it('R8: the footprint defaults to 1×1, a block\'s is its size, and extends inherits it', () => {
+    const sources = src({
+      plain: sprite(['g']),
+      house: sprite(['g'], { footprint: [3, 2] }),
+      cottage: { kind: 'sprite', extends: 'house', rows: {} },
+      shed: { kind: 'sprite', extends: 'house', footprint: [1, 2], rows: {} },
+      wall: block({ size: [2, 1, 1] }),
+    });
+    assert.deepEqual(validate(sources), []);
+    assert.deepEqual(resolve(sources, 'plain').footprint, [1, 1]);
+    assert.deepEqual(resolve(sources, 'house').footprint, [3, 2]);
+    assert.deepEqual(resolve(sources, 'cottage').footprint, [3, 2], 'inherited');
+    assert.deepEqual(resolve(sources, 'shed').footprint, [1, 2], 'its own wins');
+    assert.deepEqual(resolve(sources, 'wall').footprint, [2, 1]);
+    // resolve hands out copies: changing one leaves the object alone.
+    resolve(sources, 'house').footprint[0] = 9;
+    assert.deepEqual(resolve(sources, 'house').footprint, [3, 2]);
+  });
+
+  it('R8: the serializer writes footprint after anchor, and files without it are unchanged', async () => {
+    const obj = { kind: 'sprite', extends: 'house', anchor: [5, 13], footprint: [3, 2], keys: { x: 'ink' }, rows: {} };
+    assert.equal(
+      serialize(obj),
+      `// Pixel-art object. How to edit it: .claude/skills/pixel-art/SKILL.md
+export default {
+  kind: 'sprite',
+  extends: 'house',
+  anchor: [5, 13],
+  footprint: [3, 2],
+  keys: {
+    x: 'ink',
+  },
+  rows: {},
+};
+`,
+    );
+    assert.deepEqual(await load(serialize(obj)), obj);
+    const plain = { kind: 'sprite', anchor: [1, 1], keys: { g: 'ink' }, layers: [{ map: ['g'] }] };
+    assert.doesNotMatch(serialize(plain), /footprint/);
+    assert.equal(serialize(await load(serialize(plain))), serialize(plain));
+  });
+});

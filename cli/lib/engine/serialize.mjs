@@ -65,6 +65,7 @@ export function serializeObject(obj) {
   if (obj.kind === 'block') return serializeBlock(obj, lines);
   if (obj.extends !== undefined) lines.push(`extends: ${str(obj.extends)}`);
   if (obj.anchor !== undefined) lines.push(`anchor: ${nums(obj.anchor)}`);
+  if (obj.footprint !== undefined) lines.push(`footprint: ${nums(obj.footprint)}`);
   if (obj.keys !== undefined) lines.push(`keys: ${stringRecord(obj.keys, 1)}`);
   if (obj.rows !== undefined) {
     const layers = Object.keys(obj.rows);
@@ -108,13 +109,16 @@ function itemText(item, depth) {
   if ('group' in item) {
     const attrs = Object.keys(item.group);
     const group = attrs.length ? `{ ${attrs.map((k) => `${prop(k)}: ${str(item.group[k])}`).join(', ')} }` : '{}';
-    return `{\n${pad(depth + 1)}group: ${group},\n${pad(depth + 1)}items: ${itemList(item.items, depth + 1)},\n${pad(depth)}}`;
+    const mark = item.depth !== undefined ? `${pad(depth + 1)}depth: ${str(item.depth)},\n` : '';
+    return `{\n${pad(depth + 1)}group: ${group},\n${mark}${pad(depth + 1)}items: ${itemList(item.items, depth + 1)},\n${pad(depth)}}`;
   }
   const parts = [`object: ${str(item.object)}`];
   if (item.id !== undefined) parts.push(`id: ${str(item.id)}`);
   if (item.class !== undefined) parts.push(`class: ${str(item.class)}`);
   if (item.layer !== undefined) parts.push(`layer: ${str(item.layer)}`);
-  const at = 'tile' in item.at ? `{ tile: ${nums(item.at.tile)} }` : `{ px: ${nums(item.at.px)} }`;
+  if (item.depth !== undefined) parts.push(`depth: ${str(item.depth)}`);
+  // A pixel item's level follows its point, and is left out at 0.
+  const at = 'tile' in item.at ? `{ tile: ${nums(item.at.tile)} }` : `{ px: ${nums(item.at.px)}${item.at.level ? `, level: ${item.at.level}` : ''} }`;
   parts.push(`at: ${at}`);
   return `{ ${parts.join(', ')} }`;
 }

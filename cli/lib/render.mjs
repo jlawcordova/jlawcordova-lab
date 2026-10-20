@@ -92,7 +92,13 @@ export function flattenItems(site, scene) {
     (list ?? []).forEach((item, i) => {
       const path = [...prefix, i];
       if (item && typeof item === 'object' && 'group' in item) {
-        groups.push({ path: pathString(path), attrs: { ...item.group }, items: (item.items ?? []).length, ...(group ? { group } : {}) });
+        groups.push({
+          path: pathString(path),
+          attrs: { ...item.group },
+          items: (item.items ?? []).length,
+          ...(item.depth !== undefined ? { depth: item.depth } : {}),
+          ...(group ? { group } : {}),
+        });
         walk(item.items, path, pathString(path));
         return;
       }
@@ -100,6 +106,9 @@ export function flattenItems(site, scene) {
         path: pathString(path),
         object: item?.object,
         at: item?.at,
+        // A pixel item stands on a level of its own (default 0); a tile's level is its third number.
+        ...(item?.at?.px ? { level: item.at.level ?? 0 } : {}),
+        ...(item?.depth !== undefined ? { depth: item.depth } : {}),
         ...(item?.class !== undefined ? { class: item.class } : {}),
         ...(item?.id !== undefined ? { id: item.id } : {}),
         ...(item?.layer !== undefined ? { layer: item.layer } : {}),
