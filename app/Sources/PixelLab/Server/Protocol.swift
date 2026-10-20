@@ -410,6 +410,16 @@ struct EditResult: Codable, Sendable {
     var reordered: [String: String]?
 }
 
+/// `scene.sort` on one scene: it names no doc (the command can sort every scene),
+/// so it isn't an `EditResult`. `reordered` is as there.
+struct SceneSortResult: Codable, Sendable {
+    var changed: Bool
+    var summary: String?
+    /// How many published pixels the sort changes (the file's list order against depth order).
+    var changedPixels: Int?
+    var reordered: [String: String]?
+}
+
 // MARK: Object editing (slice 5)
 
 /// One color of `palette.get`.

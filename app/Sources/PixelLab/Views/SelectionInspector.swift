@@ -115,10 +115,13 @@ struct SelectionInspector: View {
             .accessibilityLabel("Depth")
             .accessibilityValue(item.depthMode.title)
             .accessibilityHint(item.depthMode.detail)
-            Text(item.depthMode.detail + ".")
+            // An item inside a { group } wrapper sorts only among that group's items; the wrapper is what sorts in the scene.
+            Text(item.group == nil
+                 ? item.depthMode.detail + "."
+                 : item.depthMode.detail.replacingOccurrences(of: "its list", with: "its SVG group") + ". To move it among the scene's items, set the Group depth above.")
                 .font(.caption)
                 .foregroundStyle(Theme.inkMuted)
-                .lineLimit(3)
+                .lineLimit(4)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }

@@ -245,13 +245,19 @@ struct ItemLayerLines: View {
             .pickerStyle(.inline)
             .labelsHidden()
         } label: {
-            Text(mode.title)
-                .font(.system(size: 11.5))
-                .frame(minWidth: 44)
-                .lineLimit(1)
+            // A chip of the field style, so it reads the same whether or not the window is key.
+            HStack(spacing: 5) {
+                Text(mode.title).font(.system(size: 11.5)).foregroundStyle(Theme.ink)
+                Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .semibold)).foregroundStyle(Theme.inkMuted)
+            }
+            .padding(.horizontal, 8)
+            .frame(minWidth: 62, minHeight: 26)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+            .contentShape(Rectangle())
         }
-        .menuStyle(.button)
-        .controlSize(.small)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
         .fixedSize()
         .help("Depth of the SVG group: Front draws it over everything in its list, Back under everything")
         .accessibilityLabel("Group depth")

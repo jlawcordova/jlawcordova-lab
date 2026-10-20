@@ -84,6 +84,13 @@ import Testing
         #expect(layer.edit.reordered == ["2": "3"], "the layer edit carries it on as an edit result")
     }
 
+    @Test func testR11SortOfOneSceneDecodesWithoutADocField() throws {
+        let r = try decode(SceneSortResult.self, #"{"changed":true,"summary":"Sorted harbor by depth: 3 items moved, 12 pixels change","moved":[{"from":"1","to":"2"}],"changedPixels":12,"scenes":[],"reordered":{"1":"2","2":"1"}}"#)
+        #expect(r.changed && r.changedPixels == 12)
+        #expect(r.reordered == ["1": "2", "2": "1"])
+        #expect(try decode(SceneSortResult.self, #"{"changed":false,"summary":"Already in depth order","moved":[],"changedPixels":0}"#).reordered == nil)
+    }
+
     @MainActor @Test func testR4TheSelectionFollowsItsItemsToTheirNewPaths() {
         let doc = DocumentModel(ref: DocRef(.scene, "harbor"))
         // The pine (3) and the house (4) swap places; layer ids and other paths stay.

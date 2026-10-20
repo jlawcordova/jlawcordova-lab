@@ -434,7 +434,24 @@ final class SceneEditor {
 
     /// Checks' Sort button: put the open scene's items in depth order, in one undo step.
     @discardableResult
-    func sort() async -> EditResult? { await edit("scene.sort", [:], selectResult: false) }
+    func sort() async -> SceneSortResult? {
+        guard let app, let doc, let connection = app.connection else { return nil }
+        pendingEdits += 1
+        defer { pendingEdits -= 1 }
+        do {
+            let r: SceneSortResult = try await connection.call("scene.sort", ["name": .string(doc.ref.name)])
+            if app.document === doc { app.layers.followSort(r.reordered) }
+            if let s = r.summary { announce(s) }
+            app.lastEdit = r.summary
+            app.notice = nil
+            return r
+        } catch let e as RPCError {
+            app.notice = e.message
+        } catch {
+            app.notice = error.localizedDescription
+        }
+        return nil
+    }
 
     @discardableResult func duplicate() async -> EditResult? { await itemCommand("scene.duplicate") }
     @discardableResult func snap() async -> EditResult? { await itemCommand("scene.snap") }

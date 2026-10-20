@@ -10,7 +10,11 @@
 # made, picked, gone inside, hidden, locked, moved, placed into and ungrouped, with
 # the hero island's SVG byte-identical before and after they're saved (layers.txt);
 # then the example documents' layers, read from a file, on temp copies of
-# examples/ (examples-harbor.txt, examples-town.txt).
+# examples/ (examples-harbor.txt, examples-town.txt), and depth order on the harbor example: the front
+# pine moved behind the red house draws behind its wall, the Depth override draws it over, and the saved
+# file is in order (examples-depth.txt). The temp site is put in depth order first, with the bundled CLI's
+# scene sort --all, and that is the base it starts from; a copy of the site's own document, unsorted,
+# checks the Checks warning and its Sort button (sort.txt).
 # The real checkout is only read (copied). Exits 0 if every step passed.
 #
 #   scripts/acceptance.sh [out-dir]      (default: a new temp dir)
@@ -30,6 +34,10 @@ site="$out/site" state="$out/state" shots="$out/shots"
 rm -rf "$site" "$state" "$shots" && mkdir -p "$site" "$state" "$shots"
 cp -R "$real/src" "$real/scripts" "$real/package.json" "$real/package-lock.json" "$site/"
 [[ -d "$real/node_modules" ]] && ln -s "$real/node_modules" "$site/node_modules"
+# Every file Pixel Lab writes is in depth order (docs/intents/2026-10-depth-order/spec.md, R4), so the temp site starts
+# that way: sorted by the bundled CLI, and that is the base the scripts' saves and merges are measured against.
+echo "==> the temp site, put in depth order (scene sort --all)"
+PIXELLAB_STATE="$state" node "$app/Contents/Resources/cli/bin/pixellab.mjs" scene sort --all --site "$site" | head -3
 git -C "$site" init -q && git -C "$site" add -A && git -C "$site" -c user.email=t@t -c user.name=t commit -qm base
 
 run() { # run <script> <log>
@@ -77,6 +85,15 @@ echo "hero-island.svg identical with layers; the scene holds $(grep -c "layer: '
 echo "==> the example documents: layers from the file, three and four levels deep"
 run_example examples-harbor.txt examples-harbor.log harbor
 run_example examples-town.txt examples-town.log town
+echo "==> depth order: the pine moved behind the house, the override, the saved file"
+run_example examples-depth.txt examples-depth.log harbor
+echo "==> sort: a document written before depth order, the Checks warning, Sort, save"
+doc="$out/examples/unsorted.pixellab"
+rm -rf "$doc" && cp -R "$real/src/assets/pixel-art/jlawcordova.pixellab" "$doc"
+sed "s#@OUT@#$shots#g" "$root/scripts/acceptance/sort.txt" > "$out/sort.txt"
+PIXELLAB_SCRIPT="$out/sort.txt" PIXELLAB_DOC="$doc" PIXELLAB_STATE="$state" "$app/Contents/MacOS/PixelLab" 2>&1 | grep '^script:' > "$out/sort.log" || true
+tail -1 "$out/sort.log"
+grep -q 'all steps passed' "$out/sort.log"
 echo "==> the temp site after the run"
 git -C "$site" diff --stat HEAD~1 HEAD
 git -C "$site" diff --stat

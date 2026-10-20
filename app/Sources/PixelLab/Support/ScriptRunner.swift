@@ -329,7 +329,9 @@ final class ScriptRunner {
             guard doc?.groups.contains(where: { $0.path == path }) == true else { throw Failure("no group at \(path.isEmpty ? "the selected item" : path)") }
             if doc?.groups.first(where: { $0.path == path })?.depthMode == mode { return "already \(mode.rawValue)" }
             return try needEdit(await editor.setGroupDepth(path, mode))
-        case "sort": return try needEdit(await editor.sort())
+        case "sort":
+            guard let r = await editor.sort() else { throw Failure(model.notice ?? "the sort failed") }
+            return [r.summary, r.reordered.flatMap { $0.isEmpty ? nil : "reordered \($0.count)" }].compactMap { $0 }.joined(separator: ", ")
         case "footprint":
             let parts = try arg(words, 1).split(separator: ",").compactMap { Int($0) }
             guard parts.count == 2 else { throw Failure("footprint <w>,<d>") }
