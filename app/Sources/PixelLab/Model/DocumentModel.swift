@@ -41,6 +41,8 @@ final class DocumentModel {
     var render: StageImage?
     /// nil until the first `check` comes back.
     var problems: [CheckProblem]?
+    /// `check`'s warnings: they don't fail it (off the grid, out of depth order, a moving item's copies).
+    var warnings: [CheckWarning] = []
     var checkSummary: String?
     var checkedCount: Int?
     var error: String?
@@ -99,4 +101,15 @@ final class DocumentModel {
 
     var isDirty: Bool { status?.dirty ?? false }
     var title: String { ref.name }
+
+    /// The warning that this scene's file isn't in depth order, when it isn't (Sort fixes it).
+    var outOfOrder: CheckWarning? { warnings.first { $0.kind == .outOfOrder && ($0.scene ?? ref.name) == ref.name } }
+
+    /// A scene edit put the items in depth order and moved some: the selection
+    /// follows its items to their new paths.
+    func follow(_ reordered: [String: String]) {
+        guard !reordered.isEmpty else { return }
+        let next = selection.map { $0.following(reordered) }
+        if next != selection { selection = next }
+    }
 }

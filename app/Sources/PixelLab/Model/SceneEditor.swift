@@ -173,7 +173,7 @@ final class SceneEditor {
         guard let doc else { return }
         doc.selectedPath = path
         if let item = doc.selectedItem {
-            if let l = item.at.level { placeLevel = l }
+            if let l = item.at.standingLevel { placeLevel = l }
             if reveal { self.reveal(path!) }
             announce("\(item.object) selected, \(item.at.spoken)")
         }
@@ -280,7 +280,7 @@ final class SceneEditor {
             d.dx = Int(floor(s.x)) - Int(floor(d.startScene.x))
             d.dy = Int(floor(s.y)) - Int(floor(d.startScene.y))
         } else if let origin = geometry.tileOrigin {
-            let level = item.at.level ?? 0
+            let level = item.at.standingLevel ?? 0
             let a = StageGeometry.sceneToTile(x: Int(floor(d.startScene.x)), y: Int(floor(d.startScene.y)), level: level, origin: origin)
             let b = StageGeometry.sceneToTile(x: Int(floor(s.x)), y: Int(floor(s.y)), level: level, origin: origin)
             d.dc = b.col - a.col
@@ -395,7 +395,8 @@ final class SceneEditor {
         announce("Cursor at column \(t.col), row \(t.row), level \(t.level)")
     }
 
-    /// One field of the selected item: col, row, level, x, y (`scene.set`).
+    /// One field of the selected item: col, row, level, x, y (`scene.set`); a
+    /// pixel-placed item has a level too.
     @discardableResult
     func set(_ field: String, _ value: Int) async -> EditResult? {
         guard let item = selected else { return nil }
@@ -414,8 +415,27 @@ final class SceneEditor {
         syncDrafts()
     }
 
-    @discardableResult func raise() async -> EditResult? { await itemCommand("scene.raise") }
-    @discardableResult func lower() async -> EditResult? { await itemCommand("scene.lower") }
+    /// The Depth control: draw the selected item by where it stands (`auto`), over
+    /// everything else in its list (`front`) or under it (`back`)
+    /// (docs/intents/2026-10-depth-order/spec.md, R5, R14).
+    @discardableResult
+    func setDepth(_ mode: DepthMode) async -> EditResult? {
+        guard let item = selected, item.depthMode != mode else { return nil }
+        return await edit("scene.set", ["item": .string(item.path), "depth": .string(mode.rawValue)])
+    }
+
+    /// The wrapper line's menu: a group's depth. `scene.set` takes a group's path for this alone;
+    /// the result's path is the group's, not an item to select.
+    @discardableResult
+    func setGroupDepth(_ group: String, _ mode: DepthMode) async -> EditResult? {
+        guard let current = doc?.groups.first(where: { $0.path == group }), current.depthMode != mode else { return nil }
+        return await edit("scene.set", ["item": .string(group), "depth": .string(mode.rawValue)], selectResult: false)
+    }
+
+    /// Checks' Sort button: put the open scene's items in depth order, in one undo step.
+    @discardableResult
+    func sort() async -> EditResult? { await edit("scene.sort", [:], selectResult: false) }
+
     @discardableResult func duplicate() async -> EditResult? { await itemCommand("scene.duplicate") }
     @discardableResult func snap() async -> EditResult? { await itemCommand("scene.snap") }
 
@@ -434,8 +454,11 @@ final class SceneEditor {
     }
 
     /// Runs one scene edit on the open doc and selects the item it reports.
+    /// The edit leaves the items in depth order: what was selected follows its
+    /// item to its new path (`reordered`), and `selectResult: false` keeps the
+    /// result's `path` (a group's, say) from being selected.
     @discardableResult
-    func edit(_ method: String, _ params: [String: JSONValue]) async -> EditResult? {
+    func edit(_ method: String, _ params: [String: JSONValue], selectResult: Bool = true) async -> EditResult? {
         guard let app, let doc, let connection = app.connection else { return nil }
         var p = params
         p["name"] = .string(doc.ref.name)
@@ -443,7 +466,8 @@ final class SceneEditor {
         defer { pendingEdits -= 1 }
         do {
             let r: EditResult = try await connection.call(method, p)
-            if method != "scene.remove", let path = r.path, app.document === doc {
+            if app.document === doc { app.layers.followSort(r.reordered) }
+            if selectResult, method != "scene.remove", let path = r.path, app.document === doc {
                 doc.selectedPath = path
                 reveal(path)
                 app.layers.selectionChanged()
@@ -502,7 +526,7 @@ final class SceneEditor {
             Task { await placeAtCursor() }
             return true
         case .char(let c):
-            if k.option || k.shift && !"[]".contains(c) { return false }
+            if k.option || k.shift { return false }
             if let t = StageTool.allCases.first(where: { $0.key == c }) {
                 setTool(t)
                 return true
@@ -512,8 +536,6 @@ final class SceneEditor {
                 if n <= 4 { app.setZoomLevel(index: n - 1); return true }
                 return false
             }
-            if c == "]" { Task { await raise() }; return true }
-            if c == "[" { Task { await lower() }; return true }
             return false
         }
     }

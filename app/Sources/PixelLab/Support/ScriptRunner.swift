@@ -12,9 +12,9 @@ import Foundation
 ///     select <path>|#<id>|none    click <x> <y>           clicktile <col> <row> <level>
 ///     hover <col> <row> <level>   place [<col> <row> <level>]
 ///     drag <dc> <dr> [hold]       dragpx <dx> <dy> [hold] release | cancel
-///     key <spec> (right, opt+up, shift+down, delete, return, esc, v, 2, ])
+///     key <spec> (right, opt+up, shift+down, delete, return, esc, v, 2)
 ///     move <dc> <dr> [<dl>]       nudge <dx> <dy>         set <col|row|level|x|y> <n>
-///     class <text>  id <text>     raise lower duplicate remove snap
+///     class <text>  id <text>     duplicate remove snap
 ///     undo redo save [force] revert publish [<dir>] done   saveas <path.pixellab>
 ///     time <ms>  play  pause  tracks on|off   zoom fit|1-4   sidebar library|items
 ///     search <text>   wait <ms>   snapshot <file.png>   log <text>
@@ -287,8 +287,6 @@ final class ScriptRunner {
                 case .char("z"): if k.shift { await model.redo() } else { await model.undo() }
                 case .char("s"): await model.save()
                 case .char("b"): await model.publish()
-                case .char("]"): await editor.raise()
-                case .char("["): await editor.lower()
                 default: throw Failure("no menu command for \(words[1])")
                 }
                 return nil
@@ -308,8 +306,6 @@ final class ScriptRunner {
         case "id":
             await editor.setID(words.dropFirst().joined(separator: " "))
             return nil
-        case "raise": return try needEdit(await editor.raise())
-        case "lower": return try needEdit(await editor.lower())
         case "duplicate": return try needEdit(await editor.duplicate())
         case "remove": return try needEdit(await editor.remove())
         case "snap": return try needEdit(await editor.snap())

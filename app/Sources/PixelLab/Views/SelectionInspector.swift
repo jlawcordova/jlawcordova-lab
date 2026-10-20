@@ -114,12 +114,6 @@ struct SelectionInspector: View {
     private func actions(_ item: SceneItemInfo, editor: SceneEditor) -> some View {
         VStack(spacing: 6) {
             HStack(spacing: 6) {
-                ActionButton(title: "Raise", symbol: "square.2.layers.3d.top.filled", help: "Paint it one later, in front of the next item (])") {
-                    Task { await editor.raise() }
-                }
-                ActionButton(title: "Lower", symbol: "square.2.layers.3d.bottom.filled", help: "Paint it one earlier, behind the item before it ([)") {
-                    Task { await editor.lower() }
-                }
                 ActionButton(title: "Snap", symbol: "square.grid.3x3.middle.filled", help: "Snap to the level-0 tile under it") {
                     Task { await editor.snap() }
                 }

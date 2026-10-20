@@ -531,6 +531,7 @@ final class AppModel {
                     let r: CheckResult = try await connection.call(
                         "check", ["name": .string(doc.ref.name), "kind": .string(doc.ref.kind.rawValue)])
                     doc.problems = r.problems
+                    doc.warnings = r.warnings ?? []
                     doc.checkedCount = r.checked
                     doc.checkSummary = r.summary
                 } catch {
