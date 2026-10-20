@@ -301,7 +301,8 @@ export function ungroupLayer(doc, ref) {
   else delete doc.layers;
   const parentName = parent === null ? 'the top level' : findLayer(doc, parent).name;
   const n = layers.length + items.length;
-  return { parent, layers, items, message: `Ungrouped ${layer.name}: its ${n} part${n === 1 ? '' : 's'} moved up to ${parentName} and stay where they are` };
+  const parts = n === 1 ? 'its 1 part moved up to' : `its ${n} parts moved up to`;
+  return { parent, layers, items, message: `Ungrouped ${layer.name}: ${parts} ${parentName} and ${n === 1 ? 'stays where it is' : 'stay where they are'}` };
 }
 
 /**

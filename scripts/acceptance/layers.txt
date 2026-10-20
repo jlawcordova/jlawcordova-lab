@@ -105,7 +105,15 @@ inside done
 expect inside none
 expect selection layer:group-2
 expect faded false
-# R10: dragging the selection moves it by whole tiles, one undo step; so do the keys and nudges
+# R10: dragging the selection moves it by whole tiles, one undo step; so do the keys and nudges.
+# First a real drag (mouse events into the stage), then the hook's.
+mouse down 180 43
+mouse drag 196 51
+mouse drag 212 59
+mouse up 212 59
+expect movedby 2,0
+undo
+expect movedby 0,0
 drag 1 0
 expect movedby 1,0
 undo
@@ -133,6 +141,8 @@ expect scenepixel -130,-28 empty
 click -130 -28
 expect selection none
 open scene:footer-grass
+expect hiddenlayers none
+expect lockedlayers none
 open scene:hero-island
 expect hiddenlayers group-3
 expect scenepixel -130,-28 empty
@@ -141,6 +151,7 @@ expect scenepixel -130,-28 #F4EDE0
 # R11: a locked layer can't be picked on the stage, except from inside it
 lock Railway
 click 180 43
+expect inspector item
 expect itemlayer none
 inside Railway
 click 180 43

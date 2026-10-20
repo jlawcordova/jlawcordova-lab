@@ -13,7 +13,9 @@
 - `cli/lib/render.mjs`: `flattenItems` adds `layer` and `layers`; `renderSceneImage` takes `hide` and `focus`.
 - `cli/lib/registry.mjs`: the new command file.
 - `cli/lib/server-mcp.mjs`: instructions name the layer tools.
-- `cli/test/layers.test.mjs` (new): R1–R5.
+- `cli/lib/merge.mjs`, `cli/lib/session.mjs` (as built, after the independent review): `foldScene()` folds both sides' first `layers` lists in a merge; `Session.merge` refuses a clash or a merge that adds problems.
+- `cli/README.md`: the new module and command file.
+- `cli/test/layers.test.mjs` (new): R1–R5. `cli/test/merge.test.mjs`: `foldScene`. `cli/test/help.test.mjs`, `cli/test/params.test.mjs`: the command counts and lists.
 - `docs/cli.md` (generated).
 
 **PR 2, the app (`feat/scene-layers-app`)**
@@ -32,6 +34,7 @@
 - `app/Sources/PixelLab/Views/StageInput.swift`: right-click, ⇧ and double-click.
 - `app/Sources/PixelLab/Views/SelectionInspector.swift`, `InspectorView.swift`: the item's layer line and wrapper line; which inspector shows.
 - `app/Sources/PixelLab/PixelLabApp.swift`: Edit › Group ⌘G, Ungroup ⇧⌘G.
+- `app/Sources/PixelLab/Views/MainWindow.swift`: the layer menu's overlay over the window, and `AccentButtonStyle(height:)` for the pill's Done.
 - `app/Sources/PixelLab/Support/ScriptRunner.swift`: D14's actions and expects.
 - `app/Tests/PixelLabTests/LayerTests.swift` (new): the tree, picking, targets, rows and keys, Moved by.
 - `scripts/acceptance/layers.txt` (new), `scripts/acceptance.sh`: the layers pass and its byte-identity check.
@@ -74,6 +77,8 @@ main ── feat/scene-layers ─ (intent, spec, plan) ────────�
 - `StageTests`' test of the old Items tree's rows (`TreeRow`, which is gone) is replaced by `LayerTests`' rows, wrapper and paint-order tests.
 - Found while building: a timeline frame cached before a scene's hidden layers were known kept showing them, so `LayersModel.itemsChanged` clears the cache when the render's `hide`/`focus` change; inspector notes use line limits and layout priority, not `fixedSize`, which inflated the window's minimum height; the sidebar takes a scroll request so the hook can bring a row into view before its real right-click; `layers.txt` closes the Publish sheet (`done`) after each publish, since a sheet keeps real events from the window.
 - The Place inspector also says where the item goes ("into Railway"), as D13 asks.
+- `scene.place --layer` sets the layer in `scene-edit.mjs` (with `layer-ops.mjs`'s `setItemLayer`) after `scene-ops.mjs` places the item, rather than inside `place` and `placeInGroup`.
+- After the `verify-change` run on #20: a three-way merge where both sides made a scene's first layers kept only one list, so `foldScene` folds them and `Session.merge` refuses a clash or a merge that adds problems (D1, with tests); the sidebar now gives the scene list, and the Layers tree or the Library grid, scroll areas of their own (D11), with LAYERS, LIBRARY and the chip pinned; `layers.txt` checks what a locked layer's click picks (`expect inspector item`), that another scene has no hidden or locked layers, and a real mouse drag; `expect menu` says `closed` when no menu is open; the tree's Esc clears the selection before leaving, as the stage does (R9; the spec's D11 said otherwise).
 
 ## Workflow and reviews
 

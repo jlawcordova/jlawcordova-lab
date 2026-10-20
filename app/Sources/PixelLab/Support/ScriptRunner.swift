@@ -36,7 +36,7 @@ import Foundation
 ///     (move, drag and the arrow keys act on the whole selection)
 ///     expect selection <targets,…|none>   expect inside|layername|itemlayer|hover <id|none>   expect scenelayers|rows <n>
 ///     expect hiddenlayers|lockedlayers <ids,…|none>   expect into <name>   expect crumbs <a›b>   expect movedby <c,r|none>
-///     expect menu <enabled items,…|none>   expect tab layers|library   expect inspector layer|item|multi|none   expect faded true|false
+///     expect menu <enabled items,…|none|closed>   expect tab layers|library   expect inspector layer|item|multi|none   expect faded true|false
 ///
 /// Object mode (pixels are object.render pixels at scale 1: a sprite's map
 /// column and row, a block's render pixel):
@@ -690,7 +690,12 @@ final class ScriptRunner {
             guard let action = LayerMenuAction(rawValue: which) else { throw Failure("menu group|ungroup|inside|hide|lock|close") }
             guard layers.menuItems.first(where: { $0.action == action })?.enabled == true else { throw Failure("\(which) is off in the menu") }
             await layers.perform(action)
-            return model.lastEdit.map { "\($0); \(selection())" } ?? selection()
+            switch action {
+            case .group, .ungroup: return model.lastEdit.map { "\($0); \(selection())" } ?? selection()
+            default:
+                let set = { (s: Set<String>) in s.isEmpty ? "none" : s.sorted().joined(separator: ",") }
+                return "\(selection()); inside \(layers.inside ?? "none"); hidden \(set(layers.hidden)); locked \(set(layers.locked))"
+            }
         case "group":
             guard await layers.group() != nil else { throw Failure(model.notice ?? "nothing grouped") }
             return model.lastEdit
@@ -772,7 +777,7 @@ final class ScriptRunner {
         case "crumbs": return layers.crumbs.map(\.label).joined(separator: "›")
         case "rows": return String(layers.visibleRows(query: model.searchText.trimmingCharacters(in: .whitespaces).lowercased()).count)
         case "movedby": return layers.movedBy.map { "\($0.col),\($0.row)" } ?? "none"
-        case "menu": return layers.menu == nil ? "none" : list(layers.menuItems.filter(\.enabled).map(\.title))
+        case "menu": return layers.menu == nil ? "closed" : list(layers.menuItems.filter(\.enabled).map(\.title))
         case "tab": return model.editor.sidebarTab.rawValue
         case "inspector":
             guard let doc else { return "none" }
