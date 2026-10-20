@@ -6,6 +6,7 @@
 
 import { CommandError, NotFoundError, UsageError } from '../errors.mjs';
 import { pathString } from '../render.mjs';
+import * as layerOps from '../layer-ops.mjs';
 import * as ops from '../scene-ops.mjs';
 import { atMostOne, editOf, formatChange, needOne } from './common.mjs';
 
@@ -95,7 +96,8 @@ const place = {
     '--group puts it inside an existing group (the group\'s path, or an item inside it); --new-group wraps it in a new group with those attributes ' +
     '(class and data-*, like {"class": "enter", "data-enter": "object"}), and --foot sets that group\'s data-x and data-y to the item\'s foot. ' +
     '--index is its position in the list it goes into (0 is the back); by default an item on a tile goes back to front there ' +
-    '(a new group judged by its first item on a tile) and one placed by pixel goes last. Returns the new item\'s path, and its group\'s.',
+    '(a new group judged by its first item on a tile) and one placed by pixel goes last. --layer puts it in a scene layer (its id or name; ' +
+    'layers are apart from groups and never change paint order). Returns the new item\'s path, and its group\'s.',
   params: {
     type: 'object',
     properties: {
@@ -109,6 +111,7 @@ const place = {
       newGroup: { type: 'object', description: 'attributes of a new group around the item (class, data-*), as JSON on the command line' },
       foot: { type: 'boolean', default: false, description: "with --new-group: set its data-x and data-y to the item's foot" },
       index: { type: 'integer', minimum: 0, description: 'its position in the list it goes into (0 is the back)' },
+      layer: { type: 'string', description: 'a layer of the scene for the new item to join: its id, or its name (scene items lists them)' },
     },
     required: ['name', 'object'],
   },
@@ -118,6 +121,7 @@ const place = {
     'pixellab scene place hero-island pine --at 14,6,1',
     'pixellab scene place range-sprite boxes --px 40,12 --dry-run',
     'pixellab scene place hero-island crate --at 3,1,1 --new-group \'{"class": "enter", "data-enter": "object"}\' --foot',
+    'pixellab scene place hero-island pine --at 3,1,1 --layer railway',
   ],
   async run(ctx, params) {
     atMostOne(params, ['at', 'px'], 'scene.place');
@@ -125,6 +129,7 @@ const place = {
     const name = await sceneName(ctx, params.name);
     if (!(await ctx.names('object')).includes(params.object)) throw new NotFoundError(`no object named ${params.object} (pixellab object list)`);
     return editOf(ctx)({ kind: 'scene', name }, async (/** @type {any} */ doc) => {
+      const layer = params.layer === undefined ? null : layerOps.findLayer(doc, params.layer);
       let at = params.px ? { px: params.px } : params.at ? { tile: params.at } : null;
       if (!at) {
         // SceneMode/Lab.open: the cursor starts on the tile at the middle of the view.
@@ -145,13 +150,14 @@ const place = {
       } else r = ops.place(doc, params.object, at);
       if (params.class) ops.setClass(doc, r.path, params.class);
       if (params.id) ops.setId(ctx.site, doc, r.path, params.id);
+      if (layer) layerOps.setItemLayer(ops.itemAt(doc, r.path), layer.id);
       if (params.foot && r.group) {
         const { sources } = await ctx.sources();
         const [fx, fy] = ops.footOf(ctx.site, sources, ops.itemAt(doc, r.path), doc.origin ?? [0, 0]);
         ops.setGroupAttrs(doc, r.group, { 'data-x': String(fx), 'data-y': String(fy) });
       }
       return {
-        message: r.message,
+        message: layer ? `${r.message} in ${layer.name}` : r.message,
         path: pathString(r.path),
         item: structuredClone(ops.itemAt(doc, r.path)),
         ...(r.group ? { group: { path: pathString(r.group), attrs: { ...ops.itemAt(doc, r.group).group } } } : {}),

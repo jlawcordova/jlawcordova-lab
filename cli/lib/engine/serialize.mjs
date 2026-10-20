@@ -113,6 +113,7 @@ function itemText(item, depth) {
   const parts = [`object: ${str(item.object)}`];
   if (item.id !== undefined) parts.push(`id: ${str(item.id)}`);
   if (item.class !== undefined) parts.push(`class: ${str(item.class)}`);
+  if (item.layer !== undefined) parts.push(`layer: ${str(item.layer)}`);
   const at = 'tile' in item.at ? `{ tile: ${nums(item.at.tile)} }` : `{ px: ${nums(item.at.px)} }`;
   parts.push(`at: ${at}`);
   return `{ ${parts.join(', ')} }`;
@@ -126,6 +127,17 @@ const itemList = (items, depth) =>
   items.length ? `[\n${items.map((i) => `${pad(depth + 1)}${itemText(i, depth + 1)},\n`).join('')}${pad(depth)}]` : '[]';
 
 /**
+ * A scene's layers (docs/intents/2026-10-scene-layers/spec.md, D1), one per
+ * line: id, name, then parent when it has one.
+ * @param {any[]} layers
+ */
+function layerList(layers) {
+  if (!layers.length) return '[]';
+  const one = (/** @type {any} */ l) => `{ id: ${str(l.id)}, name: ${str(l.name)}${l.parent !== undefined ? `, parent: ${str(l.parent)}` : ''} }`;
+  return `[\n${layers.map((l) => `${pad(2)}${one(l)},\n`).join('')}${pad(1)}]`;
+}
+
+/**
  * @param {any} scene
  * @returns {string}
  */
@@ -134,6 +146,7 @@ export function serializeScene(scene) {
   if (scene.output !== undefined) lines.push(`output: ${str(scene.output)}`);
   lines.push(`viewBox: ${nums(scene.viewBox)}`);
   if (scene.origin !== undefined) lines.push(`origin: ${nums(scene.origin)}`);
+  if (scene.layers !== undefined) lines.push(`layers: ${layerList(scene.layers)}`);
   lines.push(`items: ${itemList(scene.items, 1)}`);
   if (scene.motion !== undefined) lines.push(`motion: ${motionText(scene.motion)}`);
   return wrap(SCENE_HEADER, lines);

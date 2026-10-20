@@ -27,6 +27,7 @@ import objectEditCommands from './commands/object-edit.mjs';
 import objectCommands from './commands/object.mjs';
 import proposalCommands from './commands/proposal.mjs';
 import sceneEditCommands from './commands/scene-edit.mjs';
+import sceneLayerCommands from './commands/scene-layers.mjs';
 import sceneMotionCommands from './commands/scene-motion.mjs';
 import sceneCommands from './commands/scene.mjs';
 import documentCommands from './commands/document.mjs';
@@ -130,6 +131,7 @@ export const registry = createRegistry([
   ...documentCommands,
   ...sceneCommands,
   ...sceneEditCommands,
+  ...sceneLayerCommands,
   ...sceneMotionCommands,
   ...objectCommands,
   ...objectEditCommands,

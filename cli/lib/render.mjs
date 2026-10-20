@@ -102,13 +102,51 @@ export function flattenItems(site, scene) {
         at: item?.at,
         ...(item?.class !== undefined ? { class: item.class } : {}),
         ...(item?.id !== undefined ? { id: item.id } : {}),
+        ...(item?.layer !== undefined ? { layer: item.layer } : {}),
         ...(group ? { group } : {}),
         point: placementPoint(site, item ?? {}, origin),
       });
     });
   };
   walk(scene.items, [], undefined);
-  return { items, groups };
+  return { items, groups, layers: layerSummary(scene, items) };
+}
+
+/**
+ * The scene's layers (docs/intents/2026-10-scene-layers/spec.md, D4), each
+ * with how many items are in it or in the layers inside it.
+ * @param {any} scene
+ * @param {{ layer?: string }[]} items
+ */
+function layerSummary(scene, items) {
+  const layers = Array.isArray(scene.layers) ? scene.layers : [];
+  /** @type {Map<string, string | undefined>} */
+  const parents = new Map(layers.map((/** @type {any} */ l) => [l.id, l.parent]));
+  /** @type {Map<string, number>} */
+  const counts = new Map();
+  for (const item of items) {
+    /** @type {Set<string>} */
+    const seen = new Set();
+    for (let l = item.layer; l !== undefined && parents.has(l) && !seen.has(l); l = parents.get(l)) {
+      seen.add(l);
+      counts.set(l, (counts.get(l) ?? 0) + 1);
+    }
+  }
+  return layers.map((/** @type {any} */ l) => ({ id: l.id, name: l.name, ...(l.parent !== undefined ? { parent: l.parent } : {}), items: counts.get(l.id) ?? 0 }));
+}
+
+/**
+ * The scene's items with every placed item for which `hidden(item)` holds
+ * marked hidden (as a moving item away from the stage is), leaving paths alone.
+ * @param {any[]} items
+ * @param {(item: any) => boolean} hidden
+ * @returns {any[]}
+ */
+function hideWhere(items, hidden) {
+  return items.map((item) => {
+    if (item && typeof item === 'object' && 'group' in item) return { ...item, items: hideWhere(item.items ?? [], hidden) };
+    return item && !item.hidden && hidden(item) ? { ...item, hidden: true } : item;
+  });
 }
 
 /** The color name the dark theme's ground pixels get (not a palette name). */
@@ -201,22 +239,31 @@ const toOutput = (/** @type {any} */ box, /** @type {number[]} */ [vx, vy], /** 
  * @param {any} sources
  * @param {string} name
  * With `theme: 'dark'` it draws as the site's dark theme does (darkTheme).
- * @param {{ scale?: number, time?: number, show?: number[] | null, theme?: 'light' | 'dark' }} [options]
+ * `hide` is a set of layer ids whose items aren't drawn or listed; with
+ * `focus` (a set of layer ids) the result adds `focusPng`, the same render
+ * with only those layers' items (docs/intents/2026-10-scene-layers/spec.md, D4).
+ * @param {{ scale?: number, time?: number, show?: number[] | null, theme?: 'light' | 'dark', hide?: Set<string> | null, focus?: Set<string> | null }} [options]
  */
-export function renderSceneImage(site, sources, name, { scale = 1, time = 0, show = null, theme = 'light' } = {}) {
+export function renderSceneImage(site, sources, name, { scale = 1, time = 0, show = null, theme = 'light', hide = null, focus = null } = {}) {
   const { engine, motion: motionLib, preview } = site;
   const scene = sources.scenes.get(name);
   const origin = scene.origin ?? [0, 0];
   const viewBox = scene.viewBox;
   try {
     const { motion, ...still } = scene;
-    const posed = motionLib.poseItems(scene.items ?? [], motion, time, (/** @type {any} */ item) => placementPoint(site, item, origin));
+    let posed = motionLib.poseItems(scene.items ?? [], motion, time, (/** @type {any} */ item) => placementPoint(site, item, origin));
+    if (hide?.size) posed = hideWhere(posed, (item) => item.layer !== undefined && hide.has(item.layer));
     const { kept, leaves } = visibleItems(posed, show);
-    const view = { ...still, items: motionLib.shownItems(kept) };
-    const local = { ...sources, scenes: new Map([[name, view]]) };
-    const { root } = engine.renderScene(local, name);
-    if (theme === 'dark') darkTheme(root);
-    const image = toImage(sources, engine.composite(root, { time }), viewBox, theme === 'dark' ? { [PAGE]: site.theme.darkPage } : {});
+    /** The PNG of these items (trimmed to the shown variants), as the scene draws them. */
+    const paint = (/** @type {any[]} */ shown) => {
+      const view = { ...still, items: motionLib.shownItems(shown) };
+      const local = { ...sources, scenes: new Map([[name, view]]) };
+      const { root } = engine.renderScene(local, name);
+      if (theme === 'dark') darkTheme(root);
+      return toImage(sources, engine.composite(root, { time }), viewBox, theme === 'dark' ? { [PAGE]: site.theme.darkPage } : {});
+    };
+    const image = paint(kept);
+    const focusImage = focus ? paint(hideWhere(kept, (item) => item.layer === undefined || !focus.has(item.layer))) : null;
     /** @type {Map<string, ReturnType<typeof objectPixels>>} */
     const arts = new Map();
     const art = (/** @type {string} */ object) => {
@@ -249,6 +296,7 @@ export function renderSceneImage(site, sources, name, { scale = 1, time = 0, sho
       height: image.height * scale,
       time,
       ...(theme === 'dark' ? { theme } : {}),
+      ...(focusImage ? { focusPng: preview.encodePng(focusImage, scale).toString('base64') } : {}),
       items,
     };
   } catch (err) {

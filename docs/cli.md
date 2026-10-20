@@ -64,6 +64,11 @@
 | [`scene key delete`](#scenekeydelete) | Delete a key of an item's track (not the one at 0: remove the track for that) | edit |
 | [`scene key move`](#scenekeymove) | Move a key of an item's track to another time | edit |
 | [`scene key set`](#scenekeyset) | Set a key of an item's track: its move, show and pose at a time (made if there's no key there) | edit |
+| [`scene layer assign`](#scenelayerassign) | Move items and layers into a layer, or to the top level | edit |
+| [`scene layer move`](#scenelayermove) | Move layers (every item in them, and in the layers inside them) and items by tiles, together | edit |
+| [`scene layer new`](#scenelayernew) | Make a layer (a named, nestable part of a scene) and move items and layers into it | edit |
+| [`scene layer rename`](#scenelayerrename) | Rename a layer | edit |
+| [`scene layer ungroup`](#scenelayerungroup) | Ungroup a layer: what it held moves up one level and stays where it is | edit |
 | [`scene list`](#scenelist) | List every scene | read |
 | [`scene lower`](#scenelower) | Lower an item: paint it one earlier, behind the item before it | edit |
 | [`scene motion path`](#scenemotionpath) | Key an item along a polyline on the grid, at a steady speed or between two times | edit |
@@ -1018,7 +1023,7 @@ List a scene's items in paint order, with stable paths.
 pixellab scene items <name>
 ```
 
-Paths index into the scene's items: "3" is the fourth top-level item, "5.2" the third item inside the group at "5". Each item has its object, at ({ tile: [col, row, level] } or { px: [x, y] }), class, id, enclosing group and placement point in scene pixels.
+Paths index into the scene's items: "3" is the fourth top-level item, "5.2" the third item inside the group at "5". Each item has its object, at ({ tile: [col, row, level] } or { px: [x, y] }), class, id, layer, enclosing group and placement point in scene pixels. layers lists the scene's layers ({ id, name, parent, items }: items counts what is in it and in the layers inside it), in the order the Layers panel shows them.
 
 read-only · MCP tool `scene_items`
 
@@ -1087,6 +1092,125 @@ edits docs · MCP tool `scene_key_set`
 pixellab scene key set hero-island truck-a --time 4200 --move 32,16
 pixellab scene key set hero-island crane-hook --time 9000 --pose crane-hook-down
 pixellab scene key set hero-island parcel --time 12000 --no-show
+```
+
+#### scene.layer.assign
+
+Move items and layers into a layer, or to the top level.
+
+```
+pixellab scene layer assign <name> --to <text> [--items <text,…>] [--layers <text,…>]
+```
+
+--to is the layer ('' for the top level). Items keep their place in the scene (paint order doesn't change); a layer can't go inside itself or a layer within it.
+
+edits docs · MCP tool `scene_layer_assign`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `--to` | string | required | the layer to move them into: its id or name, or '' for the top level |
+| `--items` | list of string |  | items: their paths from scene items (12, 5.2) or ids, comma-separated on the command line |
+| `--layers` | list of string |  | layers: their ids (or names), comma-separated on the command line |
+
+```sh
+pixellab scene layer assign hero-island --to railway --items 150.0,151.0
+pixellab scene layer assign hero-island --to '' --layers train
+```
+
+#### scene.layer.move
+
+Move layers (every item in them, and in the layers inside them) and items by tiles, together.
+
+```
+pixellab scene layer move <name> [layer] [--layers <text,…>] [--items <text,…>] --by <n,…> [--keep-group]
+```
+
+As dragging a selection on the stage: every item moves by --by col,row[,level] tiles (a pixel-placed item by the same screen offset), each once, in one undo step; rapid repeats coalesce. Placements move at rest: an animated item's keys are offsets from its placement, so its motion moves with it. Each item's group keeps its data-x/data-y and data-col/data-row in step, as scene.move does (--no-keep-group leaves them). Paint order doesn't change.
+
+edits docs · MCP tool `scene_layer_move`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `layer` (positional) | string |  | a layer: its id, or its name when only one layer has it (scene items lists them) |
+| `--layers` | list of string |  | layers: their ids (or names), comma-separated on the command line |
+| `--items` | list of string |  | items: their paths from scene items (12, 5.2) or ids, comma-separated on the command line |
+| `--by` | list of integer | required | tiles to move: col,row[,level] |
+| `--keep-group` | boolean | default `true` | keep each item's group attributes in step, as scene.move does |
+
+```sh
+pixellab scene layer move hero-island railway --by 1,0
+pixellab scene layer move hero-island --layers railway,mine --items 12.0 --by 0,-1
+```
+
+#### scene.layer.new
+
+Make a layer (a named, nestable part of a scene) and move items and layers into it.
+
+```
+pixellab scene layer new <name> [--layer-name <text>] [--id <text>] [--items <text,…>] [--layers <text,…>] [--parent <text>]
+```
+
+A layer names part of a scene (the Mine, the Railway, the Train inside it) so it can be selected, moved and placed into as one. It never changes paint order or what is published: items keep their place in the scene, and their { group } wrappers stay as they are. Without --layer-name it is "Group n". Its parent is --parent ('' for the top level), else the deepest layer that holds every member, else the top level. A member already inside another member stays where it is. Its id is made from the name unless --id gives one. Returns the layer, how many items joined it and which layers.
+
+edits docs · MCP tool `scene_layer_new`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `--layer-name` | string |  | the layer's name, 1 to 64 characters (default "Group n") |
+| `--id` | string |  | its id, lowercase kebab-case (default: made from the name) |
+| `--items` | list of string |  | items: their paths from scene items (12, 5.2) or ids, comma-separated on the command line |
+| `--layers` | list of string |  | layers: their ids (or names), comma-separated on the command line |
+| `--parent` | string |  | the layer to make it in ('' for the top level); default: the members' common parent |
+
+```sh
+pixellab scene layer new hero-island --layer-name Railway --items 140.0,141.0,142.0
+pixellab scene layer new hero-island --layer-name Train --items cart --parent railway
+```
+
+#### scene.layer.rename
+
+Rename a layer.
+
+```
+pixellab scene layer rename <name> <layer> <to>
+```
+
+Its id stays the same, so the scene file changes on one line.
+
+edits docs · MCP tool `scene_layer_rename`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `layer` (positional) | string | required | a layer: its id, or its name when only one layer has it (scene items lists them) |
+| `to` (positional) | string | required | the new name, 1 to 64 characters |
+
+```sh
+pixellab scene layer rename hero-island group-1 "Island trees"
+```
+
+#### scene.layer.ungroup
+
+Ungroup a layer: what it held moves up one level and stays where it is.
+
+```
+pixellab scene layer ungroup <name> <layer>
+```
+
+Takes the layer away; its layers and items now belong to its parent (or the top level). Nothing moves on the stage. Returns the parent, and the layers and items (paths) it held.
+
+edits docs · MCP tool `scene_layer_ungroup`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `layer` (positional) | string | required | a layer: its id, or its name when only one layer has it (scene items lists them) |
+
+```sh
+pixellab scene layer ungroup hero-island railway
 ```
 
 #### scene.list
@@ -1203,10 +1327,10 @@ edits docs · MCP tool `scene_new`
 Place an object on a tile (or at a pixel point) in a scene.
 
 ```
-pixellab scene place <name> <object> [--at <n,…>] [--px <n,…>] [--class <text>] [--id <text>] [--group <text>] [--new-group <json>] [--foot] [--index <n>]
+pixellab scene place <name> <object> [--at <n,…>] [--px <n,…>] [--class <text>] [--id <text>] [--group <text>] [--new-group <json>] [--foot] [--index <n>] [--layer <text>]
 ```
 
-Like the lab's Place tool: an item on a tile goes in back-to-front order (by row + col, then level, among the items on tiles), so it paints in front of what's behind it. A pixel placement goes last, in front of everything. With neither --at nor --px, it goes on the level-0 tile at the middle of the view, where the lab's cursor starts. --group puts it inside an existing group (the group's path, or an item inside it); --new-group wraps it in a new group with those attributes (class and data-*, like {"class": "enter", "data-enter": "object"}), and --foot sets that group's data-x and data-y to the item's foot. --index is its position in the list it goes into (0 is the back); by default an item on a tile goes back to front there (a new group judged by its first item on a tile) and one placed by pixel goes last. Returns the new item's path, and its group's.
+Like the lab's Place tool: an item on a tile goes in back-to-front order (by row + col, then level, among the items on tiles), so it paints in front of what's behind it. A pixel placement goes last, in front of everything. With neither --at nor --px, it goes on the level-0 tile at the middle of the view, where the lab's cursor starts. --group puts it inside an existing group (the group's path, or an item inside it); --new-group wraps it in a new group with those attributes (class and data-*, like {"class": "enter", "data-enter": "object"}), and --foot sets that group's data-x and data-y to the item's foot. --index is its position in the list it goes into (0 is the back); by default an item on a tile goes back to front there (a new group judged by its first item on a tile) and one placed by pixel goes last. --layer puts it in a scene layer (its id or name; layers are apart from groups and never change paint order). Returns the new item's path, and its group's.
 
 edits docs · MCP tool `scene_place`
 
@@ -1222,11 +1346,13 @@ edits docs · MCP tool `scene_place`
 | `--new-group` | object |  | attributes of a new group around the item (class, data-*), as JSON on the command line |
 | `--foot` | boolean | default `false` | with --new-group: set its data-x and data-y to the item's foot |
 | `--index` | integer |  | its position in the list it goes into (0 is the back) (at least 0) |
+| `--layer` | string |  | a layer of the scene for the new item to join: its id, or its name (scene items lists them) |
 
 ```sh
 pixellab scene place hero-island pine --at 14,6,1
 pixellab scene place range-sprite boxes --px 40,12 --dry-run
 pixellab scene place hero-island crate --at 3,1,1 --new-group '{"class": "enter", "data-enter": "object"}' --foot
+pixellab scene place hero-island pine --at 3,1,1 --layer railway
 ```
 
 #### scene.raise
@@ -1266,10 +1392,10 @@ edits docs · MCP tool `scene_remove`
 Render a scene to a transparent PNG, with item bounds.
 
 ```
-pixellab scene render <name> [--scale <n>] [--time <n>] [--theme <light|dark>] [--show <text>] [--out <file.png>]
+pixellab scene render <name> [--scale <n>] [--time <n>] [--theme <light|dark>] [--show <text>] [--hide <text,…>] [--focus <text>] [--out <file.png>]
 ```
 
-Returns { png (base64), scale, viewBox, width, height, time, items: [{ path, object, at, id, bounds: [x, y, w, h] }] }. Bounds are in output pixels (scale included), for hit-testing. Of each run of data-class variant groups only the first shows, or the one holding --show. On the command line, --out <file.png> writes the PNG.
+Returns { png (base64), scale, viewBox, width, height, time, items: [{ path, object, at, id, bounds: [x, y, w, h] }] }. Bounds are in output pixels (scale included), for hit-testing. Of each run of data-class variant groups only the first shows, or the one holding --show. --hide leaves out the items in those layers (and the layers inside them), as hiding them in Pixel Lab does; --focus adds focusPng, the same render with only that layer's items. On the command line, --out <file.png> writes the PNG.
 
 read-only · MCP tool `scene_render`
 
@@ -1280,6 +1406,8 @@ read-only · MCP tool `scene_render`
 | `--time` | integer |  | ms into the animation: frame loops and motion tracks (default 0, the rest frame) (at least 0) |
 | `--theme` | `light` \| `dark` | default `"light"` | dark draws as the site's dark theme: the hero island's drop shadow (data-enter="shadow") takes the dark page color |
 | `--show` | string |  | an item path whose variant group to show, like 12.0 |
+| `--hide` | list of string |  | layers (ids or names) whose items are left out |
+| `--focus` | string |  | a layer: the result adds focusPng, the render of only its items (and those of the layers inside it) |
 
 ```sh
 pixellab scene render hero-island --scale 2 --out /tmp/hero.png
