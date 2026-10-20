@@ -480,9 +480,11 @@ final class AppModel {
         Task {
             repeat {
                 doc.needsItems = false
+                // Taken as it's sent: an edit that comes back later makes this list one from before it.
+                let stamp = doc.itemsStamp(editsPending: editor.pendingEdits)
                 do {
                     let r: SceneItemsResult = try await connection.call("scene.items", ["name": .string(doc.ref.name)])
-                    doc.setItems(r)
+                    doc.setItems(r, asOf: stamp)
                     if document === doc { layers.itemsChanged() }
                     thumbnails.prefetch(r.items.map(\.object))
                 } catch {
@@ -499,8 +501,9 @@ final class AppModel {
     /// made can be selected at once (an earlier `requestItems` may still be in flight).
     func reloadItems() async {
         guard let doc = document, doc.ref.kind == .scene, let connection else { return }
+        let stamp = doc.itemsStamp(editsPending: editor.pendingEdits)
         if let r: SceneItemsResult = try? await connection.call("scene.items", ["name": .string(doc.ref.name)]), document === doc {
-            doc.setItems(r)
+            doc.setItems(r, asOf: stamp)
             layers.itemsChanged()
         }
     }
@@ -770,6 +773,9 @@ final class AppModel {
 
     private func docCommand(_ method: String) async {
         guard let doc = document, let connection else { return }
+        // On its way like an edit: items listed meanwhile may hold the paths from before it.
+        editor.pendingEdits += 1
+        defer { editor.pendingEdits -= 1 }
         do {
             let r: UndoResult = try await connection.call(method, ["doc": .string(doc.ref.id)])
             doc.status = DocStatus(doc: r.doc, dirty: r.dirty, canUndo: r.canUndo, canRedo: r.canRedo)
