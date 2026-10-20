@@ -129,7 +129,8 @@ export default [
       'Reloads when the working copy has no edits its file lacks: it is clean, or it matches the file (as after its proposal was applied). ' +
       "Refuses with code dirty (details: the edits that would be lost) when there are unsaved edits, and with code proposed while its proposal waits for the owner. " +
       'Returns { doc, reloaded, changed, summary, dirty, canUndo, canRedo }; reloaded is false when the doc already matched the file. ' +
-      'doc.revert is the one that drops edits.',
+      'A scene whose file is not in depth order (a hand edit) is sorted as a step of its own: the result has sorted (how many items moved), the doc is then unsaved, ' +
+      'and one undo gives back exactly the file. doc.revert is the one that drops edits.',
     params: docParams(),
     args: ['doc'],
     mutates: true,
@@ -146,7 +147,8 @@ export default [
     description:
       'A three-way line merge: the file as the doc was opened or last saved, the file now, and the working copy. One undo step; the doc stays dirty with its own edits. ' +
       'A doc with no unsaved edits just reloads. When both sides changed the same lines it refuses with code merge_conflict ' +
-      '(details: [{ base: [from, to], ours: [lines], theirs: [lines] }]) and changes nothing. Returns { doc, merged, changed, summary, dirty, canUndo, canRedo }.',
+      '(details: [{ base: [from, to], ours: [lines], theirs: [lines] }]) and changes nothing. The merged scene is put in depth order, in the same step ' +
+      '(a line merge cannot judge overlaps): sorted says how many items moved. Returns { doc, merged, changed, summary, dirty, canUndo, canRedo, sorted? }.',
     params: docParams(),
     args: ['doc'],
     mutates: true,

@@ -35,6 +35,7 @@
 | [`object animate`](#objectanimate) | Turn a still layer into one of the site's frame loops, or switch a loop's kind | edit |
 | [`object erase`](#objecterase) | Erase pixels of an object (make them transparent), on a layer and frame | edit |
 | [`object fill`](#objectfill) | Flood-fill from a pixel with a palette color, on a layer and frame | edit |
+| [`object footprint`](#objectfootprint) | Set how many tiles a sprite covers (--to w,d), or clear it (--clear) | edit |
 | [`object frame add`](#objectframeadd) | Add a blank frame after a frame of a layer's loop | edit |
 | [`object frame delete`](#objectframedelete) | Delete a frame of a loop (not the only one) | edit |
 | [`object frame duplicate`](#objectframeduplicate) | Duplicate a frame of a loop, just after it | edit |
@@ -50,7 +51,7 @@
 | [`object pick`](#objectpick) | The color at a pixel of an object, on a layer and frame (the Picker) | read |
 | [`object render`](#objectrender) | Render one object to a transparent PNG | read |
 | [`object resize`](#objectresize) | Pad or crop a sprite's maps to a width and height (at the right and bottom) | edit |
-| [`object show`](#objectshow) | Show an object's kind, size, anchor, layers, frames, colors and extends | read |
+| [`object show`](#objectshow) | Show an object's kind, size, anchor, footprint, layers, frames, colors and extends | read |
 | [`object still`](#objectstill) | Turn a frame loop back into a still layer, keeping one frame | edit |
 | [`palette get`](#paletteget) | List the palette: every color name, hex and tier | read |
 | [`proposal apply`](#proposalapply) | Apply a proposal: check its base, validate it, write the doc's source and remove the proposal | writes files |
@@ -60,7 +61,7 @@
 | [`proposal show`](#proposalshow) | Show a proposal: its edits, the source, and a diff from the file as it is now | read |
 | [`scene duplicate`](#sceneduplicate) | Duplicate an item one column over, where the copy stands in depth order | edit |
 | [`scene group set`](#scenegroupset) | Set or remove a group's class and data attributes, or set its data-x and data-y to its first item's foot | edit |
-| [`scene items`](#sceneitems) | List a scene's items in paint order, with stable paths | read |
+| [`scene items`](#sceneitems) | List a scene's items in depth order (back to front), with stable paths | read |
 | [`scene key delete`](#scenekeydelete) | Delete a key of an item's track (not the one at 0: remove the track for that) | edit |
 | [`scene key move`](#scenekeymove) | Move a key of an item's track to another time | edit |
 | [`scene key set`](#scenekeyset) | Set a key of an item's track: its move, show and pose at a time (made if there's no key there) | edit |
@@ -333,7 +334,7 @@ Merge the changes to a doc's file on disk into its working copy, keeping the uns
 pixellab doc merge <doc>
 ```
 
-A three-way line merge: the file as the doc was opened or last saved, the file now, and the working copy. One undo step; the doc stays dirty with its own edits. A doc with no unsaved edits just reloads. When both sides changed the same lines it refuses with code merge_conflict (details: [{ base: [from, to], ours: [lines], theirs: [lines] }]) and changes nothing. Returns { doc, merged, changed, summary, dirty, canUndo, canRedo }.
+A three-way line merge: the file as the doc was opened or last saved, the file now, and the working copy. One undo step; the doc stays dirty with its own edits. A doc with no unsaved edits just reloads. When both sides changed the same lines it refuses with code merge_conflict (details: [{ base: [from, to], ours: [lines], theirs: [lines] }]) and changes nothing. The merged scene is put in depth order, in the same step (a line merge cannot judge overlaps): sorted says how many items moved. Returns { doc, merged, changed, summary, dirty, canUndo, canRedo, sorted? }.
 
 edits docs · session only (`serve`) · MCP tool `doc_merge`
 
@@ -379,7 +380,7 @@ Load an open doc from disk again, only if no unsaved work is lost.
 pixellab doc reload <doc>
 ```
 
-Reloads when the working copy has no edits its file lacks: it is clean, or it matches the file (as after its proposal was applied). Refuses with code dirty (details: the edits that would be lost) when there are unsaved edits, and with code proposed while its proposal waits for the owner. Returns { doc, reloaded, changed, summary, dirty, canUndo, canRedo }; reloaded is false when the doc already matched the file. doc.revert is the one that drops edits.
+Reloads when the working copy has no edits its file lacks: it is clean, or it matches the file (as after its proposal was applied). Refuses with code dirty (details: the edits that would be lost) when there are unsaved edits, and with code proposed while its proposal waits for the owner. Returns { doc, reloaded, changed, summary, dirty, canUndo, canRedo }; reloaded is false when the doc already matched the file. A scene whose file is not in depth order (a hand edit) is sorted as a step of its own: the result has sorted (how many items moved), the doc is then unsaved, and one undo gives back exactly the file. doc.revert is the one that drops edits.
 
 edits docs · session only (`serve`) · MCP tool `doc_reload`
 
@@ -567,6 +568,29 @@ edits docs · MCP tool `object_fill`
 pixellab object fill pine --x 3 --y 4 --color grass-1
 ```
 
+#### object.footprint
+
+Set how many tiles a sprite covers (--to w,d), or clear it (--clear).
+
+```
+pixellab object footprint <name> [--to <n,…>] [--clear]
+```
+
+A sprite sorts against its neighbours in depth order by the ground it covers: a footprint of [wide, deep] tiles from the tile it's placed on, so a house, a locomotive or the crane mast go in front of and behind things by the tiles under them. The default is 1,1. A block's size is its footprint, so blocks refuse this. An object that extends another has the other's footprint unless it sets its own. The scenes that use it are put in order again at their next edit; check warns until then (scene.sort does it now).
+
+edits docs · MCP tool `object_footprint`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | object name (or objects/<name>) |
+| `--to` | list of integer |  | tiles wide and deep: w,d (1 to 16 each) |
+| `--clear` | boolean | default `false` | take the footprint off (a sprite then covers 1,1, or what it extends) |
+
+```sh
+pixellab object footprint house --to 2,2
+pixellab object footprint house --clear
+```
+
 #### object.frame.add
 
 Add a blank frame after a frame of a layer's loop.
@@ -736,10 +760,10 @@ pixellab object map set pebble .gg. gwwg gwwg .gg. --keys '{"g": "grass-2", "w":
 Make a new object from a starter: a blank sprite, a block, or one that extends another.
 
 ```
-pixellab object new <name> [--kind <sprite|block>] [--extends <text>] [--width <n>] [--height <n>]
+pixellab object new <name> [--kind <sprite|block>] [--extends <text>] [--width <n>] [--height <n>] [--footprint <n,…>]
 ```
 
-The same starters as the lab's New dialog and `npm run art -- --new` (starter.mjs): a sprite of --width × --height (16×16 by default) anchored at its bottom center, a one-level grass block, or an object that --extends another with no rows overridden yet.
+The same starters as the lab's New dialog and `npm run art -- --new` (starter.mjs): a sprite of --width × --height (16×16 by default) anchored at its bottom center (--footprint says how many tiles it covers, 1,1 unless given), a one-level grass block, or an object that --extends another with no rows overridden yet.
 
 edits docs · MCP tool `object_new`
 
@@ -750,9 +774,11 @@ edits docs · MCP tool `object_new`
 | `--extends` | string |  | the object it extends (a sprite, such as character) |
 | `--width` | integer |  | a new sprite's width (default 16) (1 to 64) |
 | `--height` | integer |  | a new sprite's height (default 16) (1 to 64) |
+| `--footprint` | list of integer |  | the tiles a new sprite covers, for depth order: w,d (default 1,1) |
 
 ```sh
 pixellab object new small-rock --width 12 --height 8
+pixellab object new shed --width 40 --height 32 --footprint 2,1
 pixellab object new tile-sand --kind block
 pixellab object new range-hat --extends character
 ```
@@ -844,7 +870,7 @@ edits docs · MCP tool `object_resize`
 
 #### object.show
 
-Show an object's kind, size, anchor, layers, frames, colors and extends.
+Show an object's kind, size, anchor, footprint, layers, frames, colors and extends.
 
 ```
 pixellab object show <name> [--doc]
@@ -1016,13 +1042,13 @@ pixellab scene group set hero-island truck-a --attrs '{"data-enter": "object"}'
 
 #### scene.items
 
-List a scene's items in paint order, with stable paths.
+List a scene's items in depth order (back to front), with stable paths.
 
 ```
 pixellab scene items <name>
 ```
 
-Paths index into the scene's items: "3" is the fourth top-level item, "5.2" the third item inside the group at "5". Each item has its object, at ({ tile: [col, row, level] } or { px: [x, y] }), class, id, layer, enclosing group and placement point in scene pixels. layers lists the scene's layers ({ id, name, parent, items }: items counts what is in it and in the layers inside it), in the order the Layers panel shows them.
+Paths index into the scene's items: "3" is the fourth top-level item, "5.2" the third item inside the group at "5". The list is in depth order (every edit keeps it so; scene.sort fixes a file that isn't): back to front, by where each item stands. Each item has its object, at ({ tile: [col, row, level] } or { px: [x, y], level? }), level (a pixel item's, 0 unless it says), depth (front or back, when it has the override), class, id, layer, enclosing group and placement point in scene pixels. A group in groups has its path, attrs, item count and depth. layers lists the scene's layers ({ id, name, parent, items }: items counts what is in it and in the layers inside it), in the order the Layers panel shows them.
 
 read-only · MCP tool `scene_items`
 
