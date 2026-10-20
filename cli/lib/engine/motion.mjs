@@ -166,7 +166,7 @@ export function stateAt(track, object, duration, time) {
 /**
  * The scene's items as they stand at `time`: each tracked item placed by px
  * at its moved point, drawing its pose, and marked `hidden` while it doesn't
- * show. Untracked items are returned as they are.
+ * show, at the level it stands on. Untracked items are returned as they are.
  * @param {any[]} items
  * @param {Motion | undefined} motion
  * @param {number} time
@@ -183,7 +183,9 @@ export function poseItems(items, motion, time, pointOf) {
       if (!track) return item;
       const { move, show, pose } = stateAt(track, item.object, motion.duration, time);
       const [x, y] = pointOf(item);
-      return { ...item, object: pose, at: { px: [x + move[0], y + move[1]] }, ...(show ? {} : { hidden: true }) };
+      // A tracked item stands at the level it was placed at, a tile's third number or the pixel point's level.
+      const level = item.at?.tile ? item.at.tile[2] : (item.at?.level ?? 0);
+      return { ...item, object: pose, at: { px: [x + move[0], y + move[1]], ...(level ? { level } : {}) }, ...(show ? {} : { hidden: true }) };
     });
   return walk(items);
 }
@@ -200,11 +202,18 @@ export function shownItems(items) {
 }
 
 const px = (/** @type {number} */ v) => (v === 0 ? '0' : `${v}px`);
-const pct = (/** @type {number} */ t, /** @type {number} */ duration) => `${+((t / duration) * 100).toFixed(3)}%`;
+/** A key's place in the loop as a percentage, rounded to 3 decimals as the CSS writes it. */
+export const pctOf = (/** @type {number} */ t, /** @type {number} */ duration) => +((t / duration) * 100).toFixed(3);
+const pct = (/** @type {number} */ t, /** @type {number} */ duration) => `${pctOf(t, duration)}%`;
 
-/** The CSS class of a tracked item's group, and of each of its poses. */
+/**
+ * The CSS class of a tracked item's group, of each of its poses, and of each
+ * copy of it that an item drawn in several places of the depth order has
+ * (depth.mjs, placeWindows): `z0` is the copy that shows at time 0.
+ */
 export const motionClass = (/** @type {string} */ id) => `mv-${id}`;
 export const poseClass = (/** @type {string} */ id, /** @type {number} */ k) => `mv-${id}-${k}`;
+export const copyClass = (/** @type {string} */ id, /** @type {number} */ k) => `mv-${id}-z${k}`;
 
 /**
  * The poses a track uses, the item's own object first.
@@ -218,15 +227,105 @@ export function posesOf(track, object) {
 }
 
 /**
+ * Whether a track moves its item (some key's move differs from the first's).
+ * Only a moving item changes where it stands, and so its place in the depth
+ * order; show and pose keys don't.
+ * @param {Track} track
+ * @param {string} object
+ */
+export function isMoving(track, object) {
+  const keys = filledKeys(track, object);
+  return keys.some((k) => k.move[0] !== keys[0].move[0] || k.move[1] !== keys[0].move[1]);
+}
+
+/**
+ * Where a track's item is over the loop, as the CSS plays it: the moves it
+ * takes, each from a percentage of the loop on (the first at 0). Between two
+ * keys the CSS steps with steps(n, end) from the first key's percentage to the
+ * second's, both rounded as motionCss writes them, so step k (of n) begins at
+ * from + (to - from) × k / n. Keys that round to one percentage make no step.
+ * @param {Track} track
+ * @param {string} object
+ * @param {number} duration
+ * @returns {{ at: number, move: [number, number] }[]}
+ */
+export function moveRuns(track, object, duration) {
+  const keys = filledKeys(track, object);
+  const all = [...keys, { ...keys[0], t: duration }];
+  /** @type {{ at: number, move: [number, number] }[]} */
+  const runs = [];
+  const start = (/** @type {number} */ at, /** @type {[number, number]} */ move) => {
+    const last = runs[runs.length - 1];
+    if (!last || last.move[0] !== move[0] || last.move[1] !== move[1]) runs.push({ at, move });
+  };
+  all.forEach((key, i) => {
+    const next = all[i + 1];
+    if (!next) return;
+    const [from, to] = [pctOf(key.t, duration), pctOf(next.t, duration)];
+    if (to <= from) return;
+    const [dx, dy] = [next.move[0] - key.move[0], next.move[1] - key.move[1]];
+    const n = stepsFor(dx, dy);
+    if (n === 0) return start(from, key.move);
+    for (let k = 0; k < n; k++) start(from + ((to - from) * k) / n, [key.move[0] + (dx / n) * k, key.move[1] + (dy / n) * k]);
+  });
+  return runs;
+}
+
+/**
+ * The move a run list gives at percentage `p` of the loop: the last run begun by then.
+ * @param {{ at: number, move: [number, number] }[]} runs
+ * @param {number} p
+ * @returns {[number, number]}
+ */
+export function moveAtPercent(runs, p) {
+  let found = runs[0];
+  for (const run of runs) {
+    if (run.at > p) break;
+    found = run;
+  }
+  return found.move;
+}
+
+/**
+ * The opacity keyframe stops that show a copy in its windows ([from, to) as
+ * percentages of the loop) and hide it elsewhere, written with 4 decimals.
+ * Stops that round to one percentage collapse into the later one.
+ * @param {[number, number][]} windows
+ * @returns {{ at: number, on: boolean }[]}
+ */
+function copyStops(windows) {
+  const round = (/** @type {number} */ v) => +v.toFixed(4);
+  /** @type {{ at: number, on: boolean }[]} */
+  const stops = [{ at: 0, on: windows[0][0] <= 0 }];
+  /** @type {(at: number, on: boolean) => void} */
+  const stop = (at, on) => {
+    const last = stops[stops.length - 1];
+    if (last.at === at) last.on = on;
+    else if (last.on !== on) stops.push({ at, on });
+    if (stops.length > 1 && stops[stops.length - 1].on === stops[stops.length - 2].on) stops.pop();
+  };
+  for (const [from, to] of windows) {
+    if (round(from) > 0) stop(round(from), true);
+    if (round(to) < 100) stop(round(to), false);
+  }
+  return stops;
+}
+
+/**
  * The CSS that plays a scene's motion: per track, a transform animation that
  * steps between keys (relative to the rest frame, which the art is drawn
  * at), an opacity animation for show, and one per pose. The base rules hold
  * the rest frame, so reduced motion, which turns every animation off, shows
- * time 0.
+ * time 0. An item that takes several places in the depth order is drawn once
+ * per place, each copy in a wrapper whose opacity shows it only in the
+ * windows of the loop (`copies`, from depth.mjs placeWindows) in which the
+ * item is in that place; its stops switch at the same instants the item's
+ * steps do. The copy holding time 0 is visible in the base rule.
  * @param {Motion} motion
  * @param {Map<string, any>} ids  items by id
+ * @param {Map<string, { windows: [number, number][] }[]>} [copies]  each item's copies, where it has several
  */
-export function motionCss(motion, ids) {
+export function motionCss(motion, ids, copies = new Map()) {
   const { duration } = motion;
   const rules = [];
   const run = (/** @type {string} */ name, /** @type {string} */ timing) => `animation:${name} ${duration}ms ${timing} infinite`;
@@ -264,6 +363,12 @@ export function motionCss(motion, ids) {
         rules.push(`.${name}{${keys[0].pose === pose ? '' : 'opacity:0;'}${run(name, 'step-end')}}`);
       });
     }
+    copies.get(track.item)?.forEach((copy, k) => {
+      const name = copyClass(track.item, k);
+      const frames = copyStops(copy.windows).map(({ at, on }) => `${at}%{opacity:${on ? 1 : 0}}`);
+      rules.push(`@keyframes ${name}{${frames.join('')}}`);
+      rules.push(`.${name}{${k === 0 ? '' : 'opacity:0;'}${run(name, 'step-end')}}`);
+    });
   }
   if (rules.length === 0) return '';
   rules.push('@media (prefers-reduced-motion:reduce){[class^="mv-"],[class*=" mv-"]{animation:none}}');

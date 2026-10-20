@@ -192,3 +192,148 @@ function sortBand(nodes, members) {
   }
   return order;
 }
+
+// --------------------------------------------------------------- while moving
+
+/**
+ * Prepares the order of one list while some of its items move (spec D6).
+ * `nodes` are the list's nodes in the order sortNodes put them at rest; the
+ * moving ones are flagged `moving`, and every other one is still. The still
+ * nodes keep that one order for the whole loop: each must come after the
+ * still node before it, besides the usual "behind" pairs. The result gives,
+ * for the current node of each moving one (by index, with the box and pixel
+ * bounds it has at that instant), the order at that instant: the same greedy
+ * sort as sortNodes, which takes the first listed node that nothing unplaced
+ * is behind. A cycle is broken by the smallest key among the nodes that the
+ * still chain doesn't hold back. With nothing moved from rest, the order is
+ * the rest order, so time 0 draws what the rest sort draws.
+ * @param {(Node & { moving?: boolean })[]} nodes
+ * @returns {(current: Map<number, Node>) => number[]}
+ */
+export function movingOrder(nodes) {
+  const bands = /** @type {const} */ (['back', undefined, 'front']).map((band) => {
+    const members = nodes.flatMap((node, i) => (node.depth === band ? [i] : []));
+    const stills = members.filter((i) => !nodes[i].moving);
+    const movers = members.filter((i) => nodes[i].moving);
+    /** The unplaced "behind" pairs among still nodes never change, so they're counted once. */
+    const waiting = new Map(members.map((i) => [i, 0]));
+    /** @type {Map<number, number[]>} */
+    const after = new Map(members.map((i) => [i, []]));
+    for (let a = 0; a < stills.length; a++) {
+      for (let b = a + 1; b < stills.length; b++) {
+        const [i, j] = [stills[a], stills[b]];
+        if (!overlaps(nodes[i].bounds, nodes[j].bounds)) continue;
+        if (behind(nodes[i].box, nodes[j].box)) link(after, waiting, i, j);
+        else if (behind(nodes[j].box, nodes[i].box)) link(after, waiting, j, i);
+      }
+    }
+    // The chain: each still node comes after the one before it.
+    for (let a = 1; a < stills.length; a++) link(after, waiting, stills[a - 1], stills[a]);
+    return { stills, movers, others: [...stills, ...movers], waiting, after };
+  });
+  return (current) => {
+    /** @type {number[]} */
+    const order = [];
+    for (const { stills, movers, others, waiting: still, after: stillAfter } of bands) {
+      const waiting = new Map(still);
+      /** @type {Map<number, number[]>} */
+      const dynamic = new Map(movers.map((i) => [i, []]));
+      const at = (/** @type {number} */ i) => current.get(i) ?? nodes[i];
+      const keys = new Map(movers.map((i) => [i, keyOf(at(i).box)]));
+      for (const m of movers) {
+        const a = at(m);
+        for (const o of others) {
+          if (o === m || (nodes[o].moving && o < m)) continue;
+          const b = at(o);
+          if (!overlaps(a.bounds, b.bounds)) continue;
+          if (behind(a.box, b.box)) hold(dynamic, waiting, m, o);
+          else if (behind(b.box, a.box)) hold(dynamic, waiting, o, m);
+        }
+      }
+      /** @type {Set<number>} */
+      const unplaced = new Set(movers);
+      let head = 0;
+      for (let step = stills.length + movers.length; step > 0; step--) {
+        // The candidates: every unplaced moving node, and the next still one.
+        const candidates = [...movers.filter((m) => unplaced.has(m)), ...(head < stills.length ? [stills[head]] : [])];
+        let free = -1;
+        let any = candidates[0];
+        for (const c of candidates) {
+          if ((waiting.get(c) ?? 0) === 0 && (free < 0 || c < free)) free = c;
+          const [kc, ka] = [nodes[c].moving ? /** @type {number} */ (keys.get(c)) : keyOf(nodes[c].box), nodes[any].moving ? /** @type {number} */ (keys.get(any)) : keyOf(nodes[any].box)];
+          if (kc < ka || (kc === ka && c < any)) any = c;
+        }
+        const next = free >= 0 ? free : any;
+        order.push(next);
+        if (nodes[next].moving) unplaced.delete(next);
+        else head++;
+        for (const k of stillAfter.get(next) ?? []) waiting.set(k, /** @type {number} */ (waiting.get(k)) - 1);
+        for (const k of dynamic.get(next) ?? []) waiting.set(k, /** @type {number} */ (waiting.get(k)) - 1);
+      }
+    }
+    return order;
+  };
+}
+
+/** `a` goes before `b`. @param {Map<number, number[]>} after @param {Map<number, number>} waiting */
+function link(after, waiting, a, b) {
+  /** @type {number[]} */ (after.get(a)).push(b);
+  waiting.set(b, /** @type {number} */ (waiting.get(b)) + 1);
+}
+
+/** Like link, for an edge that lasts one instant. @param {Map<number, number[]>} dynamic @param {Map<number, number>} waiting */
+function hold(dynamic, waiting, a, b) {
+  if (!dynamic.has(a)) dynamic.set(a, []);
+  /** @type {number[]} */ (dynamic.get(a)).push(b);
+  waiting.set(b, /** @type {number} */ (waiting.get(b)) + 1);
+}
+
+/**
+ * The place of every moving node in an order: the still node it follows (its
+ * index, or -1 at the start) and its rank among the moving nodes after that
+ * same still node. Two moving nodes in one gap are told apart by rank, so
+ * whichever are shown at one instant sit in the order they have there.
+ * @param {number[]} order  indices into nodes
+ * @param {{ moving?: boolean }[]} nodes
+ * @returns {Map<number, { follows: number, rank: number }>}
+ */
+export function placesIn(order, nodes) {
+  /** @type {Map<number, { follows: number, rank: number }>} */
+  const places = new Map();
+  let follows = -1;
+  let rank = 0;
+  for (const i of order) {
+    if (!nodes[i].moving) {
+      follows = i;
+      rank = 0;
+    } else places.set(i, { follows, rank: rank++ });
+  }
+  return places;
+}
+
+/**
+ * What each moving node does over a loop, given the instants between which
+ * nothing moves: the loop's cut points (from 0 to its end) and, for the span
+ * between each two, the places the moving nodes take there. Each node's
+ * distinct places come back as copies, in the order they first show, with
+ * the spans (merged) in which the node is in that place, as [from, to).
+ * @param {number[]} cuts  ascending, from 0 to the end
+ * @param {(span: number) => Map<number, { follows: number, rank: number }>} placesAt
+ * @returns {Map<number, { follows: number, rank: number, windows: [number, number][] }[]>}
+ */
+export function placeWindows(cuts, placesAt) {
+  /** @type {Map<number, { follows: number, rank: number, windows: [number, number][] }[]>} */
+  const out = new Map();
+  for (let span = 0; span < cuts.length - 1; span++) {
+    for (const [node, place] of placesAt(span)) {
+      if (!out.has(node)) out.set(node, []);
+      const copies = /** @type {{ follows: number, rank: number, windows: [number, number][] }[]} */ (out.get(node));
+      let copy = copies.find((c) => c.follows === place.follows && c.rank === place.rank);
+      if (!copy) copies.push((copy = { ...place, windows: [] }));
+      const last = copy.windows[copy.windows.length - 1];
+      if (last && last[1] === cuts[span]) last[1] = cuts[span + 1];
+      else copy.windows.push([cuts[span], cuts[span + 1]]);
+    }
+  }
+  return out;
+}

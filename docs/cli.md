@@ -294,7 +294,7 @@ Validate the sources with the engine, all of them or one doc.
 pixellab check [name] [--kind <object|scene>]
 ```
 
-Problems are the engine's "<file>: <where>: <rule>" lines. With a name, only the problems in that doc and the files it uses (palette.mjs, the objects it places or extends) are listed. On the command line, the exit code is 1 when there are problems. Warnings don't fail the check: a scene's key-to-key moves (the loop back to the first key included) whose steps aren't 1 px straight, 1:1 or 2:1, so the item jumps instead of walking the grid; scene.motion.path makes on-grid keys.
+Problems are the engine's "<file>: <where>: <rule>" lines. With a name, only the problems in that doc and the files it uses (palette.mjs, the objects it places or extends) are listed. On the command line, the exit code is 1 when there are problems. Warnings don't fail the check, and each has a code. off_grid: a scene's key-to-key moves (the loop back to the first key included) whose steps aren't 1 px straight, 1:1 or 2:1, so the item jumps instead of walking the grid; scene.motion.path makes on-grid keys. out_of_order: a scene whose file lists its items out of depth order (it still publishes in depth order; scene.sort writes the file in order), with how many items would move. copies: a moving item that takes several places among the others as it moves is drawn once for each place in the SVG, which adds to its size; the warning says how many.
 
 read-only · MCP tool `check`
 

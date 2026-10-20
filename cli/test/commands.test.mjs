@@ -7,8 +7,8 @@ import { after, before, describe, test } from 'node:test';
 
 import { createContext } from '../lib/context.mjs';
 import { registry } from '../lib/registry.mjs';
-import { openSite } from '../lib/document.mjs';
-import { makeSite, needsSite, spawnCli } from './helpers.mjs';
+import { openDocument, openSite } from '../lib/document.mjs';
+import { makeDocument, makeSite, needsSite, spawnCli } from './helpers.mjs';
 
 /** A scene that breaks two rules, and an object that breaks one. */
 const BROKEN = {
@@ -224,6 +224,60 @@ describe('commands', needsSite, () => {
     const json = await cli(['check', '--json'], broken.root);
     assert.equal(json.code, 1);
     assert.equal(JSON.parse(json.stdout).ok, false);
+  });
+
+  test('R11, R12: check warns with a code: off the grid, a scene out of depth order, and the copies a moving item is drawn in', async () => {
+    const house = { kind: 'block', size: [1, 1, 1], faces: { top: 'grass-2', left: 'grass-4', right: 'wood-3' } };
+    const walker = { kind: 'sprite', keys: { g: 'grass-2', i: 'ink' }, anchor: [2, 4], layers: [{ map: ['.gg.', 'gggg', 'gggg', '.ii.'] }] };
+    const scene = (items, tracks = [], extra = '') => `export default ${JSON.stringify({ viewBox: [-80, -20, 160, 140], items, ...(tracks.length ? { motion: { duration: 10000, tracks } } : {}) })};\n${extra}`;
+    const doc = await makeDocument({
+      files: {
+        'objects/house.mjs': `export default ${JSON.stringify(house)};\n`,
+        'objects/walker.mjs': `export default ${JSON.stringify(walker)};\n`,
+        // The pine at tile 0,1,0 is behind the house's walls at 1,1,1, but is listed after them.
+        'scenes/out-of-order.mjs': scene([{ object: 'house', at: { tile: [1, 1, 1] } }, { object: 'walker', at: { tile: [0, 1, 0] } }]),
+        'scenes/in-order.mjs': scene([{ object: 'walker', at: { tile: [0, 1, 0] } }, { object: 'house', at: { tile: [1, 1, 1] } }]),
+        // The walker passes behind the house and then in front of it, so it is drawn in two places; its first move is off the grid.
+        'scenes/crossing.mjs': scene(
+          [{ object: 'house', at: { tile: [2, 2, 1] } }, { object: 'walker', id: 'w', at: { px: [0, 0] } }],
+          [{ item: 'w', keys: [{ t: 0 }, { t: 5000, move: [0, 64] }] }],
+        ),
+        'scenes/off-grid.mjs': scene([{ object: 'walker', id: 'w', at: { px: [0, 0] } }], [{ item: 'w', keys: [{ t: 0 }, { t: 5000, move: [3, 5] }] }]),
+      },
+    });
+    try {
+      const own = createContext(await openDocument({ doc: doc.root }));
+      const check = (/** @type {string} */ name) => registry.call(own, 'check', name === undefined ? {} : { name });
+      const codes = (/** @type {any} */ r) => r.warnings.map((/** @type {any} */ w) => `${w.code} ${w.scene}`);
+      const order = await check('out-of-order');
+      assert.equal(order.ok, true);
+      assert.deepEqual(codes(order), ['out_of_order out-of-order']);
+      assert.equal(order.warnings[0].moves, 2);
+      assert.equal(order.warnings[0].file, 'scenes/out-of-order.mjs');
+      assert.match(order.warnings[0].text, /^scenes\/out-of-order\.mjs: items are not in depth order: 2 would move \(pixellab scene sort out-of-order puts them right\)$/);
+      assert.deepEqual((await check('in-order')).warnings, [], 'a scene in order has none');
+      const crossing = await check('crossing');
+      assert.deepEqual(codes(crossing), ['copies crossing']);
+      assert.deepEqual({ item: crossing.warnings[0].item, copies: crossing.warnings[0].copies }, { item: 'w', copies: 2 });
+      assert.match(crossing.warnings[0].text, /^scenes\/crossing\.mjs: w is drawn 2 times as it moves among other items/);
+      assert.deepEqual(codes(await check('off-grid')), ['off_grid off-grid', 'off_grid off-grid']);
+      assert.deepEqual((await check('walker')).warnings, [], 'an object has none');
+      const everything = await check(undefined);
+      assert.deepEqual(codes(everything), ['copies crossing', 'off_grid off-grid', 'off_grid off-grid', 'out_of_order out-of-order']);
+      const cli = await spawnCli(['check', 'crossing', '--document', doc.root], { env: doc.env() });
+      assert.equal(cli.code, 0, 'warnings keep the exit code 0');
+      assert.match(cli.stdout, /^warning: scenes\/crossing\.mjs: w is drawn 2 times/m);
+      assert.match(cli.stdout, /^1 warning$/m);
+    } finally {
+      await doc.cleanup();
+    }
+  });
+
+  test('R11: a scene with a problem gets no depth warnings, only its problems', async () => {
+    const bad = createContext(await openSite({ site: broken.root }));
+    const r = await registry.call(bad, 'check', { name: 'zz-broken' });
+    assert.ok(r.problems.length >= 2);
+    assert.deepEqual(r.warnings, []);
   });
 
   test('rendering a broken scene is a clear command error', async () => {
