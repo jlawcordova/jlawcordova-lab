@@ -6,7 +6,7 @@
 
 import { blockBox, movingOrder, placesIn, placeWindows, sortNodes, spriteBox, spriteHeight, unionBounds, unionBox } from './depth.mjs';
 import { blockFaces, blockSize, footprint, LEVEL_H, pxToTileExact, tilePixels, TILE_H, TILE_W, tileToPx } from './iso.mjs';
-import { copyClass, filledKeys, isMoving, itemsById, loopFrame, motionClass, motionCss, moveAtPercent, moveRuns, poseClass, posesOf, validateMotion } from './motion.mjs';
+import { copyClass, filledKeys, isMoving, itemsById, loopFrame, motionClass, motionCss, moveAtPercent, moveRuns, poseClass, poseItems, posesOf, stateAt, validateMotion } from './motion.mjs';
 
 /**
  * @typedef {{ class?: string, map: string[] }} MapLayer
@@ -1291,6 +1291,57 @@ export function motionCopies(sources, name) {
   const copies = new Map();
   withCopies(sources, arrange(sources, scene.items, scene.origin ?? [0, 0], tracks), scene.origin ?? [0, 0], tracks, scene.motion.duration, copies);
   return [...copies].map(([item, own]) => ({ item, copies: own.length }));
+}
+
+/**
+ * A scene as it stands at `time` ms, still: every list of items in the order
+ * it is drawn in at that moment, each tracked item posed (placed by its pixel
+ * point at its level, drawing its pose, `hidden` while it doesn't show), and
+ * no motion. Each item and group carries `path`, its path in the scene's own
+ * items, which the order has moved from. This is the order the SVG's copies
+ * show at that time: both use `movingOrder`, here at a moment and there over
+ * the loop.
+ * @param {Sources} sources
+ * @param {string} name
+ * @param {number} time
+ * @returns {any}
+ */
+export function sceneAt(sources, name, time) {
+  const scene = sources.scenes.get(name);
+  if (!scene) throw new Error(`scene ${q(name)} does not exist`);
+  const tracks = tracksOf(scene);
+  const origin = scene.origin ?? [0, 0];
+  const { motion, ...still } = scene;
+  /** @type {(item: any) => number[]} */
+  const pointOf = (item) => (item.at.tile ? tileToPx(item.at.tile, origin) : item.at.px);
+  /**
+   * @param {Arranged} arranged
+   * @param {number[]} prefix
+   * @returns {any[]}
+   */
+  const list = (arranged, prefix) => {
+    const units = runsOf(arranged.parts);
+    const movers = moversOf(units, tracks);
+    let order = units.map((_, i) => i);
+    if (movers.some((track) => track)) {
+      const nodes = nodesOf(units, movers);
+      const current = new Map(
+        units.flatMap((unit, i) => {
+          const item = unit[0].item;
+          return movers[i] ? [[i, nodeMaker(sources, item, origin, movers[i])(stateAt(movers[i], item.object, motion.duration, time).move)]] : [];
+        }),
+      );
+      order = movingOrder(nodes)(/** @type {Map<number, any>} */ (current));
+    }
+    return order.flatMap((i) =>
+      units[i].map((part) => {
+        const path = [...prefix, part.index];
+        if (part.inner) return { ...part.item, items: list(part.inner, path), path };
+        return { ...poseItems([part.item], motion, time, pointOf)[0], path };
+      }),
+    );
+  };
+  return { ...still, items: list(arrange(sources, scene.items, origin, tracks), []) };
 }
 
 /**

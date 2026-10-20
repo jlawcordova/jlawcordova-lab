@@ -166,7 +166,7 @@ export function stateAt(track, object, duration, time) {
 /**
  * The scene's items as they stand at `time`: each tracked item placed by px
  * at its moved point, drawing its pose, and marked `hidden` while it doesn't
- * show. Untracked items are returned as they are.
+ * show, at the level it stands on. Untracked items are returned as they are.
  * @param {any[]} items
  * @param {Motion | undefined} motion
  * @param {number} time
@@ -183,7 +183,9 @@ export function poseItems(items, motion, time, pointOf) {
       if (!track) return item;
       const { move, show, pose } = stateAt(track, item.object, motion.duration, time);
       const [x, y] = pointOf(item);
-      return { ...item, object: pose, at: { px: [x + move[0], y + move[1]] }, ...(show ? {} : { hidden: true }) };
+      // A tracked item stands at the level it was placed at, a tile's third number or the pixel point's level.
+      const level = item.at?.tile ? item.at.tile[2] : (item.at?.level ?? 0);
+      return { ...item, object: pose, at: { px: [x + move[0], y + move[1]], ...(level ? { level } : {}) }, ...(show ? {} : { hidden: true }) };
     });
   return walk(items);
 }

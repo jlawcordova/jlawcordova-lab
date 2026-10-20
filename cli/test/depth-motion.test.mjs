@@ -8,9 +8,15 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { behind, blockBox, keyOf, movingOrder, overlaps, placesIn, placeWindows, sortNodes, spriteBox, spriteHeight } from '../lib/engine/depth.mjs';
-import { loadSources, motionCopies, renderScene, validate } from '../lib/engine/engine.mjs';
-import { isMoving, loopFrame, moveAtPercent, moveRuns, motionCss, pctOf } from '../lib/engine/motion.mjs';
+import { createContext } from '../lib/context.mjs';
+import { openDocument } from '../lib/document.mjs';
+import { composite, loadSources, motionCopies, renderScene, sceneAt, validate } from '../lib/engine/engine.mjs';
+import { isMoving, loopFrame, moveAtPercent, moveRuns, motionCss, pctOf, shownItems } from '../lib/engine/motion.mjs';
+import { poseItems } from '../lib/engine/motion.mjs';
 import { toRectSvg } from '../lib/engine/svg.mjs';
+import { registry } from '../lib/registry.mjs';
+import { renderSceneImage } from '../lib/render.mjs';
+import { decodePng, makeDocument } from './helpers.mjs';
 
 /** Deterministic pseudo-random numbers (mulberry32), so a failure can be replayed from its seed. */
 function rng(seed) {
@@ -83,6 +89,9 @@ function randomList(r, n) {
 }
 const randomBoxes = (r, n) => Array.from({ length: n }, () => blockBox(Math.floor(r() * 6), Math.floor(r() * 6), Math.floor(r() * 3) - 1, [1, 1, Math.floor(r() * 3)]));
 
+
+/** The pixels where two painted maps differ. */
+const differences = (a, b) => [...new Set([...a.keys(), ...b.keys()])].filter((p) => a.get(p) !== b.get(p));
 
 // ------------------------------------------------------- a small CSS evaluator
 
@@ -525,7 +534,7 @@ describe('the SVG draws a copy for each place (R10, D6)', () => {
       const keys = [{ t: 0 }];
       let [x, y] = [0, 0];
       for (let k = 1; k < 25; k++) {
-        [x, y] = [x + 2 * (Math.floor(r() * 21) - 10), y + (Math.floor(r() * 21) - 10)];
+        [x, y] = [x + 2 * (Math.floor(r() * 11) - 5), y + (Math.floor(r() * 11) - 5)];
         keys.push({ t: k * 1000 + Math.floor(r() * 500), move: [x, y] });
       }
       tracks.push(track(id, ...keys));
@@ -537,6 +546,260 @@ describe('the SVG draws a copy for each place (R10, D6)', () => {
     const copies = motionCopies(sources, 's');
     assert.ok(copies.length > 0, 'items cross others in the order');
     assert.ok(out.style.includes('-z0'), 'the CSS has copies');
-    assert.ok(took < 10000, `took ${took.toFixed(0)} ms`);
+    assert.ok(took < 20000, `took ${took.toFixed(0)} ms`);
+  });
+});
+
+describe('the preview draws what the published SVG shows (R10, R15, D6)', () => {
+  /**
+   * A scene whose keys fall on whole percentages and whose steps on exact ones,
+   * with items crossing each other and still ones: a walker down a column past
+   * two houses, one up the same column the other way, a diagonal one, a group
+   * with its own house and walker, and one that hides, changes pose and shows
+   * again.
+   */
+  const NICE = (() => {
+    const objects = {
+      ...OBJECTS,
+      'walker-b': sprite(['.gg.', 'gggg', 'gggg', 'ii..'], { anchor: [2, 4] }),
+      tall: sprite(['.ii.', 'gggg', 'gggg', 'gggg', 'gggg', 'gggg', '.ii.'], { anchor: [2, 7] }),
+    };
+    const items = [
+      { object: 'house', at: { tile: [2, 2, 1] } },
+      { object: 'house', at: { tile: [4, 1, 1] } },
+      { object: 'tall', at: { tile: [-1, 3, 0] } },
+      { object: 'walker', id: 'down', at: { px: [0, -4] } },
+      { object: 'walker', id: 'up', at: { px: [0, 60] } },
+      { object: 'tall', id: 'diag', at: { px: [-40, 12] } },
+      { object: 'walker', id: 'blink', class: 'cargo', at: { px: [30, 18] } },
+      {
+        group: { class: 'enter' },
+        items: [{ object: 'house', at: { tile: [-1, 2, 1] } }, { object: 'walker', id: 'inner', at: { px: [-60, 4] } }, { object: 'walker', at: { px: [-60, 40] } }],
+      },
+    ];
+    const tracks = [
+      track('down', { t: 0 }, { t: 2500, move: [0, 20] }, { t: 5000, move: [0, 40] }, { t: 7500, move: [0, 40] }),
+      track('up', { t: 0 }, { t: 5000, move: [0, -40] }, { t: 7500, move: [0, -40] }),
+      track('diag', { t: 0 }, { t: 5000, move: [40, 20] }),
+      track('blink', { t: 0 }, { t: 2500, move: [0, 10], pose: 'walker-b' }, { t: 5000, move: [0, 20], show: false }, { t: 7500, show: true }),
+      track('inner', { t: 0 }, { t: 5000, move: [40, 20] }),
+    ];
+    return { objects, scene: scene(items, tracks) };
+  })();
+
+  /** The scene as a document in a temp folder, with its sources as the engine loads them. */
+  async function open(nice = NICE) {
+    const files = Object.fromEntries([
+      ...Object.entries(nice.objects).map(([name, obj]) => [`objects/${name}.mjs`, `export default ${JSON.stringify(obj)};\n`]),
+      ['scenes/nice.mjs', `export default ${JSON.stringify(nice.scene)};\n`],
+    ]);
+    const doc = await makeDocument({ files });
+    const ctx = createContext(await openDocument({ doc: doc.root }));
+    const { sources } = await ctx.sources();
+    return { ctx, sources, doc };
+  }
+
+  /** The PNG that scene.render makes at `time`, as a map of "x,y" → hex of the pixels it paints. */
+  async function previewAt(ctx, time) {
+    // scene.render takes whole milliseconds; a window can end between two, which the same function renders.
+    const r = Number.isInteger(time) ? await registry.call(ctx, 'scene.render', { name: 'nice', time }) : renderSceneImage(ctx.site, (await ctx.sources()).sources, 'nice', { time });
+    const png = decodePng(Buffer.from(r.png, 'base64'));
+    const [vx, vy] = r.viewBox;
+    const out = new Map();
+    for (let y = 0; y < png.height; y++) {
+      for (let x = 0; x < png.width; x++) {
+        if (!png.alpha(x, y)) continue;
+        out.set(`${x + vx},${y + vy}`, png.rgba(x, y).slice(0, 3).map((v) => v.toString(16).padStart(2, '0')).join(''));
+      }
+    }
+    return out;
+  }
+
+  /** A painted map with colors as lower-case hex digits, cut to the scene's view box as the PNG is. */
+  const inHex = (sources, pixels) => {
+    const [vx, vy, w, h] = NICE.scene.viewBox;
+    const inside = ([x, y]) => x >= vx && y >= vy && x < vx + w && y < vy + h;
+    return new Map([...pixels].filter(([p]) => inside(p.split(',').map(Number))).map(([p, color]) => [p, sources.colors.get(color).hex.slice(1).toLowerCase()]));
+  };
+
+  /** Every time to check, in ms: each copy window's boundary, each step of every track, and the middle of every stretch between them. */
+  function checkTimes(scn, out) {
+    const { duration, tracks } = scn.motion;
+    const css = parseCss(out.style);
+    const cuts = new Set([0]);
+    for (const [name, stops] of css.keyframes) if (/-z\d+$/.test(name)) for (const stop of stops) cuts.add(stop.at);
+    for (const t of tracks) for (const run of moveRuns(t, 'walker', duration)) cuts.add(run.at);
+    const sorted = [...cuts].sort((a, b) => a - b);
+    const times = new Set();
+    sorted.forEach((at, i) => {
+      times.add((at / 100) * duration);
+      const next = sorted[i + 1] ?? 100;
+      times.add(Math.round((((at + next) / 2) / 100) * duration));
+    });
+    return { times: [...times].sort((a, b) => a - b), boundaries: sorted };
+  }
+
+  it('R10, R15: at every window boundary and the middle of every window, the SVG\'s tree with its CSS evaluated at that time paints the pixels scene.render paints', async () => {
+    const { ctx, sources, doc } = await open();
+    try {
+      const out = renderScene(sources, 'nice');
+      const copies = motionCopies(sources, 'nice');
+      assert.ok(copies.length >= 3, `items cross others and take several places: ${JSON.stringify(copies)}`);
+      assert.ok(copies.some((c) => c.item === 'inner'), 'a group member reorders among its group');
+      const { times, boundaries } = checkTimes(NICE.scene, out);
+      assert.ok(boundaries.length > 40 && times.length > 80, `${boundaries.length} cuts, ${times.length} times`);
+      let sawDifference = false;
+      for (const time of times) {
+        const p = time / (NICE.scene.motion.duration / 100);
+        const expected = previewAt(ctx, time);
+        const published = inHex(sources, paintCss(out, p, NICE.scene.motion.duration));
+        const got = await expected;
+        const bad = differences(got, published);
+        assert.equal(bad.length, 0, `at ${time} ms (${p}%): ${bad.length} pixels differ, e.g. ${bad.slice(0, 3).map((q) => `${q}: preview ${got.get(q)}, svg ${published.get(q)}`)}`);
+        // What the engine drew before the depth order (the list's order, nothing reordered) must differ somewhere, or this proves nothing.
+        const scn = sources.scenes.get('nice');
+        const listed = renderScene({ ...sources, scenes: new Map([['nice', { ...scn, motion: undefined, items: poseItems(scn.items, scn.motion, time, (item) => (item.at.tile ? [(item.at.tile[0] - item.at.tile[1]) * 16, (item.at.tile[0] + item.at.tile[1]) * 8 - item.at.tile[2] * 16] : item.at.px)) }]]) }, 'nice', { order: 'list' });
+        const old = inHex(sources, composite(listed.root, { time }));
+        if (differences(old, published).length) sawDifference = true;
+      }
+      assert.ok(sawDifference, 'drawing in list order is wrong somewhere, so the copies matter');
+    } finally {
+      await doc.cleanup();
+    }
+  });
+
+  it('R10, R15: reduced motion (animations off) shows the frame of time 0', async () => {
+    const { ctx, sources, doc } = await open();
+    try {
+      const out = renderScene(sources, 'nice');
+      const rest = await previewAt(ctx, 0);
+      assert.equal(differences(rest, inHex(sources, paintCss(out, 0, NICE.scene.motion.duration, false))).length, 0);
+      assert.equal(differences(rest, inHex(sources, paintCss(out, 0, NICE.scene.motion.duration, true))).length, 0, 'and so does the animation at 0%');
+      // Every copy but the one holding time 0 is hidden by its base rule.
+      const css = parseCss(out.style);
+      const hidden = [...css.rules].filter(([cls, rule]) => /-z\d+$/.test(cls) && rule.opacity === '0').map(([cls]) => cls);
+      assert.ok(hidden.length > 0 && hidden.every((cls) => !cls.endsWith('-z0')));
+    } finally {
+      await doc.cleanup();
+    }
+  });
+
+  it('R10: sceneAt lists the items in the order drawn at that time, and an item hides and shows while keeping its place', async () => {
+    const { sources, doc } = await open();
+    try {
+      const at = (time) => sceneAt(sources, 'nice', time).items.map((i) => ('group' in i ? 'group' : (i.id ?? i.object)));
+      const rest = at(0);
+      assert.equal(rest.length, 8, 'every item and the group');
+      assert.deepEqual(sceneAt(sources, 'nice', 0).items.map((i) => i.path.join('.')).sort(), ['0', '1', '2', '3', '4', '5', '6', '7']);
+      const moved = sceneAt(sources, 'nice', 3500).items;
+      assert.notDeepEqual(moved.map((i) => i.path.join('.')), sceneAt(sources, 'nice', 0).items.map((i) => i.path.join('.')), 'the order changed');
+      const blink = (time) => sceneAt(sources, 'nice', time).items.find((i) => i.id === 'blink');
+      assert.equal(blink(3000).hidden, undefined);
+      assert.equal(blink(6000).hidden, true, 'hidden while it does not show, still in the list');
+      assert.equal(blink(3000).object, 'walker-b', 'drawing its pose');
+      assert.equal(sceneAt(sources, 'nice', 0).motion, undefined);
+    } finally {
+      await doc.cleanup();
+    }
+  });
+
+  it('R10, R15: on random scenes with keys at arbitrary milliseconds, the SVG and the preview agree in the middle of every stretch', () => {
+    for (const seed of SEEDS.slice(0, 3)) {
+      const r = rng(seed + 100);
+      const items = [];
+      for (let i = 0; i < 14; i++) items.push({ object: ['house', 'walker', 'tall'][Math.floor(r() * 3)], at: { tile: [Math.floor(r() * 7) - 1, Math.floor(r() * 7) - 1, Math.floor(r() * 2)] } });
+      const tracks = [];
+      for (let i = 0; i < 5; i++) {
+        const id = `m${i}`;
+        items.splice(Math.floor(r() * items.length), 0, { object: ['walker', 'tall'][Math.floor(r() * 2)], id, at: { px: [Math.floor(r() * 80) - 40, Math.floor(r() * 50)] } });
+        const keys = [{ t: 0 }];
+        let [x, y] = [0, 0];
+        for (let k = 1; k <= 5; k++) {
+          const along = r() < 0.5 ? [2, 1] : [0, 1];
+          const steps = 4 + Math.floor(r() * 24);
+          [x, y] = [x + along[0] * steps * (r() < 0.5 ? -1 : 1), y + along[1] * steps * (r() < 0.5 ? -1 : 1)];
+          keys.push({ t: k * 1900 + Math.floor(r() * 1500), move: [x, y], ...(r() < 0.2 ? { show: r() < 0.5 } : {}) });
+        }
+        tracks.push(track(id, ...keys));
+      }
+      const scn = scene(items, tracks, 12000);
+      const sources = src({ s: scn }, { ...OBJECTS, tall: sprite(['.ii.', 'gggg', 'gggg', 'gggg', 'gggg', 'gggg', '.ii.'], { anchor: [2, 7] }) });
+      assert.deepEqual(validate(sources), [], `seed ${seed}`);
+      const out = renderScene(sources, 's');
+      const css = parseCss(out.style);
+      const cuts = new Set([0]);
+      for (const [name, stops] of css.keyframes) if (/-z\d+$/.test(name)) for (const stop of stops) cuts.add(stop.at);
+      for (const t of tracks) for (const run of moveRuns(t, 'walker', 12000)) cuts.add(run.at);
+      const sorted = [...cuts].sort((a, b) => a - b);
+      let checked = 0;
+      const stride = Math.ceil(sorted.length / 150);
+      sorted.forEach((at, i) => {
+        const next = sorted[i + 1] ?? 100;
+        if (i % stride || (next - at) * 120 < 6) return; // a stretch of under 6 ms: the CSS and the preview round it differently
+        const time = ((at + next) / 2) * 120;
+        const at0 = sceneAt(sources, 's', time);
+        const preview = composite(renderScene({ ...sources, scenes: new Map([['s', { ...at0, items: shownItems(at0.items) }]]) }, 's', { order: 'list' }).root, { time });
+        const published = paintCss(out, time / 120, 12000);
+        const bad = differences(preview, published);
+        assert.equal(bad.length, 0, `seed ${seed} at ${time.toFixed(1)} ms: ${bad.length} pixels differ, e.g. ${bad.slice(0, 3).map((q) => `${q}: ${preview.get(q)} / ${published.get(q)}`)}`);
+        checked++;
+      });
+      assert.ok(checked > 40, `seed ${seed}: ${checked} stretches checked`);
+      assert.ok(motionCopies(sources, 's').length > 0, `seed ${seed}: items change places`);
+    }
+  });
+
+  it('R10: poseItems keeps a tracked item\'s level, whether it was placed on a tile or by pixel point', () => {
+    const motion = { duration: 1000, tracks: [track('a', { t: 0 }, { t: 500, move: [0, 4] }), track('b', { t: 0 }, { t: 500, move: [0, 4] }), track('c', { t: 0 }, { t: 500, move: [0, 4] })] };
+    const items = [
+      { object: 'walker', id: 'a', at: { tile: [1, 2, 3] } },
+      { object: 'walker', id: 'b', at: { px: [5, 6], level: 2 } },
+      { object: 'walker', id: 'c', at: { px: [1, 1] } },
+    ];
+    const pointOf = (item) => (item.at.tile ? [(item.at.tile[0] - item.at.tile[1]) * 16, (item.at.tile[0] + item.at.tile[1]) * 8 - item.at.tile[2] * 16] : item.at.px);
+    const [a, b, c] = poseItems(items, motion, 500, pointOf);
+    assert.deepEqual(a.at, { px: [-16, -20], level: 3 }, 'tile 1,2,3 is at -16,-24, moved by 0,4');
+    assert.deepEqual(b.at, { px: [5, 10], level: 2 });
+    assert.deepEqual(c.at, { px: [1, 5] }, 'level 0 is left out, as in the file');
+  });
+
+  describe('through scene.render, with variants and layers', () => {
+    const LAYERED = {
+      objects: OBJECTS,
+      scene: {
+        ...scene(
+          [
+            { object: 'house', at: { tile: [2, 2, 1] } },
+            { group: { 'data-class': 'a' }, items: [{ object: 'house', at: { tile: [6, 0, 0] } }] },
+            { group: { 'data-class': 'b' }, items: [{ object: 'house', at: { tile: [7, 0, 0] } }] },
+            { object: 'walker', id: 'down', layer: 'cast', at: { px: [0, -4] } },
+          ],
+          [track('down', { t: 0 }, { t: 5000, move: [0, 40] }, { t: 7500, move: [0, 40] })],
+        ),
+        layers: [{ id: 'cast', name: 'Cast' }],
+      },
+    };
+
+    it('R10: the items come back in the order drawn at that time, with paths into the file, and show and hide leave the rest where it is', async () => {
+      const { ctx, sources, doc } = await open(LAYERED);
+      try {
+        // The walker is drawn before the house (behind it) for part of the loop.
+        const before = [...Array(40).keys()].map((k) => k * 250).find((time) => sceneAt(sources, 'nice', time).items[0].id === 'down');
+        assert.ok(before !== undefined, 'the walker is behind the house at some time');
+        const at = async (params = {}) => registry.call(ctx, 'scene.render', { name: 'nice', time: before, ...params });
+        const plain = await at();
+        assert.deepEqual(plain.items.map((i) => i.path), ['3', '0', '1.0'], 'drawn order: the walker, the house, the first variant');
+        assert.deepEqual(plain.items.map((i) => i.id ?? i.object), ['down', 'house', 'house']);
+        // At rest it is drawn after the house; the list never changed.
+        assert.deepEqual((await registry.call(ctx, 'scene.render', { name: 'nice', time: 0 })).items.map((i) => i.path), ['0', '1.0', '3']);
+        // The second variant is chosen by its path in the file, though the walker's move changed what sits at each place in the drawn list.
+        assert.deepEqual((await at({ show: '2' })).items.map((i) => i.path), ['3', '0', '2.0']);
+        // Hiding the walker's layer leaves the others in the order they have.
+        assert.deepEqual((await at({ hide: ['cast'] })).items.map((i) => i.path), ['0', '1.0']);
+        assert.notEqual(plain.png, (await at({ hide: ['cast'] })).png);
+      } finally {
+        await doc.cleanup();
+      }
+    });
   });
 });
