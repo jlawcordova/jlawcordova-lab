@@ -42,18 +42,27 @@ enum ClaudeLocator {
     }
 
     /// The first `claude` that answers `--version`; then the login shell's (`zsh -lc 'command -v claude'`).
-    static func find(chosen: String?, search: Search) -> Install? {
+    /// `node` is the app's (on the PATH, as for a turn).
+    static func find(chosen: String?, search: Search, node: URL? = nil) -> Install? {
         for path in candidates(chosen: chosen, search: search) where Locator.isExecutable(path) {
-            if let v = version(of: URL(fileURLWithPath: path), search: search) { return Install(url: URL(fileURLWithPath: path), version: v) }
+            if let v = version(of: URL(fileURLWithPath: path), search: search, node: node) { return Install(url: URL(fileURLWithPath: path), version: v) }
         }
         guard search.useSystem, let shell = loginShellClaude(), Locator.isExecutable(shell) else { return nil }
-        return version(of: URL(fileURLWithPath: shell), search: search).map { Install(url: URL(fileURLWithPath: shell), version: $0) }
+        return version(of: URL(fileURLWithPath: shell), search: search, node: node).map { Install(url: URL(fileURLWithPath: shell), version: $0) }
     }
 
     /// `claude --version` → "2.1.290".
-    static func version(of url: URL, search: Search) -> String? {
-        guard let r = run(url, ["--version"], search: search, timeout: 5), r.status == 0 else { return nil }
+    static func version(of url: URL, search: Search, node: URL? = nil) -> String? {
+        guard let r = run(url, ["--version"], search: search, node: node, timeout: 5), r.status == 0 else { return nil }
         return parseVersion(r.stdout)
+    }
+
+    /// Why a claude didn't answer `--version`: its exit and last output line.
+    static func diagnose(_ url: URL, search: Search, node: URL? = nil) -> String {
+        guard Locator.isExecutable(url.path) else { return "there's no claude command at \(url.path)" }
+        guard let r = run(url, ["--version"], search: search, node: node, timeout: 5) else { return "claude --version didn't answer within 5 s" }
+        let last = (r.stderr + r.stdout).split(separator: "\n").last.map(String.init) ?? ""
+        return "claude --version exited \(r.status)\(last.isEmpty ? "" : ": \(last)")"
     }
 
     static func parseVersion(_ text: String) -> String? {
@@ -62,8 +71,8 @@ enum ClaudeLocator {
     }
 
     /// `claude auth status --json` → loggedIn, or nil if it couldn't say.
-    static func signedIn(_ url: URL, search: Search) -> Bool? {
-        guard let r = run(url, ["auth", "status", "--json"], search: search, timeout: 10) else { return nil }
+    static func signedIn(_ url: URL, search: Search, node: URL? = nil) -> Bool? {
+        guard let r = run(url, ["auth", "status", "--json"], search: search, node: node, timeout: 10) else { return nil }
         return parseSignedIn(r.stdout)
     }
 
@@ -96,11 +105,11 @@ enum ClaudeLocator {
     }
 
     /// Runs `claude` once and waits (at most `timeout` seconds; then it's ended and nil).
-    static func run(_ url: URL, _ args: [String], search: Search, timeout: TimeInterval) -> Output? {
+    static func run(_ url: URL, _ args: [String], search: Search, node: URL? = nil, timeout: TimeInterval) -> Output? {
         let p = Process()
         p.executableURL = url
         p.arguments = args
-        p.environment = environment(base: ProcessInfo.processInfo.environment, claude: url, node: nil, search: search)
+        p.environment = environment(base: ProcessInfo.processInfo.environment, claude: url, node: node, search: search)
         let out = Pipe(), err = Pipe()
         p.standardOutput = out
         p.standardError = err
