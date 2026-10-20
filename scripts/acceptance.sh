@@ -1,7 +1,8 @@
 #!/bin/zsh
 # The acceptance pass of docs/intents/2026-10-mac-app/plan.md ("What ready to use means"), end to end
 # on a temp copy of the site: scene edits → save → publish, object paint →
-# save (scripts/acceptance/scene-object.txt), then an agent over MCP saves two
+# save (scripts/acceptance/scene-object.txt), the animation pane keys the island
+# and reverts (animation.txt), then an agent over MCP saves two
 # proposals (mcp-agent.mjs, through the app bundle's CLI) and the Agent window
 # ghosts, approves and rejects them (agent.txt); a doc with unsaved edits changes on
 # disk and is merged, reloaded and kept, and another agent's proposal is approved into an
@@ -37,6 +38,8 @@ run() { # run <script> <log>
 
 echo "==> scene and object mode, save, publish"
 run scene-object.txt scene-object.log
+echo "==> the animation pane: keys selected, added, edited, dragged, deleted; tracks; the loop"
+run animation.txt animation.log
 svgs=$(ls "$site"/src/assets/pixel-art/*.svg | wc -l | tr -d ' ')
 [[ $svgs == 6 ]] || { echo "expected 6 published SVGs in the temp site, found $svgs" >&2; exit 1; }
 echo "published $svgs SVGs into the temp site"

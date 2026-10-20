@@ -17,12 +17,17 @@ import Foundation
 ///     class <text>  id <text>     raise lower duplicate remove snap
 ///     undo redo save [force] revert publish [<dir>] done   saveas <path.pixellab>
 ///     time <ms>  play  pause  tracks on|off   zoom fit|1-4   sidebar library|items
+///     keyframe add|delete|next|prev   keyframe select <ms>|none   keyframe move <ms> <to>   (the animation pane)
+///     keyset time <ms> | move <x,y> | move clear | show on|off|clear | pose <object>|clear
+///     track add|remove   loop <ms>   panekey <spec> (a key into the focused pane: left, shift+right, k, delete, esc, space)
 ///     search <text>   wait <ms>   snapshot <file.png>   log <text>
 ///     cli <args…>  (the bundled CLI on the script's document: an outside edit to the files)
 ///     stale merge|reload|keep     (the changed-on-disk banner's buttons)
 ///     expect dirty|selected|object|at|items|problems|build|outputs|publishdir|document|tool|time <value>
 ///     expect scenes|objects|zoom|badge|theme|ghosttime <value>   expect scenepixel <x>,<y> <#RRGGBB|empty>
 ///     expect stale true|false     (the banner shows)   expect mergealert true|false
+///     expect key <ms>|none   expect keys <n> (the selected track's)   expect keymove x,y|inherits
+///     expect keyshow true|false|inherits   expect keypose <object>|inherits   expect loop <ms>   expect tracks <n>   expect pane on|off
 ///
 /// Object mode (pixels are object.render pixels at scale 1: a sprite's map
 /// column and row, a block's render pixel):
@@ -346,6 +351,8 @@ final class ScriptRunner {
             model.timeline.pause()
             return "paused at \(TimelineModel.label(model.timeline.time)), \(model.document?.renderCount ?? 0) renders so far"
         case "tracks": model.timeline.showTracks = (try arg(words, 1)) == "on"; return nil
+        case "keyframe", "keyset", "track", "loop", "panekey":
+            return try await performAnimation(words, model: model)
         case "zoom":
             let z = try arg(words, 1)
             if z == "fit" { model.zoom = .fit } else { model.zoom = .level(try int(words, 1)) }
@@ -435,6 +442,73 @@ final class ScriptRunner {
             return try expect(words, model: model)
         default:
             throw Failure("unknown action \(words[0])")
+        }
+    }
+
+    /// The animation pane's actions (docs/intents/2026-10-animation-pane/spec.md, D5).
+    private func performAnimation(_ words: [String], model: AppModel) async throws -> String? {
+        let timeline = model.timeline
+        func key() -> String { timeline.selectedKey.map { "\($0.item) at \($0.t) ms" } ?? "no key" }
+        // A refused edit leaves its reason in the notice (a successful one clears it).
+        func after(_ what: String) -> String { "\(what): \(model.notice ?? model.lastEdit ?? "no edit"); selected \(key())" }
+        switch words[0] {
+        case "keyframe":
+            switch try arg(words, 1) {
+            case "add": await timeline.addKey(); return after("add")
+            case "delete": await timeline.deleteKey(); return after("delete")
+            case "next": timeline.stepKey(1); return key()
+            case "prev": timeline.stepKey(-1); return key()
+            case "select":
+                if (try arg(words, 2)) == "none" { timeline.deselectKey(); return "no key" }
+                guard let item = timeline.selectedItemID else { throw Failure("select an item with an id first") }
+                timeline.selectKey(item, try int(words, 2))
+                guard timeline.selectedKey?.t == (try int(words, 2)) else { throw Failure("\(item) has no key at \(try int(words, 2)) ms: \(timeline.track(item)?.keys.map { String($0.t) }.joined(separator: ", ") ?? "no track")") }
+                return key()
+            case "move":
+                // A drag: from one key's time to another, snapped as the pane snaps.
+                guard let item = timeline.selectedItemID, let duration = timeline.duration else { throw Failure("select an animated item first") }
+                let from = try int(words, 2)
+                timeline.selectKey(item, from, scrub: false)
+                guard timeline.selectedKey?.t == from else { throw Failure("\(item) has no key at \(from) ms") }
+                await timeline.moveKey(to: TimelineModel.snap(Double(try int(words, 3)), duration: duration))
+                return after("move")
+            default: throw Failure("keyframe add|delete|next|prev|select <ms>|none|move <ms> <to>")
+            }
+        case "keyset":
+            guard timeline.selectedKey != nil else { throw Failure("select a key first") }
+            let what = try arg(words, 1)
+            let value = try arg(words, 2)
+            switch (what, value) {
+            case ("time", _): await timeline.moveKey(to: try int(words, 2))
+            case ("move", "clear"): await timeline.setKey(clear: ["move"])
+            case ("move", _):
+                let parts = value.split(separator: ",").compactMap { Int($0) }
+                guard parts.count == 2 else { throw Failure("keyset move x,y") }
+                await timeline.setKey(move: parts)
+            case ("show", "clear"): await timeline.setKey(clear: ["show"])
+            case ("show", _): await timeline.setKey(show: value == "on" || value == "true")
+            case ("pose", "clear"): await timeline.setKey(clear: ["pose"])
+            case ("pose", _): await timeline.setKey(pose: value)
+            default: throw Failure("keyset time|move|show|pose <value>")
+            }
+            return after("keyset \(what)")
+        case "track":
+            switch try arg(words, 1) {
+            case "add": await timeline.addTrack()
+            case "remove": await timeline.removeTrack()
+            default: throw Failure("track add|remove")
+            }
+            return after("track \(words[1])")
+        case "loop":
+            await timeline.setDuration(try int(words, 1))
+            return "\(model.notice ?? model.lastEdit ?? "no edit"); loop \(Int(timeline.duration ?? 0)) ms"
+        case "panekey":
+            guard let k = KeyInput(spec: try arg(words, 1)) else { throw Failure("panekey <spec>") }
+            let used = timeline.handleKey(k)
+            // Keys that edit run as tasks: let them finish.
+            try? await Task.sleep(for: .milliseconds(50))
+            return used ? "used; \(key()), time \(timeline.renderTime)" : "not the pane's"
+        default: throw Failure("unknown action \(words[0])")
         }
     }
 
@@ -690,6 +764,14 @@ final class ScriptRunner {
         case "alert": got = model.saveAlert.map { "\($0.kind)" } ?? "none"
         case "stale": got = String(model.showsStaleBanner)
         case "mergealert": got = String(model.mergeAlert != nil)
+        case "key": got = model.timeline.selectedKey.map { String($0.t) } ?? "none"
+        case "keys": got = model.timeline.selectedTrack.map { String($0.keys.count) } ?? "none"
+        case "keymove": got = model.timeline.selectedFilled.map { $0.ownMove ? "\($0.move[0]),\($0.move[1])" : "inherits" } ?? "none"
+        case "keyshow": got = model.timeline.selectedFilled.map { $0.ownShow ? String($0.show) : "inherits" } ?? "none"
+        case "keypose": got = model.timeline.selectedFilled.map { $0.ownPose ? ($0.pose ?? "") : "inherits" } ?? "none"
+        case "loop": got = model.timeline.duration.map { String(Int($0)) } ?? "none"
+        case "tracks": got = String(model.timeline.tracks.count)
+        case "pane": got = model.timeline.showTracks ? "on" : "off"
         case "color": got = model.objectEditor.color
         case "layer": got = String(model.objectEditor.layer)
         case "frame": got = String(model.objectEditor.frame)

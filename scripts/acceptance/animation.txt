@@ -1,0 +1,104 @@
+# Acceptance 7: the animation pane (docs/intents/2026-10-animation-pane/spec.md).
+# The island's motion as it was on 2026-10-20: a 28 s loop, 39 tracks, the cart
+# with 11 keys (0, 7200, 10400 move -32,-16, 10700 pose, 11900 pose, 13500 move 0,0, …).
+# Ends with Revert, so the file is unchanged for the scripts after it.
+appearance dark
+open scene:hero-island
+expect loop 28000
+expect tracks 39
+select #cart
+expect object mine-cart
+expect keys 11
+tracks on
+expect pane on
+# R2: a key clicked selects it and takes the playhead there
+keyframe select 7200
+expect key 7200
+expect time 7200
+# R3: Add Key at the playhead pins the cart where it is (4 of the 16 steps toward -32,-16)
+time 8000
+keyframe add
+expect key 8000
+expect keys 12
+expect keymove -8,-4
+expect dirty true
+# R7: the key's values, set and cleared
+keyset move -16,-8
+expect keymove -16,-8
+keyset show off
+expect keyshow false
+keyset show clear
+expect keyshow inherits
+keyset pose mine-cart-tipped
+expect keypose mine-cart-tipped
+keyset pose clear
+expect keypose inherits
+keyset move clear
+expect keymove inherits
+# R5: a drag to 8460 ms snaps to 8500; a drop on another key is refused and the key stays
+keyframe move 8000 8460
+expect key 8500
+expect time 8500
+keyframe move 8500 10400
+expect key 8500
+expect keys 12
+# R10: ⇧→ ⇧← walk the keys, → ← step the playhead, the buttons too
+panekey shift+right
+expect key 10400
+panekey shift+left
+expect key 8500
+panekey right
+expect time 8600
+panekey left
+expect time 8500
+keyframe next
+expect key 10400
+keyframe prev
+expect key 8500
+snapshot @OUT@/animation-pane-dark.png
+appearance light
+snapshot @OUT@/animation-pane-light.png
+appearance dark
+# R4: ⌫ in the pane deletes the selected key; the rest frame can't go
+panekey delete
+expect key none
+expect keys 11
+keyframe select 0
+expect key 0
+keyframe delete
+expect keys 11
+expect key 0
+panekey esc
+expect key none
+# R6: moving the item on the stage past 0 keys it there, and that key is selected
+time 7200
+key right
+expect key 7200
+expect keymove 16,8
+undo
+expect key 7200
+expect keymove inherits
+# R8: an item without an id can't be animated; with one, Animate makes a track (its rest key) and Remove Track drops it
+library pine
+place 4 -1 1
+expect object pine
+track add
+expect tracks 39
+id pine-a
+track add
+expect tracks 40
+expect keys 1
+expect key 0
+expect pane on
+track remove
+expect tracks 39
+# R9: a loop that would cut off keys is refused; a longer one takes
+loop 20000
+expect loop 28000
+loop 30000
+expect loop 30000
+# Nothing saved
+revert
+expect dirty false
+expect loop 28000
+expect tracks 39
