@@ -69,6 +69,7 @@ export default {
 - When the last layer of a scene is ungrouped, `layers` is removed, so the file is exactly what it was before.
 - A layer's id is made from its first name (`Group 1` → `group-1`, `Railway` → `railway`; `-2`, `-3` when taken; `layer-…` when the name doesn't start with a letter) and doesn't change on rename, so a rename touches one line. Commands take a layer by id, or by its exact name when only one layer has it.
 - Why not a sidecar file or ids per wrapper: the item's own `layer` moves with it through every existing edit (raise, lower, duplicate, remove, undo, proposals, three-way merges) with no bookkeeping, where paths into the items would break on every insert.
+- **Three-way merges** (`doc.merge`, and approving a proposal into an open copy with unsaved edits): the scene line merge keeps both sides' new lines, so when both sides made a scene's first layers it would hold two `layers:` lists, and importing keeps only the last. The merge folds them into one list, ours first. A layer id both sides made for different layers, or another top-level key both sides added (two `motion:` blocks), is a clash (`merge_conflict`). And a merge whose result has validation problems that neither side had (an item in a layer the other side ungrouped) is refused (`merge_invalid`). Nothing changes when a merge is refused.
 
 ### D2. Paint order and output (R2)
 
@@ -159,13 +160,13 @@ Errors use the existing codes (`not_found`, `usage`, `exists`) plus `layer_cycle
 ### D11. The sidebar and the Layers panel (R6, R7, R20)
 
 - Search field; SCENES (no count) and scene rows (icon and name, no count); in scene mode a segmented Layers | Library (`SceneEditor.sidebarTab` defaults to `.layers`); object mode keeps Palette | Library. `Views/ItemsTree.swift` is replaced by `Views/LayersPanel.swift`.
-- The Layers tab: LAYERS (no count), then the tree, in its own scroll area filling the sidebar under the tabs.
+- The Layers tab: LAYERS (no count), then the tree, in its own scroll area filling the sidebar under the tabs. The scene list above has its own scroll too, at most about a third of the sidebar, and the Library tab keeps LIBRARY and the "New items go into" chip above its grid's scroll.
 - **Layer row** (28 pt): a chevron button (turns 90°; no animation with Reduce Motion), `square.dashed`, the name in Sora 12.5 semibold (inkMuted, regular, when hidden), a gold IN badge while you're inside it, the lock button (24 pt; shown on hover, on selection or while locked), the eye button (24 pt). Indented 14 pt a level.
 - **Item row:** `cube`, the object name, and its position on the right in SF Mono (`14,6,1`, or `px 31,6`).
 - **Order:** a layer's child layers (in `layers` order), then its items in paint order; the top level is the same. Layers start collapsed; selecting something on the stage expands its chain and scrolls its row into view.
 - Selected rows take `Theme.selection`, hovered rows `Theme.card`; inside a layer, rows outside it dim to 40%.
 - **Search:** a flat list of the items (object, id, class) and layers (name) that match.
-- **Keyboard:** clicking the tree (or Tab) focuses it, with an accent focus ring. ↑↓ select the previous or next row, ⇧↑ ⇧↓ add it to the selection, → expands a layer (or goes to its first row), ← collapses it (or goes to its parent), Return goes inside the selected layer, Esc leaves the layer you're inside.
+- **Keyboard:** clicking the tree (or Tab) focuses it, with an accent focus ring. ↑↓ select the previous or next row, ⇧↑ ⇧↓ add it to the selection, → expands a layer (or goes to its first row), ← collapses it (or goes to its parent), Return goes inside the selected layer, Esc clears the selection and then leaves the layer you're inside (as on the stage, R9).
 - **VoiceOver:** "Layer Railway, 12 items, hidden, locked" with actions Go Inside, Hide or Show, Lock or Unlock, Expand or Collapse; "pine, column 14, row 6, level 1, in Railway"; the selected trait on selected rows; "Hide Railway", "Lock Railway", "Expand Railway" on the buttons.
 
 ### D12. The inspector (R14, R15)
@@ -190,7 +191,7 @@ Errors use the existing codes (`not_found`, `usage`, `exists`) plus `layer_cycle
 - `select layer:<id>|<path>|#<id> …` selects one or more targets; `select add <target>` adds one; `click <x> <y> [shift]` and `dblclick <x> <y>` click the stage in scene pixels through the stage's picking; `pointer <x> <y>` moves the pointer there (the hover outline); `rightclick <x> <y>` and `rightclick row <target>` open the menu; `menu group|ungroup|inside|hide|lock|close` chooses from it.
 - `group`, `ungroup`, `inside <layer>|done|top`, `crumb <n>`, `hide <layer>`, `show <layer>`, `lock <layer>`, `unlock <layer>`, `expand <layer>`, `collapse <layer>`, `rename <name…>`, `movedby <col> <row>`, `layernudge upleft|upright|downleft|downright`, `placeinto`, `layerskey <spec>` (a key into the tree: up, down, shift+down, right, left, return, esc), `sidebar layers|library` (`items` stays an alias of `layers`).
 - `move`, `drag` and the arrow keys act on the whole selection.
-- `expect selection <targets,…|none>`, `inside <id|none>`, `scenelayers <n>` (`layers` is object mode's), `layername <name>`, `itemlayer <id|none>`, `hiddenlayers <ids|none>`, `lockedlayers <ids|none>`, `into <name>`, `crumbs <a›b›c>`, `rows <n>`, `movedby <+c,−r>`, `menu <enabled items|none>`, `tab layers|library`, `inspector layer|item|multi|none`, `faded true|false`, `hover <target|none>`.
+- `expect selection <targets,…|none>`, `inside <id|none>`, `scenelayers <n>` (`layers` is object mode's), `layername <name>`, `itemlayer <id|none>`, `hiddenlayers <ids|none>`, `lockedlayers <ids|none>`, `into <name>`, `crumbs <a›b›c>`, `rows <n>`, `movedby <+c,−r>`, `menu <enabled items|none|closed>` (`closed` when no menu is open), `tab layers|library`, `inspector layer|item|multi|none`, `faded true|false`, `hover <target|none>`.
 
 ### D15. Docs (R19)
 

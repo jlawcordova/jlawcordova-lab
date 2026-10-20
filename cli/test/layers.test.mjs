@@ -5,7 +5,7 @@
 // On temp copies of the sample document.
 
 import assert from 'node:assert/strict';
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 
@@ -133,6 +133,51 @@ describe('the scene format (R1)', () => {
     assert.deepEqual(r.items.map((/** @type {any} */ i) => [i.path, i.layer ?? null]), [['0.0', 'ground'], ['1.0', 'ground'], ['2', 'stones'], ['3', 'rock'], ['4', null]]);
     const shown = await call(session(), 'scene.show', {}, 'layered');
     assert.deepEqual([shown.layers, shown.layerNames], [3, ['Ground', 'Stones', 'Rock']]);
+  });
+});
+
+describe('merging a scene with layers (R1, D1)', () => {
+  // A scene of its own, written to disk by each test: the open copy and the file change apart.
+  const MERGING = YARD.replace("  output: 'yard.svg',\n", '');
+  const file = () => join(doc.root, 'scenes/merging.mjs');
+  const merge = (/** @type {Session} */ s) => registry.call(s.context(), 'doc.merge', { doc: 'scene:merging' });
+  /** Another session's edit, saved to the file. */
+  const onDisk = async (/** @type {string} */ command, /** @type {any} */ params) => {
+    const other = session();
+    await call(other, command, params, 'merging');
+    await writeFile(file(), opened.serialize.serialize(await working(other, 'merging')));
+  };
+
+  test("R1: when the open copy and the file each make a scene's first layers, a merge keeps both lists", async () => {
+    await writeFile(file(), MERGING);
+    const mine = session();
+    await call(mine, 'scene.layer.new', { items: ['0.0'] }, 'merging');
+    await onDisk('scene.layer.new', { layerName: 'Sky', items: ['4'] });
+    assert.equal((await merge(mine)).merged, true);
+    const scene = await working(mine, 'merging');
+    assert.deepEqual(scene.layers, [{ id: 'group-1', name: 'Group 1' }, { id: 'sky', name: 'Sky' }]);
+    assert.deepEqual([scene.items[0].items[0].layer, scene.items[4].layer], ['group-1', 'sky']);
+  });
+
+  test('R1: a layer id both sides made for different layers clashes, and nothing merges', async () => {
+    await writeFile(file(), MERGING);
+    const mine = session();
+    await call(mine, 'scene.layer.new', { layerName: 'Trees', id: 'trees', items: ['0.0'] }, 'merging');
+    await onDisk('scene.layer.new', { layerName: 'Rocks', id: 'trees', items: ['4'] });
+    const before = JSON.stringify(await working(mine, 'merging'));
+    await assert.rejects(merge(mine), (/** @type {any} */ err) => err.code === 'merge_conflict' && /added layer trees/.test(err.message));
+    assert.equal(JSON.stringify(await working(mine, 'merging')), before);
+  });
+
+  test('R1: a merge that would leave an item in a layer neither side kept is refused', async () => {
+    const layered = LAYERED.replace("  output: 'yard.svg',\n", '');
+    await writeFile(file(), layered);
+    const mine = session();
+    await call(mine, 'scene.layer.assign', { to: 'stones', items: ['4'] }, 'merging');
+    await onDisk('scene.layer.ungroup', { layer: 'stones' });
+    const before = JSON.stringify(await working(mine, 'merging'));
+    await assert.rejects(merge(mine), (/** @type {any} */ err) => err.code === 'merge_invalid' && /layer 'stones' is no layer/.test(err.message));
+    assert.equal(JSON.stringify(await working(mine, 'merging')), before);
   });
 });
 

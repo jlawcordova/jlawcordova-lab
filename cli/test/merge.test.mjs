@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { hunks, merge3 } from '../lib/merge.mjs';
+import { foldScene, hunks, merge3 } from '../lib/merge.mjs';
 
 const lines = (/** @type {string[]} */ ...l) => l.join('\n');
 const BASE = lines('a', 'b', 'c', 'd', 'e');
@@ -47,4 +47,30 @@ test('R8: insertions at the same point clash, unless union keeps both (ours firs
   // union never joins a replacement with an insertion.
   assert.equal(merge3(BASE, lines('a', 'B', 'c', 'd', 'e'), lines('a', 'n', 'b', 'c', 'd', 'e'), { union: true }).text, lines('a', 'n', 'B', 'c', 'd', 'e'));
   assert.equal(merge3(BASE, lines('a', 'B', 'c', 'd', 'e'), lines('a', 'y', 'c', 'd', 'e'), { union: true }).conflicts.length, 1);
+});
+
+// A scene's layers (docs/intents/2026-10-scene-layers/spec.md, D1): both sides making a scene's
+// first layers would give two `layers:` blocks, and importing keeps only the last.
+test("R1: foldScene folds both sides' first layers into one list, ours first; it refuses an id or another key both added", () => {
+  const scene = lines(
+    'export default {',
+    '  viewBox: [0, 0, 16, 16],',
+    '  layers: [',
+    "    { id: 'group-1', name: 'Group 1' },",
+    '  ],',
+    '  layers: [',
+    "    { id: 'sky', name: 'Sky' },",
+    '  ],',
+    '  items: [],',
+    '};',
+  );
+  assert.deepEqual(foldScene(scene), {
+    text: lines('export default {', '  viewBox: [0, 0, 16, 16],', '  layers: [', "    { id: 'group-1', name: 'Group 1' },", "    { id: 'sky', name: 'Sky' },", '  ],', '  items: [],', '};'),
+    clashes: [],
+  });
+  assert.deepEqual(foldScene(scene.replace("'sky', name: 'Sky'", "'group-1', name: 'Rocks'")).clashes, ['layer group-1']);
+  const motions = lines('export default {', '  items: [],', '  motion: {', '    duration: 100,', '  },', '  motion: {', '    duration: 200,', '  },', '};');
+  assert.deepEqual(foldScene(motions).clashes, ['motion']);
+  const one = lines('export default {', '  layers: [', "    { id: 'a', name: 'A' },", '  ],', '  items: [],', '};');
+  assert.deepEqual(foldScene(one), { text: one, clashes: [] });
 });

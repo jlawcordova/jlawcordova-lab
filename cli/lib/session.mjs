@@ -33,7 +33,7 @@ import { join } from 'node:path';
 import { createContext, docFile } from './context.mjs';
 import { unifiedDiff } from './diff.mjs';
 import { CommandError, NotFoundError } from './errors.mjs';
-import { merge3 } from './merge.mjs';
+import { foldScene, merge3 } from './merge.mjs';
 import { unsavedInApp } from './open-docs.mjs';
 import { createState, newProposalId, stateDir, writeAtomic } from './state.mjs';
 
@@ -641,6 +641,27 @@ export class Session {
   }
 
   /**
+   * The engine's problems for `data` as this doc (next to the other docs as
+   * the session has them) that none of `others` (other versions of it) has.
+   * @param {any} ctx
+   * @param {Entry} entry
+   * @param {any} data
+   * @param {any[]} others
+   */
+  async newProblems(ctx, entry, data, others) {
+    const { sources } = await ctx.sources();
+    const engine = this.site.engine;
+    const problemsOf = (/** @type {any} */ doc) => {
+      const objects = Object.fromEntries(sources.objects);
+      const scenes = entry.kind === 'scene' ? { [entry.name]: doc } : {};
+      if (entry.kind === 'object') objects[entry.name] = doc;
+      return engine.validate(engine.loadSources({ palette: sources.palette, objects, scenes })).filter((/** @type {string} */ p) => p.startsWith(`${entry.file}: `));
+    };
+    const had = new Set(others.flatMap(problemsOf));
+    return problemsOf(data).filter((/** @type {string} */ p) => !had.has(p));
+  }
+
+  /**
    * Merges the file's changes since the doc's base into its working copy,
    * three ways (spec D4), as one undo step. A clean doc just reloads; a clash
    * changes nothing and throws merge_conflict.
@@ -663,7 +684,8 @@ export class Session {
       return { doc: ref, merged: true, changed: true, summary: `Reloaded ${ref}: it had no unsaved edits`, ...this.status(entry) };
     }
     const base = entry.base.exists ? (await this.canonical(entry.base.text)) ?? entry.base.text : '';
-    const { text, conflicts } = merge3(base, ours, theirs, { union: entry.kind === 'scene' });
+    const merged = merge3(base, ours, theirs, { union: entry.kind === 'scene' });
+    const { conflicts } = merged;
     if (conflicts.length) {
       const n = conflicts.length;
       throw new CommandError(
@@ -671,11 +693,27 @@ export class Session {
         { code: 'merge_conflict', details: conflicts },
       );
     }
+    // Both sides' first layers fold into one list (docs/intents/2026-10-scene-layers/spec.md, D1);
+    // what can't be folded (the same layer id, or both adding another key) clashes.
+    const folded = entry.kind === 'scene' ? foldScene(merged.text) : { text: merged.text, clashes: [] };
+    if (folded.clashes.length) {
+      throw new CommandError(`Both the open copy and ${entry.file} added ${folded.clashes.join(', ')}; nothing merged. Reload the file (dropping the unsaved edits), or keep the open copy and save over the file.`, {
+        code: 'merge_conflict',
+        details: folded.clashes,
+      });
+    }
+    const text = folded.text;
     let data;
     try {
       data = await importSource(text);
     } catch (err) {
       throw new CommandError(`the merge of ${entry.file} doesn't load (${/** @type {Error} */ (err).message.split('\n')[0]}); nothing merged`, { code: 'merge_invalid' });
+    }
+    // A merge that loads but breaks the doc (an item naming a layer neither side kept, two layers
+    // with one id) is refused: only problems the open copy or the file already had may stay.
+    const added = await this.newProblems(ctx, entry, data, [entry.doc, await importSource(theirs)]);
+    if (added.length) {
+      throw new CommandError(`the merge of ${entry.file} would add ${added.length} problem${added.length === 1 ? '' : 's'} (${added[0]}); nothing merged`, { code: 'merge_invalid', details: added });
     }
     const before = JSON.stringify(entry.doc);
     entry.doc = data;
