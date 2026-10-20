@@ -3,8 +3,12 @@
 // Agent window to show. PIXELLAB_STATE overrides the default,
 // ~/Library/Application Support/Pixel Lab/.
 //
-//   proposals/<id>.json   { id, doc: "scene:<name>" | "object:<name>", baseHash, source, summary, createdAt, agent }
-//   activity.jsonl        one { time, tool, args, ok, summary } per line
+//   proposals/<id>.json   { id, number, doc: "scene:<name>" | "object:<name>", baseHash, source, summary, createdAt, agent, chat? }
+//   proposal-numbers.log  one proposal id per line, appended when a proposal is first written: its
+//                         number (#n) is its line (docs/intents/2026-10-agent-chat/spec.md, D7)
+//   activity.jsonl        one { time, tool, args, ok, summary, agent?, chat? } per line
+//
+// chat is { id, title } for a proposal or tool call made from Pixel Lab's Agent chat.
 
 import { randomBytes } from 'node:crypto';
 import { appendFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -49,6 +53,8 @@ export function newProposalId(now = new Date()) {
  *   summary: string[],
  *   createdAt: string,
  *   agent: string | null,
+ *   number?: number,
+ *   chat?: { id: string, title: string },
  * }} Proposal
  */
 
@@ -56,6 +62,20 @@ export function newProposalId(now = new Date()) {
 export function createState(/** @type {string} */ dir) {
   const proposalsDir = join(dir, 'proposals');
   const activityFile = join(dir, 'activity.jsonl');
+  const numbersFile = join(dir, 'proposal-numbers.log');
+
+  /** The ids in proposal-numbers.log, in order (line n is proposal #n). */
+  const numbered = async () => {
+    try {
+      return (await readFile(numbersFile, 'utf8')).split('\n').filter((l) => l.trim());
+    } catch {
+      return [];
+    }
+  };
+  const numberOf = async (/** @type {string} */ id) => {
+    const i = (await numbered()).indexOf(id);
+    return i < 0 ? null : i + 1;
+  };
   const proposalFile = (/** @type {string} */ id) => {
     if (!ID.test(id)) throw new NotFoundError(`no proposal ${id}; ids look like 20261019-142301-a1b2c3 (pixellab proposal list)`);
     return join(proposalsDir, `${id}.json`);
@@ -66,11 +86,28 @@ export function createState(/** @type {string} */ dir) {
     proposalsDir,
     activityFile,
 
-    /** @param {Proposal} proposal */
+    /**
+     * Writes a proposal. The first time an id is written it gets the next
+     * number: its id is appended to proposal-numbers.log (an append is atomic, so two
+     * servers proposing at once each get their own line) and the number is
+     * its line. A rewritten proposal keeps its number.
+     * @param {Proposal} proposal
+     */
     async writeProposal(proposal) {
-      await writeAtomic(proposalFile(proposal.id), `${JSON.stringify(proposal, null, 2)}\n`);
-      return proposal;
+      const file = proposalFile(proposal.id);
+      let number = proposal.number ?? (await numberOf(proposal.id));
+      if (number === null) {
+        await mkdir(proposalsDir, { recursive: true });
+        await appendFile(numbersFile, `${proposal.id}\n`);
+        number = await numberOf(proposal.id);
+      }
+      const out = { id: proposal.id, ...(number ? { number } : {}), ...proposal };
+      await writeAtomic(file, `${JSON.stringify(out, null, 2)}\n`);
+      return out;
     },
+
+    /** A proposal's number (#n), or null if it was never numbered. */
+    numberOf,
 
     /** @returns {Promise<Proposal>} */
     async readProposal(/** @type {string} */ id) {

@@ -12,6 +12,7 @@
 // docs/intents/2026-10-mcp-gaps/spec.md), so the next edit starts from disk.
 
 import { activitySummary } from './activity-summary.mjs';
+import { chatOf } from './chat-context.mjs';
 import { consoleToStderr, INVALID_PARAMS, METHOD_NOT_FOUND, RpcError, serveLines } from './jsonrpc.mjs';
 import { CommandError } from './errors.mjs';
 import { registry as defaultRegistry } from './registry.mjs';
@@ -41,7 +42,8 @@ export const toolName = (/** @type {string} */ command) => command.replace(/\./g
 const INSTRUCTIONS = `Pixel Lab edits the pixel art in a .pixellab document: scenes (isometric, 32×16 tiles) and objects (sprites and blocks drawn from a fixed palette). The site that inlines the art publishes from the document.
 Look first: document_info, scene_list, scene_items, scene_render (returns the PNG), object_list, object_show, object_render, palette_get, check (problems, and warnings such as off-grid motion).
 Edit: scene_place (also into a group, a new group or a layer), scene_move, scene_set, scene_group_set, object_paint, object_fill, object_map_set (a whole map in one call) and the rest. Layers name parts of a scene (the Mine, the Railway, the Train inside it) and never change paint order or the published SVG; they are apart from { group } wrappers: scene_items lists them, scene_layer_new makes one from items and layers, scene_layer_rename, scene_layer_ungroup, scene_layer_assign (into a layer or the top level), scene_layer_move (by tiles, together). Depth: a scene's items always draw back to front by where each stands (column, row and level, and the size of its block or the footprint of its sprite; a pixel-placed item has a level). Every edit puts the items in that order, so scene_items reads back to front, a new item goes where it belongs and the paths it returns are after the sort (reordered says which other paths moved). There is no raise or lower: scene_set depth (front, back or auto) on an item or a group is the one manual control, to draw it over or under everything else in its list. object_footprint says how many tiles a large sprite covers; scene_sort puts a scene written before this (or by hand) in order and reports what moved. Motion: scene_track_add, scene_track_remove, scene_key_set, scene_key_move, scene_key_delete, scene_motion_set, scene_motion_path (on-grid keys along a polyline). Edits stay in this server's memory with undo (doc_undo, doc_redo, doc_status).
-Save: doc_save validates the doc and, unless the server runs with --direct, writes a proposal for a person to approve in Pixel Lab instead of changing the document. Once the owner applies or rejects it, this server brings the doc back in line with the file on its own before your next call (doc_status shows how, as synced), so keep editing without a revert. doc_reload reloads a doc from disk when nothing unsaved would be lost. Before proposing, doc_status lists unsavedInApp: docs the owner has open in Pixel Lab with unsaved edits; say so if you propose against one. Say what you changed when you're done.`;
+Save: doc_save validates the doc and, unless the server runs with --direct, writes a proposal for a person to approve in Pixel Lab instead of changing the document. Once the owner applies or rejects it, this server brings the doc back in line with the file on its own before your next call (doc_status shows how, as synced), so keep editing without a revert. doc_reload reloads a doc from disk when nothing unsaved would be lost. Before proposing, doc_status lists unsavedInApp: docs the owner has open in Pixel Lab with unsaved edits; say so if you propose against one. Say what you changed when you're done.
+Ask: chat_ask puts a question with two to four answers in front of the owner in Pixel Lab's Agent chat, as buttons; their choice comes back as their next message, so end your turn after it. Without a chat attached (a terminal) it says so: ask in your own conversation.`;
 
 /**
  * @param {{
@@ -56,7 +58,7 @@ Save: doc_save validates the doc and, unless the server runs with --direct, writ
  */
 export async function startMcpServer({ site, env = process.env, input = process.stdin, output = process.stdout, log = (t) => process.stderr.write(`pixellab: ${t}\n`), registry = defaultRegistry, direct = false }) {
   if (output === process.stdout) consoleToStderr();
-  const session = new Session(site, { env, mode: direct ? 'direct' : 'propose' });
+  const session = new Session(site, { env, mode: direct ? 'direct' : 'propose', chat: chatOf(env) });
   const left = direct ? { 'proposal.apply': LEFT_OUT['proposal.apply'], 'proposal.reject': LEFT_OUT['proposal.reject'] } : LEFT_OUT;
 
   /** @type {Map<string, import('./registry.mjs').Command>} */
@@ -90,7 +92,7 @@ export async function startMcpServer({ site, env = process.env, input = process.
     const cmd = typeof name === 'string' ? tools.get(name) : undefined;
     const time = new Date().toISOString();
     const append = (/** @type {boolean} */ ok, /** @type {string} */ summary) =>
-      session.state.appendActivity({ time, tool: String(name), args, ok, summary }).catch((err) => log(`can't write the activity log: ${err.message}`));
+      session.state.appendActivity({ time, tool: String(name), args, ok, summary, ...(session.agent ? { agent: session.agent } : {}), ...(session.chat ? { chat: session.chat } : {}) }).catch((err) => log(`can't write the activity log: ${err.message}`));
     if (!cmd) {
       await append(false, `unknown tool ${name}`);
       const why = typeof name === 'string' && left[/** @type {keyof typeof left} */ (name.replace(/_/g, '.'))];
