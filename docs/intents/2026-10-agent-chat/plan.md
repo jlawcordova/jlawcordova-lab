@@ -3,7 +3,7 @@
 ## Files that change
 
 **PR 1, the CLI (`feat/agent-chat-cli`)**
-- `cli/lib/state.mjs`: `writeProposal` numbers a proposal once (`proposals/numbers.log`); `numberOf(id)`.
+- `cli/lib/state.mjs`: `writeProposal` numbers a proposal once (`proposal-numbers.log` in the state dir); `numberOf(id)`.
 - `cli/lib/session.mjs`: the session's `chat` (`{ id, title }`); `propose` writes `chat` into the proposal.
 - `cli/lib/server-mcp.mjs`: reads `PIXELLAB_CHAT` / `PIXELLAB_CHAT_TITLE`; activity lines gain `agent` and `chat`; the instructions name `chat_ask`.
 - `cli/lib/chat-context.mjs` (new): matching the working copy to the saved file, the block's text (D5).

@@ -149,15 +149,18 @@ export class Session {
    *   mode?: 'direct' | 'propose',
    *   env?: Record<string, string | undefined>,
    *   agent?: string | null,
+   *   chat?: { id: string, title: string } | null,
    *   onChange?: (status: any) => void,
    *   now?: () => number,
    * }} [options]
    */
-  constructor(site, { mode = 'direct', env = process.env, agent = null, onChange, now = Date.now } = {}) {
+  constructor(site, { mode = 'direct', env = process.env, agent = null, chat = null, onChange, now = Date.now } = {}) {
     this.site = site;
     this.mode = mode;
     this.env = env;
     this.agent = agent;
+    /** The Agent chat this session works for (docs/intents/2026-10-agent-chat/spec.md, D7), or null. */
+    this.chat = chat;
     this.onChange = onChange;
     this.now = now;
     this.state = createState(stateDir(env));
@@ -529,8 +532,9 @@ export class Session {
       summary: this.edits(entry),
       createdAt: new Date(this.now()).toISOString(),
       agent: this.agent,
+      ...(this.chat ? { chat: this.chat } : {}),
     };
-    await this.state.writeProposal(proposal);
+    const written = await this.state.writeProposal(proposal);
     const inApp = (await unsavedInApp(this.state.dir, this.site.root).catch(() => [])).includes(entry.ref);
     entry.proposal = id;
     entry.proposed = { id, text: plan.text, seq: this.seq };
@@ -539,9 +543,10 @@ export class Session {
     return {
       doc: entry.ref,
       proposal: id,
+      ...(written.number ? { number: written.number } : {}),
       file: join(this.state.proposalsDir, `${id}.json`),
       wrote: false,
-      summary: `Proposed ${entry.ref} as ${id} (${proposal.summary.length} edit${proposal.summary.length === 1 ? '' : 's'})`,
+      summary: `Proposed ${entry.ref} as ${written.number ? `#${written.number} (${id})` : id} (${proposal.summary.length} edit${proposal.summary.length === 1 ? '' : 's'})`,
       edits: proposal.summary,
       diff: plan.diff,
       ...(inApp ? { warnings: [`${entry.ref} has unsaved edits in Pixel Lab; approving this proposal will merge it into them, and lines both of you changed will clash. Tell the owner.`] } : {}),

@@ -447,7 +447,8 @@ describe('sessions', needsSite, () => {
     assert.equal(saved.wrote, false);
     assert.equal(await readFile(file('scenes/zz-test.mjs'), 'utf8'), disk, 'the site is untouched');
     const proposal = JSON.parse(await readFile(saved.file, 'utf8'));
-    assert.deepEqual(Object.keys(proposal), ['id', 'doc', 'baseHash', 'source', 'summary', 'createdAt', 'agent']);
+    // A number (#n) too (docs/intents/2026-10-agent-chat/spec.md, R24); no chat from outside the Agent chat.
+    assert.deepEqual(Object.keys(proposal), ['id', 'number', 'doc', 'baseHash', 'source', 'summary', 'createdAt', 'agent']);
     assert.equal(proposal.doc, 'scene:zz-test');
     assert.equal(proposal.agent, 'test-agent 1.0');
     assert.equal(proposal.baseHash, (await readSource(opened, 'scene', 'zz-test')).hash);

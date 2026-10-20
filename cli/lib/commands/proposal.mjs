@@ -39,14 +39,25 @@ function targetOf(ctx, proposal) {
 const baseMatches = (/** @type {any} */ proposal, /** @type {any} */ disk) => (proposal.baseHash === null ? !disk.exists : disk.exists && disk.hash === proposal.baseHash);
 
 /** @param {any} p @param {boolean} matches */
-const listed = (p, matches) => ({ id: p.id, doc: p.doc, summary: p.summary ?? [], createdAt: p.createdAt, agent: p.agent ?? null, baseMatches: matches });
+const listed = (p, matches) => ({
+  id: p.id,
+  ...(Number.isInteger(p.number) ? { number: p.number } : {}),
+  doc: p.doc,
+  summary: p.summary ?? [],
+  createdAt: p.createdAt,
+  agent: p.agent ?? null,
+  ...(p.chat && typeof p.chat.id === 'string' ? { chat: { id: p.chat.id, title: String(p.chat.title ?? 'Chat') } } : {}),
+  baseMatches: matches,
+});
 
 /** @type {import('../registry.mjs').Command[]} */
 export default [
   {
     name: 'proposal.list',
     summary: 'List the proposals agents made, oldest first',
-    description: 'Each is { id, doc, summary: [edits], createdAt, agent, baseMatches }; baseMatches is false when the file changed since the agent opened it.',
+    description:
+      'Each is { id, number, doc, summary: [edits], createdAt, agent, chat?, baseMatches }; number is its #n (older proposals have none), chat ({ id, title }) is the Agent chat it came from, ' +
+      'and baseMatches is false when the file changed since the agent opened it.',
     params: { type: 'object', properties: {} },
     args: [],
     mutates: false,
@@ -65,7 +76,9 @@ export default [
       return { proposals: out };
     },
     format: (r) =>
-      r.proposals.map((/** @type {any} */ p) => `${p.id}  ${p.doc}  ${p.agent ?? '?'}  ${p.summary.length} edit${p.summary.length === 1 ? '' : 's'}${p.baseMatches ? '' : '  (file changed since)'}`).join('\n') ||
+      r.proposals
+        .map((/** @type {any} */ p) => `${p.number ? `#${p.number}  ` : ''}${p.id}  ${p.doc}  ${p.chat ? `chat "${p.chat.title}"` : (p.agent ?? '?')}  ${p.summary.length} edit${p.summary.length === 1 ? '' : 's'}${p.baseMatches ? '' : '  (file changed since)'}`)
+        .join('\n') ||
       'no proposals',
   },
   {
@@ -91,7 +104,7 @@ export default [
     },
     format: (r) =>
       [
-        `${r.id}: ${r.doc} by ${r.agent ?? 'an agent'}, ${r.createdAt}`,
+        `${r.number ? `#${r.number} ` : ''}${r.id}: ${r.doc} by ${r.agent ?? 'an agent'}${r.chat ? ` in the chat "${r.chat.title}"` : ''}, ${r.createdAt}`,
         ...r.summary.map((/** @type {string} */ s) => `  - ${s}`),
         r.baseMatches ? '' : `warning: ${r.file} changed since the proposal was made; apply needs --force`,
         r.diff || '(no change from the file as it is)',

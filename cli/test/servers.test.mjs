@@ -209,7 +209,8 @@ describe('serve --mcp', needsSite, () => {
     const files = await readdir(join(state, 'proposals'));
     assert.deepEqual(files, [`${proposal}.json`]);
     const p = JSON.parse(await readFile(join(state, 'proposals', files[0]), 'utf8'));
-    assert.deepEqual(Object.keys(p), ['id', 'doc', 'baseHash', 'source', 'summary', 'createdAt', 'agent']);
+    // A number (#n) too (docs/intents/2026-10-agent-chat/spec.md, R24); no chat from a terminal.
+    assert.deepEqual(Object.keys(p), ['id', 'number', 'doc', 'baseHash', 'source', 'summary', 'createdAt', 'agent']);
     assert.equal(p.doc, 'scene:footer-grass');
     assert.equal(p.agent, 'test-agent 9.9');
     assert.deepEqual(p.summary, ['pine placed at column 0, row 0, level 0']);
@@ -243,7 +244,8 @@ describe('serve --mcp', needsSite, () => {
         ['proposal_apply', false],
       ],
     );
-    for (const e of entries) assert.deepEqual(Object.keys(e), ['time', 'tool', 'args', 'ok', 'summary']);
+    // The client's name and version too (docs/intents/2026-10-agent-chat/spec.md, R24); no chat from a terminal.
+    for (const e of entries) assert.deepEqual(Object.keys(e), ['time', 'tool', 'args', 'ok', 'summary', 'agent']);
     assert.equal(entries[1].summary, 'pine placed at column 0, row 0, level 0');
     assert.deepEqual(entries[1].args, { name: 'footer-grass', object: 'pine', at: [0, 0, 0] });
   });

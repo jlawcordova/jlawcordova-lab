@@ -19,6 +19,8 @@
 | [`art build`](#artbuild) | Publish: validate every source, compile each scene with an output and write the SVGs | writes files |
 | [`art preview`](#artpreview) | Render the review PNG of an object (standing on a tile) or a scene, on the card color; `palette` for the swatch sheet | read |
 | [`art sizes`](#artsizes) | Bytes each object and each color adds to a compiled scene, against the document's git HEAD | read |
+| [`chat ask`](#chatask) | Ask the owner a question with two to four answers, shown as buttons in Pixel Lab's Agent chat | read |
+| [`chat context`](#chatcontext) | Build the selection block an Agent chat message carries: what's selected, as the saved document has it | read |
 | [`check`](#check) | Validate the sources with the engine, all of them or one doc | read |
 | [`doc close`](#docclose) | Close an open doc (refused with unsaved changes unless --force) | session |
 | [`doc merge`](#docmerge) | Merge the changes to a doc's file on disk into its working copy, keeping the unsaved edits | edit, session |
@@ -282,6 +284,53 @@ read-only · MCP tool `art_sizes`
 
 ```sh
 pixellab art sizes hero-island
+```
+
+### chat
+
+#### chat.ask
+
+Ask the owner a question with two to four answers, shown as buttons in Pixel Lab's Agent chat.
+
+```
+pixellab chat ask <question> --options <text,…>
+```
+
+Use it when the owner should choose (every use of an object or only these, one way or another). It returns at once: the question shows in the chat with a button per answer, and the owner's choice arrives as their next message, so end your turn after asking. With no Pixel Lab chat on this connection (a terminal), it says so: ask in your own conversation.
+
+read-only · MCP tool `chat_ask`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `question` (positional) | string | required | the question, in one or two sentences |
+| `--options` | list of string | required | two to four short answers, as button labels |
+
+```sh
+pixellab chat ask "Make every pine taller, or only these 2?" --options "Only these 2,Every pine (8)"
+```
+
+#### chat.context
+
+Build the selection block an Agent chat message carries: what's selected, as the saved document has it.
+
+```
+pixellab chat context [name] [--object <text>] [--layers <text,…>] [--items <text,…>] [--pinned <text,…>]
+```
+
+Pixel Lab sends this block with each chat message. Layers and items are named as the app has them (its working copy, which may have unsaved edits); the block names them by their paths in the saved file. An item placed, moved or changed since the last save, or a layer made or changed since, isn't in the saved file: it's left out and listed in unsaved. With --object, the block names a whole object instead.
+
+read-only · MCP tool `chat_context`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string |  | scene name (or scenes/<name>) |
+| `--object` | string |  | an object: the block names the whole object (object mode) instead of a scene |
+| `--layers` | list of string |  | selected layer ids, comma-separated on the command line |
+| `--items` | list of string |  | selected item paths (12, 5.2), comma-separated on the command line |
+| `--pinned` | list of string |  | which of those are pinned to the chat: layer:<id> or a path |
+
+```sh
+pixellab chat context harbor --items 45.0,46.0 --layers boats
 ```
 
 ### check
@@ -944,7 +993,7 @@ List the proposals agents made, oldest first.
 pixellab proposal list
 ```
 
-Each is { id, doc, summary: [edits], createdAt, agent, baseMatches }; baseMatches is false when the file changed since the agent opened it.
+Each is { id, number, doc, summary: [edits], createdAt, agent, chat?, baseMatches }; number is its #n (older proposals have none), chat ({ id, title }) is the Agent chat it came from, and baseMatches is false when the file changed since the agent opened it.
 
 read-only · MCP tool `proposal_list`
 
