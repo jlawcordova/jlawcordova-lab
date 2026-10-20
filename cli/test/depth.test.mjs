@@ -10,7 +10,7 @@ import { describe, it } from 'node:test';
 import { createContext } from '../lib/context.mjs';
 import { compileScene, readSources } from '../lib/engine/compile.mjs';
 import { openDocument } from '../lib/document.mjs';
-import { behind, blockBox, keyOf, overlaps, shiftBox, sortNodes, spriteBox, spriteHeight, unionBounds, unionBox } from '../lib/engine/depth.mjs';
+import { behind, blockBox, displaced, keyOf, overlaps, shiftBox, sortNodes, spriteBox, spriteHeight, unionBounds, unionBox } from '../lib/engine/depth.mjs';
 import { composite, depthOrder, isInDepthOrder, loadSources, renderObject, renderScene, resolve, sceneInOrder, validate } from '../lib/engine/engine.mjs';
 import { pxToTile, pxToTileExact, tileToPx } from '../lib/engine/iso.mjs';
 import { previewColors, renderPreview } from '../lib/engine/preview.mjs';
@@ -748,5 +748,109 @@ describe("the harbor example: a pine moved behind the red house (R3, intent)", (
     assert.ok(where(1) < where(2) && where(1) < where(3), `${order}`);
     // trees[0] (3,6,0) is one row in front of it: it draws after the walls (it stands under the roof's level, so the roof is not ordered against it).
     assert.ok(where(0) > where(2), `${order}`);
+  });
+});
+
+describe('the sort moves as few items as it can (R2)', () => {
+  const unit = (c, r, l) => blockBox(c, r, l, [1, 1, 1]);
+  const FREE = { bounds: null };
+
+  /** The first listed free node, always (what the sort did before it also tried pulling blockers forward). */
+  function firstFree(nodes) {
+    const n = nodes.length;
+    const waiting = nodes.map((b, j) => nodes.filter((a, i) => i !== j && overlaps(a.bounds, b.bounds) && behind(a.box, b.box)).length);
+    const placed = new Set();
+    const out = [];
+    while (out.length < n) {
+      const rest = nodes.map((_, i) => i).filter((i) => !placed.has(i));
+      const free = rest.find((i) => waiting[i] === 0);
+      const next = free ?? rest.reduce((a, b) => (keyOf(nodes[b].box) < keyOf(nodes[a].box) ? b : a));
+      placed.add(next);
+      out.push(next);
+      nodes.forEach((b, j) => {
+        if (!placed.has(j) && overlaps(nodes[next].bounds, b.bounds) && behind(nodes[next].box, b.box)) waiting[j]--;
+      });
+    }
+    return out;
+  }
+
+  it('R2: displaced counts the items out of the longest run that keeps its order', () => {
+    assert.equal(displaced([]), 0);
+    assert.equal(displaced([0, 1, 2, 3]), 0);
+    assert.equal(displaced([3, 0, 1, 2]), 1, 'one item jumped far');
+    assert.equal(displaced([1, 2, 3, 0]), 1);
+    assert.equal(displaced([2, 3, 4, 5, 0, 1]), 2);
+    assert.equal(displaced([3, 2, 1, 0]), 3);
+  });
+
+  it('R2: an item that must come before two others listed far ahead of it is pulled forward, not left for them to wait on', () => {
+    // W1 and W2 are in front of P but listed first; f1…f3 meet nothing. Holding W1 and W2 back would displace both; pulling P forward displaces one.
+    const nodes = [
+      { box: unit(3, 0, 0), bounds: { minX: 0, minY: 0, maxX: 9, maxY: 9 } },
+      { box: unit(4, 0, 0), bounds: { minX: 0, minY: 0, maxX: 9, maxY: 9 } },
+      { box: unit(9, 9, 0), ...FREE },
+      { box: unit(8, 9, 0), ...FREE },
+      { box: unit(7, 9, 0), ...FREE },
+      { box: unit(0, 0, 0), bounds: { minX: 0, minY: 0, maxX: 9, maxY: 9 } },
+    ];
+    assert.deepEqual(firstFree(nodes), [2, 3, 4, 5, 0, 1]);
+    assert.deepEqual(sortNodes(nodes), [5, 0, 1, 2, 3, 4], 'only P moves, up in front of the walls');
+  });
+
+  it('R2: an item listed early that must come after two later ones is the one that moves down', () => {
+    const nodes = [
+      { box: unit(3, 0, 0), bounds: { minX: 0, minY: 0, maxX: 9, maxY: 9 } },
+      { box: unit(9, 9, 0), ...FREE },
+      { box: unit(8, 9, 0), ...FREE },
+      { box: unit(0, 0, 0), bounds: { minX: 0, minY: 0, maxX: 9, maxY: 9 } },
+      { box: unit(1, 0, 0), bounds: { minX: 0, minY: 0, maxX: 9, maxY: 9 } },
+    ];
+    assert.deepEqual(sortNodes(nodes), [1, 2, 3, 4, 0], 'pulling the two forward would displace two; holding the one back displaces one');
+  });
+
+  it('R2: where both ways displace as many items, the one that holds the blocked item back is kept', () => {
+    const nodes = [
+      { box: unit(3, 0, 0), bounds: { minX: 0, minY: 0, maxX: 9, maxY: 9 } },
+      { box: unit(9, 9, 0), ...FREE },
+      { box: unit(8, 9, 0), ...FREE },
+      { box: unit(0, 0, 0), bounds: { minX: 0, minY: 0, maxX: 9, maxY: 9 } },
+    ];
+    assert.deepEqual(sortNodes(nodes), [1, 2, 3, 0]);
+  });
+
+  it('R2: the harbor pine moved behind the red house moves one item, and back again moves one item', async () => {
+    const { sources } = await readSources(join(REPO, 'examples', 'harbor.pixellab'));
+    const flat = structuredClone(sources.scenes.get('harbor-flat'));
+    const lone = { ...sources, scenes: new Map([['flat', flat]]) };
+    const pineAt = (list, tile) => list.findIndex((item) => item.group && item.items[0].object === 'pine' && item.items[0].at.tile.join() === tile);
+    assert.deepEqual(depthOrder(lone, flat.items), flat.items.map((_, i) => i), 'the example is in order');
+    const before = pineAt(flat.items, '5,6,0');
+    flat.items[before].items[0].at.tile = [0, 1, 0];
+    const up = depthOrder(lone, flat.items);
+    assert.equal(displaced(up), 1, 'only the pine moves');
+    assert.ok(up.indexOf(before) < before, 'up in front of the walls it stands behind');
+    // Sort it, then put it back where it stood.
+    const sorted = up.map((i) => flat.items[i]);
+    flat.items.splice(0, flat.items.length, ...sorted);
+    assert.deepEqual(depthOrder(lone, flat.items), flat.items.map((_, i) => i));
+    const at = pineAt(flat.items, '0,1,0');
+    flat.items[at].items[0].at.tile = [5, 6, 0];
+    const down = depthOrder(lone, flat.items);
+    assert.equal(displaced(down), 1, 'only the pine moves');
+    assert.ok(down.indexOf(at) > at, 'down behind everything it stands in front of');
+  });
+
+  it('R2: never displaces more than holding blocked items back would, and a second sort changes nothing, on random scenes with cycles', () => {
+    for (const seed of SEEDS) {
+      const r = rng(seed + 7);
+      for (let round = 0; round < 40; round++) {
+        const boxes = randomBoxes(r, 5 + Math.floor(r() * 50), 5);
+        const nodes = boxes.map((box, i) => ({ box, bounds: r() < 0.5 ? EVERYWHERE : { minX: i * 3, minY: 0, maxX: i * 3 + 2 + Math.floor(r() * 8), maxY: 5 } }));
+        const order = sortNodes(nodes);
+        assert.ok(displaced(order) <= displaced(firstFree(nodes)), `seed ${seed}, round ${round}`);
+        const once = order.map((i) => nodes[i]);
+        assert.deepEqual(sortNodes(once), once.map((_, i) => i), `seed ${seed}, round ${round}: sorted lists stay`);
+      }
+    }
   });
 });

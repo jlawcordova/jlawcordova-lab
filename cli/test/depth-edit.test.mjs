@@ -93,10 +93,10 @@ describe('R4: every edit keeps the list sorted', () => {
   test('R4: placing puts the item where it stands, and the path it returns is after the sort', async () => {
     const s = owner();
     const r = await call(s, 'scene.place', { object: 'block', at: [-1, -1, 0], id: 'e' });
-    // e is behind a, b and c, which must wait for it; "far" overlaps nothing, so it is the first free item listed and the sort takes it first.
-    assert.deepEqual(await order(s), ['far', 'e', 'a', 'b', 'c', 'd']);
-    assert.equal(r.path, '1');
-    assert.deepEqual(r.reordered, { '0': '2', '1': '3', '2': '4', '3': '5', '4': '0', '5': '1' }, 'every path the sort changed, old → new; e was added last');
+    // e is behind a, b and c, which would wait for it; the sort moves e (one item) up in front of them and leaves "far" where it was.
+    assert.deepEqual(await order(s), ['e', 'a', 'b', 'c', 'd', 'far']);
+    assert.equal(r.path, '0');
+    assert.deepEqual(r.reordered, { '0': '1', '1': '2', '2': '3', '3': '4', '4': '5', '5': '0' }, 'every path the sort changed, old → new; e was added last');
     assert.equal(r.item.id, 'e');
     assert.equal(await inOrder(s), true);
     // Nothing it overlaps: it stays last and nothing is reordered.
@@ -151,11 +151,11 @@ describe('R4: every edit keeps the list sorted', () => {
     assert.equal(front.path, '4');
     assert.deepEqual(await order(s), ['b', 'c', 'd', 'far', 'a']);
     assert.equal((await call(s, 'scene.items', {})).items.at(-1).depth, 'front');
-    // Back where it stands, it is behind b and c again (and "far", free, comes first).
+    // Back where it stands, it is behind b and c again: it alone moves back up, past them.
     const auto = await call(s, 'scene.set', { item: 'a', depth: 'auto' });
-    assert.deepEqual(await order(s), ['far', 'a', 'b', 'c', 'd']);
-    assert.equal(auto.path, '1');
-    assert.equal((await call(s, 'scene.items', {})).items[1].depth, undefined);
+    assert.deepEqual(await order(s), ['a', 'b', 'c', 'd', 'far']);
+    assert.equal(auto.path, '0');
+    assert.equal((await call(s, 'scene.items', {})).items[0].depth, undefined);
   });
 
   test('R4: undo and redo give the edit and its sort back together, in one step', async () => {
