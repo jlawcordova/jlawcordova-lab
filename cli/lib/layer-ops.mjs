@@ -162,12 +162,14 @@ export function idFor(doc, name) {
   for (let n = 2; ; n++) if (!taken.has(`${base}-${n}`)) return `${base}-${n}`;
 }
 
-/** "Group n": one more than the highest "Group n" in the scene (spec D10). */
+/**
+ * "Group n": one more than the highest n of the scene's "Group n" names and
+ * group-n ids, so the count goes on after a group is renamed (spec D10).
+ */
 export function nextGroupName(/** @type {any} */ doc) {
   let high = 0;
   for (const l of layersOf(doc)) {
-    const m = /^Group (\d+)$/.exec(l.name);
-    if (m) high = Math.max(high, Number(m[1]));
+    for (const m of [/^Group (\d+)$/.exec(l.name), /^group-(\d+)$/.exec(l.id)]) if (m) high = Math.max(high, Number(m[1]));
   }
   return `Group ${high + 1}`;
 }
