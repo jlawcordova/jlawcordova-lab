@@ -127,14 +127,34 @@ export function behind(a, b) {
 }
 
 /**
+ * How many items an order displaces: those that are not part of the longest
+ * run of items that keep their relative order. `order[k]` is the old index of
+ * the item now at k, so an order that changes nothing displaces none, and one
+ * item taken out and put elsewhere displaces one however many it jumps.
+ * @param {number[]} order
+ */
+export function displaced(order) {
+  /** The smallest last value of an increasing run of each length. @type {number[]} */
+  const tails = [];
+  for (const old of order) {
+    let [lo, hi] = [0, tails.length];
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (tails[mid] < old) lo = mid + 1;
+      else hi = mid;
+    }
+    tails[lo] = old;
+  }
+  return order.length - tails.length;
+}
+
+/**
  * The order the nodes draw in, as indices into `nodes`. Back-marked nodes
  * draw first, then unmarked ones, then front-marked ones; each band is sorted
- * on its own. In a band, repeatedly take the first listed node that nothing
- * unplaced is behind (where their pixels can meet), so items keep the order
- * the file lists them in unless an overlap forces a change. If every
- * remaining node has something behind it (a cycle), take the one with the
- * smallest key, then the smallest index. Whether a node is available depends
- * only on the set already placed, so sorting a sorted list returns it.
+ * on its own, keeping the order the file lists them in unless an overlap
+ * forces a change, and moving as few items as it can (sortBand). Whether the
+ * result is right depends only on the "behind" pairs, so sorting a sorted
+ * list returns it.
  * @param {Node[]} nodes
  * @returns {number[]}
  */
@@ -149,6 +169,16 @@ export function sortNodes(nodes) {
 }
 
 /**
+ * Sorts one band by its "behind" pairs (where the nodes' pixels can meet), two
+ * ways, and keeps the one that displaces fewer nodes (a tie keeps the first):
+ * (a) repeatedly take the first listed node that nothing unplaced is behind,
+ * which holds a blocked node back while the nodes after it go ahead; (b) walk
+ * the list and, before a node, place the nodes behind it that aren't placed
+ * yet, in list order, which pulls a blocking node forward instead. A list
+ * that is in order comes back unchanged either way. If every remaining node
+ * has something behind it (a cycle), only (a) is used, and it takes the node
+ * with the smallest key, then the smallest index; (a) leaves what it made
+ * where it is when sorted again, which (b) can't promise with a cycle.
  * @param {Node[]} nodes
  * @param {number[]} members  indices into nodes, ascending
  * @returns {number[]}
@@ -156,26 +186,29 @@ export function sortNodes(nodes) {
 function sortBand(nodes, members) {
   const n = members.length;
   const keys = members.map((i) => keyOf(nodes[i].box));
-  /** How many unplaced nodes are behind each, and the nodes each is behind of. */
-  const waiting = new Array(n).fill(0);
+  /** How many nodes are behind each, the nodes each is behind of, and the nodes behind each. */
+  const behindCount = new Array(n).fill(0);
   /** @type {number[][]} */
   const after = Array.from({ length: n }, () => []);
+  /** @type {number[][]} */
+  const before = Array.from({ length: n }, () => []);
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
       const [a, b] = [nodes[members[i]], nodes[members[j]]];
       if (!overlaps(a.bounds, b.bounds)) continue;
-      if (behind(a.box, b.box)) {
-        after[i].push(j);
-        waiting[j]++;
-      } else if (behind(b.box, a.box)) {
-        after[j].push(i);
-        waiting[i]++;
-      }
+      const [first, second] = behind(a.box, b.box) ? [i, j] : behind(b.box, a.box) ? [j, i] : [-1, -1];
+      if (first < 0) continue;
+      after[first].push(second);
+      before[second].push(first);
+      behindCount[second]++;
     }
   }
+  // (a)
+  const waiting = behindCount.slice();
   const placed = new Array(n).fill(false);
   /** @type {number[]} */
-  const order = [];
+  const first = [];
+  let cycle = false;
   for (let step = 0; step < n; step++) {
     // The first listed node that is free; failing that (a cycle), the smallest key.
     let free = -1;
@@ -185,12 +218,25 @@ function sortBand(nodes, members) {
       if (any < 0 || keys[k] < keys[any]) any = k;
       if (waiting[k] === 0 && free < 0) free = k;
     }
+    if (free < 0) cycle = true;
     const next = free >= 0 ? free : any;
     placed[next] = true;
-    order.push(members[next]);
+    first.push(next);
     for (const k of after[next]) waiting[k]--;
   }
-  return order;
+  if (cycle || displaced(first) === 0) return first.map((k) => members[k]);
+  // (b)
+  const done = new Array(n).fill(false);
+  /** @type {number[]} */
+  const second = [];
+  const place = (/** @type {number} */ k) => {
+    if (done[k]) return;
+    done[k] = true;
+    for (const behindK of before[k]) place(behindK);
+    second.push(k);
+  };
+  for (let k = 0; k < n; k++) place(k);
+  return (displaced(second) < displaced(first) ? second : first).map((k) => members[k]);
 }
 
 // --------------------------------------------------------------- while moving

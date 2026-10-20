@@ -252,9 +252,9 @@ describe('commands', needsSite, () => {
       const order = await check('out-of-order');
       assert.equal(order.ok, true);
       assert.deepEqual(codes(order), ['out_of_order out-of-order']);
-      assert.equal(order.warnings[0].moves, 2);
+      assert.equal(order.warnings[0].moves, 1, 'the walker moves up in front of the house; the house is not counted');
       assert.equal(order.warnings[0].file, 'scenes/out-of-order.mjs');
-      assert.match(order.warnings[0].text, /^scenes\/out-of-order\.mjs: items are not in depth order: 2 would move \(pixellab scene sort out-of-order puts them right\)$/);
+      assert.match(order.warnings[0].text, /^scenes\/out-of-order\.mjs: items are not in depth order: 1 would move \(pixellab scene sort out-of-order puts them right\)$/);
       assert.deepEqual((await check('in-order')).warnings, [], 'a scene in order has none');
       const crossing = await check('crossing');
       assert.deepEqual(codes(crossing), ['copies crossing']);
