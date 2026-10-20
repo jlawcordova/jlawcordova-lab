@@ -522,6 +522,27 @@ describe('the engine draws in depth order (R3, R5, R9, D2)', () => {
     }
   });
 
+  it('R8: a wide sprite with a footprint sorts by the ground it covers, in the boxes and in the pixels', () => {
+    // A 56×16 slab that reaches right from its tile, drawn in grass-2, beside a 4×12 tree in grass-4 two tiles right and a row back.
+    const slab = (extra = {}) => ({ kind: 'sprite', anchor: [4, 15], keys: { g: 'grass-2' }, layers: [{ map: Array.from({ length: 16 }, () => 'g'.repeat(56)) }], ...extra });
+    const items = [{ object: 'slab', at: { tile: [0, 2, 0] } }, { object: 'tree', at: { tile: [2, 1, 0] } }];
+    const sourcesOf = (extra) => src({ slab: slab(extra), tree }, { s: scene(items, { viewBox: [-60, -30, 120, 70] }) });
+    const [plain, wide] = [sourcesOf(), sourcesOf({ footprint: [3, 1] })];
+    // The boxes: on one tile the two cannot be told apart, and over three columns the tree stands behind the slab.
+    const standing = spriteBox(2, 1, 0, [1, 1], 12 / 16);
+    assert.equal(behind(standing, spriteBox(0, 2, 0, [1, 1], 16 / 16)), false);
+    assert.equal(behind(spriteBox(0, 2, 0, [1, 1], 16 / 16), standing), false, 'no order on one tile');
+    assert.equal(behind(standing, spriteBox(0, 2, 0, [3, 1], 16 / 16)), true, 'the tree is behind the three-tile slab');
+    // The engine: the same scene lists the slab first. With no footprint it stays first; with one the tree moves under it.
+    assert.deepEqual(depthOrder(plain, plain.scenes.get('s').items), [0, 1]);
+    assert.deepEqual(depthOrder(wide, wide.scenes.get('s').items), [1, 0]);
+    // The pixels: where both paint, the tree is over the slab without a footprint and under it with one.
+    const both = [...paintedAt(plain, 'slab', tileToPx([0, 2, 0], [0, 0])).keys()].filter((p) => paintedAt(plain, 'tree', tileToPx([2, 1, 0], [0, 0])).has(p));
+    assert.ok(both.length > 0, 'the fixtures overlap on screen');
+    assert.equal(colorAt(plain, both[0]), 'grass-4', 'tree over slab');
+    assert.equal(colorAt(wide, both[0]), 'grass-2', 'slab over tree');
+  });
+
   it('R3: order list draws the items as the file lists them, as engines before the depth order did', () => {
     const sources = src(OBJECTS, { s: scene([redHouse, treeBehind], { viewBox: [-40, -30, 80, 70] }) });
     const { p, a, b } = overlap(sources, treeBehind, redHouse);

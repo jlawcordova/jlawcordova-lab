@@ -578,3 +578,36 @@ describe('R15: the harbor\'s pine moved behind the red house', () => {
     assert.equal(await colorAt(-16, 88), 'wood-3');
   });
 });
+
+describe('R8: a footprint on the harbor\'s tree puts its scenes out of order', () => {
+  /** @type {string} */
+  let tmp;
+  /** @type {Session} */
+  let s;
+  before(async () => {
+    tmp = await tempDir('pixellab-harbor-footprint-');
+    const root = join(tmp, 'harbor.pixellab');
+    await cp(join(REPO, 'examples', 'harbor.pixellab'), root, { recursive: true });
+    const harbor = await openDocument({ doc: root, env: { ...process.env, HOME: tmp } });
+    s = new Session(harbor, { env: { ...process.env, PIXELLAB_STATE: join(tmp, 'state') } });
+  });
+  after(async () => {
+    const { rm } = await import('node:fs/promises');
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  test('R8: object.footprint tree --to 3,3 makes check report out_of_order, and scene.sort then moves the items', async () => {
+    const oc = (/** @type {string} */ name, /** @type {any} */ params) => registry.call(s.context(), name, params);
+    const outOfOrder = async () => (await oc('check', {})).warnings.filter((/** @type {any} */ w) => w.code === 'out_of_order');
+    assert.deepEqual(await outOfOrder(), [], 'the example is in depth order as it stands');
+    await oc('object.footprint', { name: 'tree', to: [3, 3] });
+    const warned = await outOfOrder();
+    assert.deepEqual(warned.map((/** @type {any} */ w) => w.scene).sort(), ['harbor', 'harbor-flat']);
+    assert.ok(warned.every((/** @type {any} */ w) => w.moves > 0), 'each scene says how many items would move');
+    const sorted = await oc('scene.sort', { all: true });
+    assert.equal(sorted.changed, true);
+    assert.deepEqual(sorted.scenes.map((/** @type {any} */ x) => x.scene).sort(), ['harbor', 'harbor-flat']);
+    assert.ok(sorted.scenes.every((/** @type {any} */ x) => x.moved > 0), 'the sort moves items in both scenes');
+    assert.deepEqual(await outOfOrder(), [], 'sorted again, check is quiet');
+  });
+});
