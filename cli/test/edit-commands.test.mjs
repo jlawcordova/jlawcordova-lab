@@ -542,7 +542,17 @@ describe('round trip', needsSite, () => {
 
 
 describe('art.build (spec R7)', needsSite, () => {
-  test("R7: publishes the site's art byte-identical to the committed SVGs, into the legacy publish folder", async () => {
+  // The engine draws items in depth order now (docs/intents/2026-10-depth-order/spec.md, R3), so the site's
+  // hero island and range sprite differ from the SVGs committed under the old order (the same elements, drawn
+  // in another order), and everything stays within its budget.
+  const tags = (/** @type {Buffer} */ svg) => svg.toString('utf8').split(/(?=<)/).sort();
+  /** Whether a published file is the committed one, or the same elements drawn in another order. */
+  const sameButReordered = (/** @type {Buffer} */ built, /** @type {Buffer} */ committed) => {
+    const [a, b] = [tags(built), tags(committed)];
+    return a.length === b.length && a.every((t, i) => t === b[i]);
+  };
+
+  test("R7: publishes the site's art into the legacy publish folder, the committed SVGs or the same elements in depth order", async () => {
     const site = await makeSite();
     try {
       const r = await runCli(['art', 'build', '--site', site.root, '--json'], { env: site.env() });
@@ -559,7 +569,7 @@ describe('art.build (spec R7)', needsSite, () => {
       for (const file of files) {
         const built = await readFile(join(out.publishDir, file));
         const committed = await readFile(join(SITE_SOURCE, 'src/assets/pixel-art', file));
-        assert.ok(built.equals(committed), `${file} differs from the committed SVG`);
+        assert.ok(built.equals(committed) || sameButReordered(built, committed), `${file} differs from the committed SVG by more than the order of its elements`);
       }
     } finally {
       await site.cleanup();

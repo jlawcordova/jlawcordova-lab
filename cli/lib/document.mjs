@@ -17,6 +17,7 @@ import { basename, dirname, isAbsolute, join, resolve as resolvePath } from 'nod
 import { pathToFileURL } from 'node:url';
 
 import * as compile from './engine/compile.mjs';
+import * as depth from './engine/depth.mjs';
 import * as edit from './engine/edit.mjs';
 import * as engine from './engine/engine.mjs';
 import * as iso from './engine/iso.mjs';
@@ -40,8 +41,8 @@ export const SITE_BUDGETS = {
 /** The night theme's page color when a manifest names none (the site's dark --color-page). */
 export const DEFAULT_THEME = { darkPage: '#1C1712' };
 
-export const ENGINE_MODULES = /** @type {const} */ (['engine', 'iso', 'motion', 'serialize', 'edit', 'starter']);
-const MODULES = { engine, iso, motion, serialize, edit, starter, preview, compile };
+export const ENGINE_MODULES = /** @type {const} */ (['engine', 'iso', 'depth', 'motion', 'serialize', 'edit', 'starter']);
+const MODULES = { engine, iso, depth, motion, serialize, edit, starter, preview, compile };
 
 /** The config file: `{"document": "<path>"}` or `{"site": "<checkout>"}`. */
 export const configFile = () => join(homedir(), '.config', 'pixellab', 'config.json');
@@ -274,7 +275,7 @@ export function checkDocument(root, from = 'flag', via = 'doc') {
  *   budgets: Record<string, { raw: number, gzip: number }>,
  *   preview: { card?: string, grid?: string },
  *   theme: { darkPage: string },
- *   engine: typeof engine, iso: typeof iso, motion: typeof motion, serialize: typeof serialize,
+ *   engine: typeof engine, iso: typeof iso, depth: typeof depth, motion: typeof motion, serialize: typeof serialize,
  *   edit: typeof edit, starter: typeof starter, preview_: typeof preview, compile: typeof compile,
  *   loadDocs: () => Promise<Docs>,
  * }} Document

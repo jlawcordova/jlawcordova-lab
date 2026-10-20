@@ -4,7 +4,8 @@
 // layer trees. It uses no Node or DOM APIs, so `npm run art` and the editor
 // run the same code.
 
-import { blockFaces, blockSize, footprint, LEVEL_H, tilePixels, TILE_H, TILE_W, tileToPx } from './iso.mjs';
+import { blockBox, sortNodes, spriteBox, spriteHeight, unionBounds, unionBox } from './depth.mjs';
+import { blockFaces, blockSize, footprint, LEVEL_H, pxToTileExact, tilePixels, TILE_H, TILE_W, tileToPx } from './iso.mjs';
 import { filledKeys, itemsById, loopFrame, motionClass, motionCss, poseClass, posesOf, validateMotion } from './motion.mjs';
 
 /**
@@ -25,6 +26,7 @@ import { filledKeys, itemsById, loopFrame, motionClass, motionCss, poseClass, po
  *   block?: Block,
  *   character: boolean,
  *   anchor: [number, number],
+ *   footprint: [number, number],
  *   keys: Record<string, string>,
  *   layers: SpriteLayer[],
  *   width: number,
@@ -32,6 +34,8 @@ import { filledKeys, itemsById, loopFrame, motionClass, motionCss, poseClass, po
  * }} Resolved
  * @typedef {{ pixels: Map<string, string>, colors: Set<string> }} Layer
  * @typedef {{ attrs: [string, string][], frame?: number, frames?: number, hidden?: boolean, children: (Group | Layer)[] }} Group
+ * @typedef {import('./depth.mjs').Box} DepthBox
+ * @typedef {import('./depth.mjs').Bounds} DepthBounds
  */
 
 export const TIERS = /** @type {const} */ (['world', 'outfit']);
@@ -142,7 +146,9 @@ function validatePalette({ palette }, problems) {
   }
 }
 
-const OBJECT_PROPS = ['kind', 'extends', 'anchor', 'keys', 'rows', 'layers'];
+const OBJECT_PROPS = ['kind', 'extends', 'anchor', 'footprint', 'keys', 'rows', 'layers'];
+/** A sprite's footprint is whole tiles, 1 to this many each way. */
+export const MAX_FOOTPRINT = 16;
 const BLOCK_PROPS = ['kind', 'size', 'faces', 'surface', 'sides'];
 const SIDES_PROPS = ['keys', 'left', 'right'];
 /** A side map is one tile's face wide (its 16-pixel period along the face) and one level high. */
@@ -172,6 +178,9 @@ function validateObjectShape(sources, name, problems) {
   for (const key of Object.keys(obj)) if (!OBJECT_PROPS.includes(key)) add(`unknown property ${q(key)}`);
   if (obj.kind !== 'sprite') add(`kind must be 'sprite' or 'block', got ${q(obj.kind)}`);
   if ('anchor' in obj && !isWhole(obj.anchor, 2)) add('anchor must be two whole numbers');
+  if ('footprint' in obj && !(isWhole(obj.footprint, 2) && obj.footprint.every((/** @type {number} */ n) => n >= 1 && n <= MAX_FOOTPRINT))) {
+    add(`footprint must be two whole numbers, tiles wide and deep, from 1 to ${MAX_FOOTPRINT}`);
+  }
 
   const keys = obj.keys ?? {};
   if ('keys' in obj && !isRecord(obj.keys)) add('keys must be an object of key: color name');
@@ -249,7 +258,10 @@ function validateObjectShape(sources, name, problems) {
  * @param {(msg: string) => void} add
  */
 function validateBlockShape(sources, obj, add) {
-  for (const key of Object.keys(obj)) if (!BLOCK_PROPS.includes(key)) add(`unknown property ${q(key)}`);
+  for (const key of Object.keys(obj)) {
+    if (key === 'footprint') add('footprint is for sprites; a block\'s size is its footprint');
+    else if (!BLOCK_PROPS.includes(key)) add(`unknown property ${q(key)}`);
+  }
   const sized = isWhole(obj.size, 3) && obj.size[0] >= 1 && obj.size[1] >= 1 && obj.size[2] >= 0;
   if (!sized) add('size must be three whole numbers: tiles wide, tiles deep (both at least 1) and levels high (0 is a flat tile)');
   if (!isRecord(obj.faces)) add('faces must be an object of face: color name');
@@ -456,6 +468,8 @@ function extendsChain(sources, name) {
   return { names, cycle: false };
 }
 
+/** An item's or group's override: draw in front of, or behind, the rest of its list (depth.mjs). */
+const DEPTHS = ['front', 'back'];
 const SCENE_PROPS = ['output', 'viewBox', 'origin', 'layers', 'items', 'motion'];
 const LAYER_PROPS = ['id', 'name', 'parent'];
 /** A layer's name: 1–64 characters on one line, no spaces at either end. */
@@ -553,7 +567,8 @@ function validateItems(sources, items, path, add, ids, layers) {
     const where = `${path}[${i}]`;
     if (!isRecord(item)) return add(`${where}: must be { object, at } or { group, items }`);
     if ('group' in item) {
-      for (const key of Object.keys(item)) if (key !== 'group' && key !== 'items') add(`${where}: unknown property ${q(key)}`);
+      for (const key of Object.keys(item)) if (!['group', 'depth', 'items'].includes(key)) add(`${where}: unknown property ${q(key)}`);
+      if ('depth' in item && !DEPTHS.includes(item.depth)) add(`${where}: depth must be 'front' or 'back'`);
       if (!isRecord(item.group)) add(`${where}: group must be an object of attributes`);
       else {
         for (const [attr, value] of Object.entries(item.group)) {
@@ -567,7 +582,8 @@ function validateItems(sources, items, path, add, ids, layers) {
       if (!Array.isArray(item.items)) return add(`${where}: items must be a list`);
       return validateItems(sources, item.items, `${where}.items`, add, ids, layers);
     }
-    for (const key of Object.keys(item)) if (!['object', 'id', 'class', 'layer', 'at'].includes(key)) add(`${where}: unknown property ${q(key)}`);
+    for (const key of Object.keys(item)) if (!['object', 'id', 'class', 'layer', 'depth', 'at'].includes(key)) add(`${where}: unknown property ${q(key)}`);
+    if ('depth' in item && !DEPTHS.includes(item.depth)) add(`${where}: depth must be 'front' or 'back'`);
     if ('layer' in item && (typeof item.layer !== 'string' || !layers.has(item.layer))) add(`${where}: layer ${q(item.layer)} is no layer of this scene`);
     if ('id' in item) {
       if (typeof item.id !== 'string' || !NAME.test(item.id)) add(`${where}: id must be lowercase kebab-case`);
@@ -579,10 +595,15 @@ function validateItems(sources, items, path, add, ids, layers) {
       add(`${where}: class must be lowercase class names separated by single spaces`);
     }
     const at = item.at;
-    if (!isRecord(at) || Object.keys(at).length !== 1 || !('px' in at || 'tile' in at)) {
-      add(`${where}: at must be { px: [x, y] } or { tile: [col, row, level] }`);
+    const placed = isRecord(at) ? Object.keys(at).filter((key) => key !== 'level') : [];
+    if (!isRecord(at) || placed.length !== 1 || !(placed[0] === 'px' || placed[0] === 'tile') || Object.keys(at).some((key) => key !== 'level' && key !== placed[0])) {
+      add(`${where}: at must be { px: [x, y], level? } or { tile: [col, row, level] }`);
     } else if ('px' in at && !isWhole(at.px, 2)) add(`${where}: at.px must be two whole numbers`);
     else if ('tile' in at && !isWhole(at.tile, 3)) add(`${where}: at.tile must be three whole numbers`);
+    if (isRecord(at) && 'level' in at) {
+      if ('tile' in at) add(`${where}: at.level is only for at.px; a tile's level is its third number`);
+      else if (!Number.isInteger(at.level)) add(`${where}: at.level must be a whole number`);
+    }
   });
 }
 
@@ -612,6 +633,7 @@ export function resolve(sources, name, seen = []) {
       name,
       character: name === 'character',
       anchor: anchor ?? [0, 0],
+      footprint: ownFootprint(obj) ?? [1, 1],
       keys: { ...obj.keys },
       layers,
       width: first[0].length,
@@ -635,12 +657,20 @@ export function resolve(sources, name, seen = []) {
     name,
     character: name === 'character' || base.character,
     anchor: anchor ?? base.anchor,
+    footprint: ownFootprint(obj) ?? base.footprint,
     keys: { ...base.keys, ...obj.keys },
     layers,
     width: base.width,
     height: base.height,
   };
 }
+
+/**
+ * A sprite's own `footprint`, copied, or undefined.
+ * @param {any} obj
+ * @returns {[number, number] | undefined}
+ */
+const ownFootprint = (obj) => (Array.isArray(obj.footprint) ? [obj.footprint[0], obj.footprint[1]] : undefined);
 
 /**
  * A block as a Resolved: its surface is the one layer, and its size is the
@@ -660,6 +690,7 @@ function resolveBlock(name, obj) {
     block: { size: obj.size, faces: { ...obj.faces }, surface, ...(sides ? { sides } : {}) },
     character: false,
     anchor: [0, 0],
+    footprint: [obj.size[0], obj.size[1]],
     keys: { ...surface?.keys },
     layers,
     width,
@@ -914,23 +945,205 @@ function draw(obj, ox, oy, group) {
 
 /**
  * Renders a scene to a tree that mirrors its groups, placement classes and
- * frame loops. Items paint in source order.
+ * frame loops. Every list of items (the scene's, and each group's) paints in
+ * depth order, back to front (depth.mjs): of two items whose pixels could
+ * overlap, the one behind paints first, whatever order the file lists them in.
  * @param {Sources} sources
  * @param {string} name
  * A scene with motion also returns the CSS that plays it, and each tracked
  * item is drawn at its rest frame in its own group (motion.mjs).
+ * With `order: 'list'` the items paint in the order the file lists them, as
+ * engines before the depth order did (what `scene.sort` compares against, and
+ * a preview that has already put its items in order).
+ * @param {{ order?: 'depth' | 'list' }} [options]
  * @returns {{ viewBox: number[], root: Group, style?: string }}
  */
-export function renderScene(sources, name) {
+export function renderScene(sources, name, { order = 'depth' } = {}) {
   const scene = sources.scenes.get(name);
   if (!scene) throw new Error(`scene ${q(name)} does not exist`);
   /** @type {Group} */
   const root = { attrs: [], children: [] };
-  const tracks = new Map((scene.motion?.tracks ?? []).map((/** @type {any} */ track) => [track.item, track]));
-  placeItems(sources, scene.items, root, scene.origin ?? [0, 0], tracks);
+  const tracks = tracksOf(scene);
+  const origin = scene.origin ?? [0, 0];
+  const items = order === 'list' ? scene.items : arrange(sources, scene.items, origin, tracks).items;
+  placeItems(sources, items, root, origin, tracks);
   if (!tracks.size) return { viewBox: scene.viewBox, root };
   return { viewBox: scene.viewBox, root, style: motionCss(scene.motion, itemsById(scene.items)) };
 }
+
+// --------------------------------------------------------------------- depth
+
+/** A scene's motion tracks by item id. @param {any} scene @returns {Map<string, any>} */
+const tracksOf = (scene) => new Map((scene.motion?.tracks ?? []).map((/** @type {any} */ track) => [track.item, track]));
+
+/**
+ * What the depth order needs of an object, cached per set of sources: where
+ * its pixels fall with its anchor at (0, 0), over every layer and frame (a
+ * block's faces and sides), and the sizes its box comes from.
+ * @typedef {{ bounds: DepthBounds | null, footprint: [number, number], height: number, block?: number[] }} Extent
+ */
+/** @type {WeakMap<object, Map<string, Extent>>} */
+const EXTENTS = new WeakMap();
+
+/**
+ * @param {Sources} sources
+ * @param {string} name
+ * @returns {Extent}
+ */
+function extentOf(sources, name) {
+  let byName = EXTENTS.get(sources.objects);
+  if (!byName) EXTENTS.set(sources.objects, (byName = new Map()));
+  let found = byName.get(name);
+  if (!found) {
+    const obj = resolve(sources, name);
+    found = {
+      bounds: treeBounds(renderObject(sources, name)),
+      footprint: obj.footprint,
+      height: spriteHeight(obj.anchor[1]),
+      ...(obj.block ? { block: obj.block.size } : {}),
+    };
+    byName.set(name, found);
+  }
+  return found;
+}
+
+/**
+ * The bounds of every pixel in a tree, in every group (every frame and pose).
+ * @param {Group} group
+ * @returns {DepthBounds | null}
+ */
+function treeBounds(group) {
+  /** @type {DepthBounds | null} */
+  let out = null;
+  for (const child of group.children) {
+    if ('pixels' in child) out = unionBounds([out, bounds(child.pixels.keys())]);
+    else out = unionBounds([out, treeBounds(child)]);
+  }
+  return out;
+}
+
+/**
+ * A placed object's node for the sort: the box it stands in and the pixels it
+ * can draw on. A tracked item rests where the SVG draws it, at its placement
+ * plus its first key's move, and its pixels cover all its poses.
+ * @param {Sources} sources
+ * @param {any} item
+ * @param {number[]} origin
+ * @param {Map<string, any>} tracks
+ * @returns {{ box: DepthBox, bounds: DepthBounds | null }}
+ */
+function itemNode(sources, item, origin, tracks) {
+  const track = item.id !== undefined ? tracks.get(item.id) : undefined;
+  let [x, y] = item.at.tile ? tileToPx(item.at.tile, origin) : item.at.px;
+  const level = item.at.tile ? item.at.tile[2] : (item.at.level ?? 0);
+  let standing = item.object;
+  let poses = [item.object];
+  if (track) {
+    const rest = filledKeys(track, item.object)[0];
+    [x, y] = [x + rest.move[0], y + rest.move[1]];
+    standing = rest.pose;
+    poses = posesOf(track, item.object);
+  }
+  const [c, r] = item.at.tile && !track ? item.at.tile : pxToTileExact([x, y], level, origin);
+  const extent = extentOf(sources, standing);
+  const box = extent.block ? blockBox(c, r, level, extent.block) : spriteBox(c, r, level, extent.footprint, extent.height);
+  const shifted = poses.map((pose) => {
+    const b = extentOf(sources, pose).bounds;
+    return b && { minX: b.minX + x, minY: b.minY + y, maxX: b.maxX + x, maxY: b.maxY + y };
+  });
+  return { box, bounds: unionBounds(shifted) };
+}
+
+/** A group that is one variant of a run (the site shows one at a time). @param {any} item */
+const isVariantGroup = (item) => 'group' in item && isRecord(item.group) && 'data-class' in item.group;
+
+/**
+ * Puts one list in depth order: groups sort as one object (their box is the
+ * union of their members' boxes at rest) with their members sorted inside,
+ * and a run of consecutive variant groups sorts as one unit and keeps its own
+ * order. Items keep the order the file lists them in unless an overlap forces
+ * a change. Back-marked items come first, front-marked last. Returns copies of
+ * the groups, the same item objects, the new order, and whether the list and
+ * every list inside it already were in order.
+ * @param {Sources} sources
+ * @param {any[]} items
+ * @param {number[]} origin
+ * @param {Map<string, any>} tracks
+ * @returns {{ items: any[], order: number[], sorted: boolean, box: DepthBox | null, bounds: DepthBounds | null }}
+ */
+function arrange(sources, items, origin, tracks) {
+  let inside = true;
+  const parts = items.map((item, index) => {
+    if ('group' in item) {
+      const inner = arrange(sources, item.items ?? [], origin, tracks);
+      inside &&= inner.sorted;
+      return { index, item: inner.sorted ? item : { ...item, items: inner.items }, box: inner.box, bounds: inner.bounds, depth: item.depth };
+    }
+    return { index, item, ...itemNode(sources, item, origin, tracks), depth: item.depth };
+  });
+  /** @param {typeof parts} list */
+  const runs = (list) => {
+    /** @type {(typeof parts)[]} */
+    const out = [];
+    list.forEach((part, i) => {
+      if (isVariantGroup(part.item) && i > 0 && isVariantGroup(list[i - 1].item)) out[out.length - 1].push(part);
+      else out.push([part]);
+    });
+    return out;
+  };
+  let list = parts;
+  // Sorting can bring two variant groups side by side, which then make a run
+  // of their own; sort again until the runs stop merging, so a sorted list
+  // sorts to itself.
+  for (;;) {
+    const units = runs(list);
+    const order = sortNodes(units.map((u) => ({ box: unionBox(u.map((p) => p.box)), bounds: unionBounds(u.map((p) => p.bounds)), depth: u[0].depth })));
+    list = order.flatMap((i) => units[i]);
+    if (runs(list).length === units.length) break;
+  }
+  const order = list.map((p) => p.index);
+  return {
+    items: list.map((p) => p.item),
+    order,
+    sorted: inside && order.every((index, i) => index === i),
+    box: unionBox(parts.map((p) => p.box)),
+    bounds: unionBounds(parts.map((p) => p.bounds)),
+  };
+}
+
+/**
+ * The order one list of items draws in, as indices into it: its groups count
+ * as one object each, and the members inside are not sorted. A tracked item
+ * rests at its first key; give the scene's tracks, by item id, to count them.
+ * @param {Sources} sources
+ * @param {any[]} items
+ * @param {number[]} [origin]
+ * @param {Map<string, any>} [tracks]
+ * @returns {number[]}
+ */
+export function depthOrder(sources, items, origin = [0, 0], tracks = new Map()) {
+  return arrange(sources, items, origin, tracks).order;
+}
+
+/**
+ * A copy of the scene with every list of items, the scene's and each group's,
+ * in depth order.
+ * @param {Sources} sources
+ * @param {any} scene
+ * @returns {any}
+ */
+export function sceneInOrder(sources, scene) {
+  const copy = structuredClone(scene);
+  copy.items = arrange(sources, copy.items, copy.origin ?? [0, 0], tracksOf(copy)).items;
+  return copy;
+}
+
+/**
+ * Whether every list of the scene's items is in depth order already.
+ * @param {Sources} sources
+ * @param {any} scene
+ */
+export const isInDepthOrder = (sources, scene) => arrange(sources, scene.items, scene.origin ?? [0, 0], tracksOf(scene)).sorted;
 
 /**
  * @param {Sources} sources
