@@ -220,13 +220,40 @@ struct ItemLayerLines: View {
             }
         }
         if let g = item.group, let group = doc.groups.first(where: { $0.path == g }) {
-            Text("SVG group \(g)\(Self.attributes(group).map { " · \($0)" } ?? "")")
-                .font(Theme.monoFont(10))
-                .foregroundStyle(Theme.inkMuted)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .help("The site's wrapper around the item (scene group set edits it)")
+            HStack(spacing: 6) {
+                Text("SVG group \(g)\(Self.attributes(group).map { " · \($0)" } ?? "")")
+                    .font(Theme.monoFont(10))
+                    .foregroundStyle(Theme.inkMuted)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help("The site's wrapper around the item (scene group set edits it)")
+                Spacer(minLength: 0)
+                groupDepthMenu(group)
+            }
         }
+    }
+
+    /// The wrapper's depth: it sorts as one object, so Front and Back draw it
+    /// over or under everything else in its list (docs/intents/2026-10-depth-order/spec.md, D5, D7).
+    private func groupDepthMenu(_ group: SceneGroupInfo) -> some View {
+        let mode = group.depthMode
+        return Menu {
+            Picker("Group depth", selection: Binding(get: { mode }, set: { m in Task { await model.editor.setGroupDepth(group.path, m) } })) {
+                ForEach(DepthMode.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            Text(mode == .auto ? "Depth" : "Depth: \(mode.title)")
+                .font(.system(size: 11))
+                .lineLimit(1)
+        }
+        .menuStyle(.button)
+        .controlSize(.small)
+        .fixedSize()
+        .help("Depth of the SVG group: Front draws it over everything in its list, Back under everything")
+        .accessibilityLabel("Group depth")
+        .accessibilityValue(mode.title)
     }
 
     /// ".enter · enter=object": its class and data-* other than the coordinates.
