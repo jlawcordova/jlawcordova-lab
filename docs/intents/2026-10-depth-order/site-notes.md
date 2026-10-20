@@ -6,26 +6,26 @@ Its art changes when the new engine draws it, even before any key is added, beca
 
 ## The numbers
 
-Taken on a temp copy of the site's document (`src/assets/pixel-art/jlawcordova.pixellab`, as of 2026-10-20), on this change's branch before the sort follow-up (the rest sort moving fewer items) lands. **That follow-up changes which valid order is chosen, so these numbers may drop; they will be refreshed before this change merges.**
+Taken on a temp copy of the site's document (`src/assets/pixel-art/jlawcordova.pixellab`, as of 2026-10-20), on this change's branch with the sort follow-up (the rest sort moving fewer items) merged.
 
 ```sh
 pixellab scene sort --all --dry-run --json --document=<temp copy>
 pixellab check --json --document=<temp copy>
 ```
 
-| Scene | Items moved by the sort | Items `check` says would move | Published pixels that change (time 0) |
-| --- | ---: | ---: | ---: |
-| `hero-island` | 35 | 218 | 281 |
-| `closeup-water` | 9 | 85 | 124 |
-| `closeup-front-trees` | 13 | 93 | 76 |
-| `closeup-office` | 1 | 9 | 36 |
-| `closeup-crane` | 6 | 14 | 20 |
-| `closeup-road-end` | 6 | 32 | 12 |
-| `closeup-land` | 12 | 46 | 6 |
-| `range-sprite` | 4 | 11 | 0 |
-| the other seven (`achievement-frames`, `achievement-icons`, `closeup-sky`, `footer-dirt`, `footer-grass`, `library-demo`, `outfit-preview`) | 0 | 0 | 0 |
+| Scene | Items moved | Published pixels that change (time 0) |
+| --- | ---: | ---: |
+| `hero-island` | 35 | 281 |
+| `closeup-water` | 9 | 124 |
+| `closeup-front-trees` | 13 | 76 |
+| `closeup-office` | 1 | 36 |
+| `closeup-crane` | 2 | 20 |
+| `closeup-road-end` | 6 | 12 |
+| `closeup-land` | 12 | 6 |
+| `range-sprite` | 4 | 0 |
+| the other seven (`achievement-frames`, `achievement-icons`, `closeup-sky`, `footer-dirt`, `footer-grass`, `library-demo`, `outfit-preview`) | 0 | 0 |
 
-The two move columns count different things: the sort's `moved` lists the items it took out of their place, and `check` counts every item whose position in the list changes (an item that moves far shifts the ones it passes). Across the document the sort moves 86 items and 555 published pixels change at time 0, in seven of the 15 scenes (eight have items that move). `changedPixels` compares the scene drawn in its file's list order (as the old engine publishes it) with depth order, so it is what the site sees when it bumps the pin.
+"Items moved" is the items the sort takes out of their place, and it is the number `check`'s `out_of_order` warning gives for each scene (the two agree). Across the document the sort moves 82 items and 555 published pixels change at time 0, in seven of the 15 scenes (eight have items that move). The pixel count compares the scene drawn in its file's list order (as the old engine publishes it) with depth order, so it is what the site sees when it bumps the pin.
 
 Also on that copy:
 
