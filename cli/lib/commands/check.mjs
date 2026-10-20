@@ -39,17 +39,18 @@ export function dependencies(sources, { kind, name }) {
 const fileOf = (/** @type {string} */ problem) => problem.slice(0, problem.indexOf(': '));
 
 /**
- * How many items a sort would move in a scene: in each list, those that would
- * change their index. Counted in the file's lists, groups' members apart.
+ * How many items a sort would move in a scene, as scene.sort counts them: in
+ * each list (groups' members apart), those not in the longest run that keeps
+ * its order, so one item moved far counts once.
  * @param {any} engine
+ * @param {any} depth  the engine's depth module
  * @param {any} sources
  * @param {any} scene
  */
-function misplaced(engine, sources, scene) {
+function misplaced(engine, depth, sources, scene) {
   const tracks = new Map((scene.motion?.tracks ?? []).map((/** @type {any} */ track) => [track.item, track]));
   const walk = (/** @type {any[]} */ items) =>
-    engine.depthOrder(sources, items, scene.origin ?? [0, 0], tracks).filter((/** @type {number} */ index, /** @type {number} */ i) => index !== i).length +
-    items.reduce((n, item) => n + (item.group ? walk(item.items ?? []) : 0), 0);
+    depth.displaced(engine.depthOrder(sources, items, scene.origin ?? [0, 0], tracks)) + items.reduce((n, item) => n + (item.group ? walk(item.items ?? []) : 0), 0);
   return walk(scene.items);
 }
 
@@ -88,7 +89,7 @@ const check = {
         /** @type {any[]} */
         const out = [];
         if (!engine.isInDepthOrder(sources, scene)) {
-          const moves = misplaced(engine, sources, scene);
+          const moves = misplaced(engine, ctx.site.depth, sources, scene);
           out.push({ ...entry(`${file}: items are not in depth order: ${moves} would move (pixellab scene sort ${n} puts them right)`), code: 'out_of_order', scene: n, moves });
         }
         for (const { item, copies } of engine.motionCopies(sources, n)) {
