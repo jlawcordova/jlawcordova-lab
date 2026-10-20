@@ -1,5 +1,5 @@
 # Intent: Draw a scene's items by where they stand
-Author: J. Law. Cordova (owner). Status: draft.
+Author: J. Law. Cordova (owner). Status: accepted.
 
 ## Problem
 After moving a block in the harbor example, things overlapped the wrong way: an item I'd moved behind another still drew over it. I asked whether the drawing order follows the order items are listed in the scene. It does, and moving an item never changes that order.
