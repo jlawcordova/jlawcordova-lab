@@ -200,11 +200,18 @@ export function shownItems(items) {
 }
 
 const px = (/** @type {number} */ v) => (v === 0 ? '0' : `${v}px`);
-const pct = (/** @type {number} */ t, /** @type {number} */ duration) => `${+((t / duration) * 100).toFixed(3)}%`;
+/** A key's place in the loop as a percentage, rounded to 3 decimals as the CSS writes it. */
+export const pctOf = (/** @type {number} */ t, /** @type {number} */ duration) => +((t / duration) * 100).toFixed(3);
+const pct = (/** @type {number} */ t, /** @type {number} */ duration) => `${pctOf(t, duration)}%`;
 
-/** The CSS class of a tracked item's group, and of each of its poses. */
+/**
+ * The CSS class of a tracked item's group, of each of its poses, and of each
+ * copy of it that an item drawn in several places of the depth order has
+ * (depth.mjs, placeWindows): `z0` is the copy that shows at time 0.
+ */
 export const motionClass = (/** @type {string} */ id) => `mv-${id}`;
 export const poseClass = (/** @type {string} */ id, /** @type {number} */ k) => `mv-${id}-${k}`;
+export const copyClass = (/** @type {string} */ id, /** @type {number} */ k) => `mv-${id}-z${k}`;
 
 /**
  * The poses a track uses, the item's own object first.
@@ -215,6 +222,66 @@ export function posesOf(track, object) {
   const out = [object];
   for (const key of track.keys) if (key.pose && !out.includes(key.pose)) out.push(key.pose);
   return out;
+}
+
+/**
+ * Whether a track moves its item (some key's move differs from the first's).
+ * Only a moving item changes where it stands, and so its place in the depth
+ * order; show and pose keys don't.
+ * @param {Track} track
+ * @param {string} object
+ */
+export function isMoving(track, object) {
+  const keys = filledKeys(track, object);
+  return keys.some((k) => k.move[0] !== keys[0].move[0] || k.move[1] !== keys[0].move[1]);
+}
+
+/**
+ * Where a track's item is over the loop, as the CSS plays it: the moves it
+ * takes, each from a percentage of the loop on (the first at 0). Between two
+ * keys the CSS steps with steps(n, end) from the first key's percentage to the
+ * second's, both rounded as motionCss writes them, so step k (of n) begins at
+ * from + (to - from) × k / n. Keys that round to one percentage make no step.
+ * @param {Track} track
+ * @param {string} object
+ * @param {number} duration
+ * @returns {{ at: number, move: [number, number] }[]}
+ */
+export function moveRuns(track, object, duration) {
+  const keys = filledKeys(track, object);
+  const all = [...keys, { ...keys[0], t: duration }];
+  /** @type {{ at: number, move: [number, number] }[]} */
+  const runs = [];
+  const start = (/** @type {number} */ at, /** @type {[number, number]} */ move) => {
+    const last = runs[runs.length - 1];
+    if (!last || last.move[0] !== move[0] || last.move[1] !== move[1]) runs.push({ at, move });
+  };
+  all.forEach((key, i) => {
+    const next = all[i + 1];
+    if (!next) return;
+    const [from, to] = [pctOf(key.t, duration), pctOf(next.t, duration)];
+    if (to <= from) return;
+    const [dx, dy] = [next.move[0] - key.move[0], next.move[1] - key.move[1]];
+    const n = stepsFor(dx, dy);
+    if (n === 0) return start(from, key.move);
+    for (let k = 0; k < n; k++) start(from + ((to - from) * k) / n, [key.move[0] + (dx / n) * k, key.move[1] + (dy / n) * k]);
+  });
+  return runs;
+}
+
+/**
+ * The move a run list gives at percentage `p` of the loop: the last run begun by then.
+ * @param {{ at: number, move: [number, number] }[]} runs
+ * @param {number} p
+ * @returns {[number, number]}
+ */
+export function moveAtPercent(runs, p) {
+  let found = runs[0];
+  for (const run of runs) {
+    if (run.at > p) break;
+    found = run;
+  }
+  return found.move;
 }
 
 /**
