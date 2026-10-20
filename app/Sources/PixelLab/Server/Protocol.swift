@@ -253,11 +253,70 @@ struct SceneItemsResult: Codable, Sendable {
     var groups: [SceneGroupInfo]
 }
 
-/// One motion track: the item id it moves and its key times (ms).
+/// One key of a motion track, as the scene's source holds it: `move` (pixels
+/// from where the scene places the item), `show` and `pose` are only on the
+/// keys that change them; the rest carry on from the key before.
+struct MotionKey: Codable, Sendable, Hashable, Identifiable {
+    var t: Int
+    var move: [Int]?
+    var show: Bool?
+    var pose: String?
+    var id: Int { t }
+
+    /// "move 32, 16, hidden, pose crane-hook-down" (what the key sets; "rest frame" at 0 with nothing set).
+    var spoken: String {
+        var parts: [String] = []
+        if let m = move, m.count == 2 { parts.append("move \(m[0]), \(m[1])") }
+        if let s = show { parts.append(s ? "shown" : "hidden") }
+        if let p = pose { parts.append("pose \(p)") }
+        if parts.isEmpty { return t == 0 ? "rest frame" : "nothing set" }
+        return parts.joined(separator: ", ")
+    }
+}
+
+/// A key with its inherited values filled in (`filledKeys` in motion.mjs,
+/// without the stepping): move [0, 0], shown and the item's own object
+/// (`pose` nil) until a key says otherwise. The `own…` flags say which values
+/// the key sets itself.
+struct FilledKey: Sendable, Hashable {
+    var t: Int
+    var move: [Int]
+    var show: Bool
+    var pose: String?
+    var ownMove: Bool
+    var ownShow: Bool
+    var ownPose: Bool
+}
+
+/// One motion track: the item id it moves and its keys, in time order.
 struct MotionTrack: Sendable, Hashable, Identifiable {
     var item: String
-    var keys: [Double]
+    var keys: [MotionKey]
     var id: String { item }
+
+    /// The key times in ms.
+    var times: [Double] { keys.map { Double($0.t) } }
+
+    func key(at t: Int) -> MotionKey? { keys.first { $0.t == t } }
+
+    /// The key at `t` with the values it inherits from the keys before it.
+    func filled(at t: Int) -> FilledKey? {
+        var move = [0, 0], show = true
+        var pose: String?
+        for key in keys {
+            if let m = key.move, m.count == 2 { move = m }
+            if let s = key.show { show = s }
+            if let p = key.pose { pose = p }
+            if key.t == t { return FilledKey(t: t, move: move, show: show, pose: pose, ownMove: key.move != nil, ownShow: key.show != nil, ownPose: key.pose != nil) }
+            if key.t > t { return nil }
+        }
+        return nil
+    }
+
+    /// The key before and after `t` (by time; neither is the key at `t` itself).
+    func neighbors(of t: Int) -> (previous: MotionKey?, next: MotionKey?) {
+        (keys.last { $0.t < t }, keys.first { $0.t > t })
+    }
 }
 
 /// `scene.show --doc`, only the motion part of the doc.
@@ -265,7 +324,12 @@ struct SceneShowMotion: Codable, Sendable {
     struct Doc: Codable, Sendable {
         struct Motion: Codable, Sendable {
             struct Track: Codable, Sendable {
-                struct Key: Codable, Sendable { var t: Double? }
+                struct Key: Codable, Sendable {
+                    var t: Int?
+                    var move: [Int]?
+                    var show: Bool?
+                    var pose: String?
+                }
                 var item: String
                 var keys: [Key]?
             }
@@ -279,7 +343,10 @@ struct SceneShowMotion: Codable, Sendable {
 }
 
 /// An edit's result: `{ doc, changed, summary, path?, item? }`; object edits
-/// add `pixels` (paint), `layer` (layer edits) or `frame` (frame edits).
+/// add `pixels` (paint), `layer` (layer edits) or `frame` (frame edits);
+/// `scene.move` says when it `keyed` a move past time 0; the key edits
+/// return the `key`, whether it was `pinned` (Add Key) and the track's
+/// off-grid `warnings`.
 struct EditResult: Codable, Sendable {
     var doc: String
     var changed: Bool?
@@ -288,6 +355,10 @@ struct EditResult: Codable, Sendable {
     var pixels: Int?
     var layer: Int?
     var frame: Int?
+    var keyed: Bool?
+    var key: MotionKey?
+    var pinned: Bool?
+    var warnings: [String]?
 }
 
 // MARK: Object editing (slice 5)

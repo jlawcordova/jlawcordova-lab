@@ -71,6 +71,7 @@ async function moveEdit(ctx, params, op, key = null) {
         message: group ? `${r.message}; its group's ${Object.keys(group.attrs).filter((k) => /^data-(x|y|col|row)$/.test(k)).join(', ')} followed` : r.message,
         path: pathString(r.path),
         item: structuredClone(r.item),
+        keyed: r.keyed === true,
         ...(group ? { group } : {}),
       };
     },

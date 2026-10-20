@@ -174,6 +174,8 @@ final class SceneEditor {
     func select(_ path: String?, reveal: Bool = true) {
         guard let doc else { return }
         doc.selectedPath = path
+        // Another item (or none): the pane's key no longer belongs to the selection.
+        if let app, let sk = app.timeline.selectedKey, sk.item != doc.selectedItem?.id { app.timeline.selectedKey = nil }
         if let item = doc.selectedItem {
             if let l = item.at.level { placeLevel = l }
             if reveal { self.reveal(path!) }
@@ -367,13 +369,25 @@ final class SceneEditor {
             moveCursor(dc: dc, dr: dr, dl: dl)
             return nil
         }
-        return await edit("scene.move", ["item": .string(item.path), "by": [JSONValue(dc), JSONValue(dr), JSONValue(dl)]].merging(timeParam) { a, _ in a })
+        return await keyedMove(item, ["item": .string(item.path), "by": [JSONValue(dc), JSONValue(dr), JSONValue(dl)]])
     }
 
     @discardableResult
     func nudge(dx: Int, dy: Int) async -> EditResult? {
         guard let item = selected else { return nil }
-        return await edit("scene.move", ["item": .string(item.path), "nudge": [JSONValue(dx), JSONValue(dy)]].merging(timeParam) { a, _ in a })
+        return await keyedMove(item, ["item": .string(item.path), "nudge": [JSONValue(dx), JSONValue(dy)]])
+    }
+
+    /// `scene.move` at the playhead's time: past 0 an animated item's key
+    /// moves instead, and that key becomes the pane's selected key
+    /// (docs/intents/2026-10-animation-pane/spec.md, R6).
+    private func keyedMove(_ item: SceneItemInfo, _ params: [String: JSONValue]) async -> EditResult? {
+        let time = timeParam
+        let r = await edit("scene.move", params.merging(time) { a, _ in a })
+        if let r, r.keyed == true, let id = item.id, let t = time["time"].flatMap({ $0.doubleValue }).map({ Int($0) }) {
+            await app?.timeline.keyedByStage(item: id, t: t)
+        }
+        return r
     }
 
     func moveCursor(dc: Int, dr: Int, dl: Int) {

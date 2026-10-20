@@ -11,6 +11,8 @@ enum SettingsKey {
     static let appearance = "appearance"
     static let lastDoc = "lastDoc"
     static let showGrid = "showGrid"
+    /// The timeline's animation pane (the tracks and their keys) is open.
+    static let showTracks = "showTracks"
 }
 
 enum AppearanceSetting: String, CaseIterable, Identifiable, Sendable {
