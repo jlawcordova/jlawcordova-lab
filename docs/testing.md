@@ -40,6 +40,8 @@ Other helpers: `runCli()` and `spawnCli()` run the real binary, `startServer()` 
 | `sync.test.mjs` | settling proposals, `doc.reload`, edits since disk, the app's open docs, `doc.merge` and the merge in `proposal.apply` |
 | `merge.test.mjs` | the three-way line merge |
 | `groups.test.mjs` | group attributes following moves, `scene.group.set`, placing into groups |
+| `layers.test.mjs` | scene layers: the format and its checks, the layer commands, placing into a layer, renders that hide or focus, the art staying byte-identical, merging |
+| `examples.test.mjs` | the documents in `examples/`: they match `scripts/make-examples.mjs`, check clean, nest and move as described, and the harbor builds the same SVG with and without layers |
 | `motion-commands.test.mjs` | tracks and keys, `check`'s off-grid warnings, `scene.motion.path` |
 | `map-set.test.mjs` | `object.map.set` |
 | `activity-and-proposals.test.mjs` | activity summaries, proposal order |
@@ -107,7 +109,7 @@ Snapshots draw the window with `cacheDisplay`, so pixel art stays nearest-neighb
 scripts/build-app.sh && scripts/acceptance.sh
 ```
 
-End to end on a temp copy of the site: scene edits, save and publish (six SVGs into the temp site); object painting and save; an agent saving two proposals over MCP through the bundled CLI; the Agent window ghosting, approving and rejecting them; a doc with unsaved edits changed on disk and merged, reloaded and kept, and another proposal approved into an unsaved copy (`stale.txt`); Save As to a copy, reopening it and publishing from it into a folder; and scene layers (`layers.txt`): grouping, renaming, picking, going inside, the layer menu on the stage and on a row, hiding, locking, dragging and nudging, placing into a layer and ungrouping, with the runner checking that the hero island's SVG is byte-identical before and after its layers were saved and that the saved scene holds no hidden or locked state. Run it whenever `app/`, `cli/` or `scripts/acceptance/` changed. Its `expect` lines pin the art as it was on 2026-10-20: after the site's art changes, update the scripts in `scripts/acceptance/`.
+End to end on a temp copy of the site: scene edits, save and publish (six SVGs into the temp site); object painting and save; an agent saving two proposals over MCP through the bundled CLI; the Agent window ghosting, approving and rejecting them; a doc with unsaved edits changed on disk and merged, reloaded and kept, and another proposal approved into an unsaved copy (`stale.txt`); Save As to a copy, reopening it and publishing from it into a folder; and scene layers (`layers.txt`): grouping, renaming, picking, going inside, the layer menu on the stage and on a row, hiding, locking, dragging and nudging, placing into a layer and ungrouping, with the runner checking that the hero island's SVG is byte-identical before and after its layers were saved and that the saved scene holds no hidden or locked state; then the example documents (`examples-harbor.txt`, `examples-town.txt`, each on a temp copy of an `examples/` document), with layers read from a file three and four levels deep. Run it whenever `app/`, `cli/` or `scripts/acceptance/` changed. Its `expect` lines pin the art as it was on 2026-10-20: after the site's art changes, update the scripts in `scripts/acceptance/`.
 
 ## CI
 

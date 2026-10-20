@@ -27,6 +27,7 @@
   "scripts": {
     "test": "node --test \"cli/test/**/*.test.mjs\"",
     "docs:cli": "node scripts/docs-cli.mjs",
-    "docs:site": "node scripts/docs-site/build.mjs"
+    "docs:site": "node scripts/docs-site/build.mjs",
+    "examples": "node scripts/make-examples.mjs"
   }
 }

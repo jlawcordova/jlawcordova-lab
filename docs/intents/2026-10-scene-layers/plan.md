@@ -38,6 +38,7 @@
 - `app/Sources/PixelLab/Support/ScriptRunner.swift`: D14's actions and expects.
 - `app/Tests/PixelLabTests/LayerTests.swift` (new): the tree, picking, targets, rows and keys, Moved by.
 - `scripts/acceptance/layers.txt` (new), `scripts/acceptance.sh`: the layers pass and its byte-identity check.
+- `scripts/make-examples.mjs`, `examples/` (`harbor.pixellab`, `town.pixellab`, `README.md`), `cli/test/examples.test.mjs`, `scripts/acceptance/examples-harbor.txt`, `examples-town.txt`, `scripts/try-example.sh` (all new), `package.json` (`npm run examples`): the example documents, added at the owner's request after the verification.
 - Docs: `README.md`, `app/README.md`, `cli/README.md`, `docs/architecture.md`, `docs/testing.md`, `CLAUDE.md`, `docs/screenshots/layers-*.png` (new), and this plan's "As built".
 
 ## Order of work
@@ -80,6 +81,7 @@ main ── feat/scene-layers ─ (intent, spec, plan) ────────�
 - `scene.place --layer` sets the layer in `scene-edit.mjs` (with `layer-ops.mjs`'s `setItemLayer`) after `scene-ops.mjs` places the item, rather than inside `place` and `placeInGroup`.
 - After the `verify-change` run on #20: a three-way merge where both sides made a scene's first layers kept only one list, so `foldScene` folds them and `Session.merge` refuses a clash or a merge that adds problems (D1, with tests); the sidebar now gives the scene list, and the Layers tree or the Library grid, scroll areas of their own (D11), with LAYERS, LIBRARY and the chip pinned; `layers.txt` checks what a locked layer's click picks (`expect inspector item`), that another scene has no hidden or locked layers, and a real mouse drag; `expect menu` says `closed` when no menu is open; the tree's Esc clears the selection before leaving, as the stage does (R9; the spec's D11 said otherwise).
 - After its re-check: a layer both sides made under the same default name wrote the same line on both sides, so the line merge took it once and two groups became one; `Session.merge` now refuses a layer id new on both sides unless both put the same items in it (D1, with a test each way). The scene list's heading got a little room above the list.
+- At the owner's request, example documents in `examples/` to try and test layers on (R18): `scripts/make-examples.mjs` writes `harbor.pixellab` (89 items, 16 layers three deep, the site's `{ group }` wrappers, an animated boat, two rocks in no layer, and `harbor-flat`, the same scene without layers, which builds the same SVG) and `town.pixellab` (379 items, 59 layers four deep) from the starter palette; `examples.test.mjs` checks they match the generator, check clean and nest as described; `acceptance.sh` runs `examples-harbor.txt` and `examples-town.txt` on temp copies; `scripts/try-example.sh` opens the app on a copy. With three crumbs the pill's Done button was squeezed to "Do…", so it keeps its size (`fixedSize`).
 
 ## Workflow and reviews
 

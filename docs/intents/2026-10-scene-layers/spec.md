@@ -33,7 +33,7 @@ The prototype named in the intent is the design for everything the owner sees. T
 
 **Proof and standards**
 
-- **R18. The script hook and the acceptance pass.** The script hook has actions and `expect` lines for all of it (listed in `ScriptRunner.swift` and in `CLAUDE.md`), and `scripts/acceptance/` covers layers end to end, including that a published SVG is byte-identical before and after layers are made.
+- **R18. The script hook and the acceptance pass.** The script hook has actions and `expect` lines for all of it (listed in `ScriptRunner.swift` and in `CLAUDE.md`), and `scripts/acceptance/` covers layers end to end, including that a published SVG is byte-identical before and after layers are made. Two example documents in `examples/`, made by a script, give layers read from a file (nested four deep, and around the site's `{ group }` wrappers) for the CLI tests and the acceptance pass, and something to try the app on without the site.
 - **R19. Docs.** The README's tour and shortcuts (⌘G, ⇧⌘G), the docs that mention the Items tab, `CLAUDE.md`'s hook list, the MCP server's instructions and the generated `docs/cli.md` describe layers.
 - **R20. Accessibility and the app's rules.** VoiceOver labels on every row, button, menu item and the stage; visible focus on the tree, the menu and the fields; a full keyboard path through the Layers tree; Reduce Motion turns off the fade's animation and the chevrons'. Colors from the board 03 tokens, no `@State`, no new npm or Swift dependencies.
 

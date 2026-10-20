@@ -182,9 +182,13 @@ swift build --package-path app             # debug build; swift build -c release
 scripts/build-app.sh                       # build/Pixel Lab.app (icon, bundled CLI, ad-hoc signature)
 scripts/snapshot.sh /tmp/hero.png scene:hero-island dark   # read-only self-snapshot of the main window
 scripts/acceptance.sh                      # the end-to-end acceptance pass on a temp copy of the site
+scripts/try-example.sh town                # the app on a temp copy of an example document (examples/)
+npm run examples                           # rewrite examples/ from scripts/make-examples.mjs
 npm run docs:cli                           # regenerate docs/cli.md from the command registry
 npm run docs:site                          # build the developer docs site into build/docs-site/
 ```
+
+**Example documents.** [`examples/`](examples/README.md) has two documents to try scene layers on without the site: `harbor.pixellab`, a small island with layers three deep and the site's `{ group }` wrappers, and `town.pixellab`, about 400 items in 59 layers four deep. `scripts/try-example.sh [harbor|town]` opens the built app on a temp copy, so nothing in the repo changes.
 
 **Script hook.** `PIXELLAB_SCRIPT=<file> PIXELLAB_DOC=<temp copy of a document> PIXELLAB_STATE=<temp dir> "build/Pixel Lab.app/Contents/MacOS/PixelLab"` (or `PIXELLAB_SITE=<temp copy of the site>`) drives the app's model headlessly, one action per line (`open scene:hero-island`, `library pine`, `place 4 -1 1`, `move 1 0`, `save`, `publish`, `saveas <path>`, `mode object`, `px 23 20`, `agent open`, `approve`, `snapshot <png>`, `expect …`); it refuses the real checkout and anything inside it, logs each step and exits 0 only if every step passed. The action list is at the top of `app/Sources/PixelLab/Support/ScriptRunner.swift`; [CLAUDE.md](CLAUDE.md) says how to make the temp copy.
 

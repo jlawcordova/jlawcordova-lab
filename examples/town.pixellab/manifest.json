@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "name": "town",
+  "publish": {
+    "budgets": {
+      "town.svg": {
+        "raw": 409600,
+        "gzip": 81920
+      }
+    }
+  }
+}

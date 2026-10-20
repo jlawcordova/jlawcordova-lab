@@ -8,7 +8,9 @@
 # unsaved copy (stale-agent.mjs, stale.txt); the document is saved as a
 # copy, reopened and published into a folder (document.txt); and scene layers are
 # made, picked, gone inside, hidden, locked, moved, placed into and ungrouped, with
-# the hero island's SVG byte-identical before and after they're saved (layers.txt).
+# the hero island's SVG byte-identical before and after they're saved (layers.txt);
+# then the example documents' layers, read from a file, on temp copies of
+# examples/ (examples-harbor.txt, examples-town.txt).
 # The real checkout is only read (copied). Exits 0 if every step passed.
 #
 #   scripts/acceptance.sh [out-dir]      (default: a new temp dir)
@@ -33,6 +35,15 @@ git -C "$site" init -q && git -C "$site" add -A && git -C "$site" -c user.email=
 run() { # run <script> <log>
   sed "s#@OUT@#$shots#g" "$root/scripts/acceptance/$1" > "$out/$1"
   PIXELLAB_SCRIPT="$out/$1" PIXELLAB_SITE="$site" PIXELLAB_STATE="$state" "$app/Contents/MacOS/PixelLab" 2>&1 | grep '^script:' > "$out/$2" || true
+  tail -1 "$out/$2"
+  grep -q 'all steps passed' "$out/$2"
+}
+
+run_example() { # run_example <script> <log> <example>: on a temp copy of examples/<example>.pixellab
+  local doc="$out/examples/$3.pixellab"
+  rm -rf "$doc" && mkdir -p "$out/examples" && cp -R "$root/examples/$3.pixellab" "$doc"
+  sed "s#@OUT@#$shots#g" "$root/scripts/acceptance/$1" > "$out/$1"
+  PIXELLAB_SCRIPT="$out/$1" PIXELLAB_DOC="$doc" PIXELLAB_STATE="$state" "$app/Contents/MacOS/PixelLab" 2>&1 | grep '^script:' > "$out/$2" || true
   tail -1 "$out/$2"
   grep -q 'all steps passed' "$out/$2"
 }
@@ -63,6 +74,9 @@ grep -q '^  layers: \[$' "$scene" || { echo "the saved hero island has no layers
 if grep -qE 'hidden|locked' "$scene"; then echo "hidden or locked state went into the scene file" >&2; exit 1; fi
 grep -q '"group-3"' "$state/layer-view.json" || { echo "the hidden Sky layer isn't in the app's view state" >&2; exit 1; }
 echo "hero-island.svg identical with layers; the scene holds $(grep -c "layer: '" "$scene") items in layers and no view state"
+echo "==> the example documents: layers from the file, three and four levels deep"
+run_example examples-harbor.txt examples-harbor.log harbor
+run_example examples-town.txt examples-town.log town
 echo "==> the temp site after the run"
 git -C "$site" diff --stat HEAD~1 HEAD
 git -C "$site" diff --stat

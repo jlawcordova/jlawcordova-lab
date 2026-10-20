@@ -165,6 +165,7 @@ struct BreadcrumbPill: View {
             if layers.inside != nil {
                 Button("Done") { layers.done() }
                     .buttonStyle(AccentButtonStyle(height: 24))
+                    .fixedSize()
                     .padding(.leading, 4)
                     .help("Leave this layer (Esc)")
             }

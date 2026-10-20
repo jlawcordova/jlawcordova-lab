@@ -1,0 +1,45 @@
+# The harbor example (examples/harbor.pixellab, a temp copy): layers that come from the file,
+# nested three deep, beside the site's { group } wrappers, with an animated boat in a layer.
+# Pixels are scene pixels: 0,-16 is the red house's roof, -16,8 a grass tile's top.
+appearance dark
+open scene:harbor
+expect tab layers
+expect scenelayers 16
+# Ground, Village, Harbor, Trees, and two rocks in no layer
+expect rows 6
+# a click on the roof picks the outermost layer; double-clicks go a level down at a time
+click 0 -16
+expect selection layer:village
+dblclick 0 -16
+expect inside village
+expect selection layer:houses
+dblclick 0 -16
+expect inside houses
+expect selection layer:red-house
+expect crumbs harbor›Village›Houses
+snapshot @OUT@/example-harbor-inside-dark.png
+crumb 0
+expect inside none
+# hiding Ground takes the grass away; the scene file never says so
+expect scenepixel -16,8 #8FA56E
+hide Ground
+expect scenepixel -16,8 empty
+show Ground
+expect scenepixel -16,8 #8FA56E
+# a locked Village passes clicks through (nothing behind the roof there)
+lock Village
+click 0 -16
+expect selection none
+unlock Village
+# moving Harbor moves the dock, the lamps and the animated boat together
+select layer:harbor
+move 1 0
+expect movedby 1,0
+undo
+expect movedby 0,0
+# the same scene without layers lists every item at the top level
+open scene:harbor-flat
+expect scenelayers 0
+expect rows 89
+click 0 -16
+expect object roof-red
