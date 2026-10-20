@@ -1,6 +1,7 @@
 // Read-only scene commands: scene.list, scene.show, scene.items, scene.render.
 
 import { UsageError } from '../errors.mjs';
+import { closure, findLayer } from '../layer-ops.mjs';
 import { flattenItems, MAX_SCALE, parsePath, renderSceneImage } from '../render.mjs';
 
 const NAME = { type: 'string', description: 'scene name (or scenes/<name>)' };
@@ -76,7 +77,7 @@ const show = {
   mutates: false,
   async run(ctx, { name: query, doc }) {
     const { name, scene } = await sceneDoc(ctx, query);
-    const { items, groups } = flattenItems(ctx.site, scene);
+    const { items, groups, layers } = flattenItems(ctx.site, scene);
     /** @type {Record<string, number>} */
     const objects = {};
     for (const item of items) objects[item.object] = (objects[item.object] ?? 0) + 1;
@@ -88,6 +89,8 @@ const show = {
       origin: scene.origin ?? [0, 0],
       items: items.length,
       groups: groups.length,
+      layers: layers.length,
+      layerNames: layers.map((/** @type {any} */ l) => l.name),
       objects,
       motion: scene.motion
         ? { duration: scene.motion.duration, tracks: (scene.motion.tracks ?? []).map((/** @type {any} */ t) => ({ item: t.item, keys: t.keys?.length ?? 0 })) }
@@ -103,6 +106,7 @@ const show = {
       `viewBox   ${vx}, ${vy}, ${vw}×${vh}`,
       `origin    ${r.origin.join(', ')}`,
       `items     ${r.items} in ${r.groups} group${r.groups === 1 ? '' : 's'}`,
+      `layers    ${r.layers}${r.layers ? `: ${r.layerNames.join(', ')}` : ''}`,
       `objects   ${Object.keys(r.objects).length}: ${Object.entries(r.objects).map(([o, n]) => (n > 1 ? `${o} ×${n}` : o)).join(', ')}`,
     ];
     if (r.motion) lines.push(`motion    ${r.motion.duration} ms, ${r.motion.tracks.length} track${r.motion.tracks.length === 1 ? '' : 's'}: ${r.motion.tracks.map((/** @type {any} */ t) => t.item).join(', ')}`);
@@ -116,7 +120,8 @@ const items = {
   summary: "List a scene's items in paint order, with stable paths",
   description:
     'Paths index into the scene\'s items: "3" is the fourth top-level item, "5.2" the third item inside the group at "5". ' +
-    'Each item has its object, at ({ tile: [col, row, level] } or { px: [x, y] }), class, id, enclosing group and placement point in scene pixels.',
+    'Each item has its object, at ({ tile: [col, row, level] } or { px: [x, y] }), class, id, layer, enclosing group and placement point in scene pixels. ' +
+    'layers lists the scene\'s layers ({ id, name, parent, items }: items counts what is in it and in the layers inside it), in the order the Layers panel shows them.',
   params: { type: 'object', properties: { name: NAME }, required: ['name'] },
   args: ['name'],
   mutates: false,
@@ -129,7 +134,7 @@ const items = {
     const o = Math.max(6, ...r.items.map((/** @type {any} */ i) => String(i.object).length));
     return r.items
       .map((/** @type {any} */ i) => {
-        const extra = [i.id ? `#${i.id}` : '', i.class ? `.${i.class.replace(/ /g, '.')}` : ''].filter(Boolean).join(' ');
+        const extra = [i.id ? `#${i.id}` : '', i.class ? `.${i.class.replace(/ /g, '.')}` : '', i.layer ? `^${i.layer}` : ''].filter(Boolean).join(' ');
         return `${i.path.padEnd(w)}  ${String(i.object).padEnd(o)}  ${at(i.at).padEnd(16)}${extra ? ` ${extra}` : ''}`.trimEnd();
       })
       .join('\n');
@@ -143,7 +148,8 @@ const render = {
   description:
     'Returns { png (base64), scale, viewBox, width, height, time, items: [{ path, object, at, id, bounds: [x, y, w, h] }] }. ' +
     'Bounds are in output pixels (scale included), for hit-testing. Of each run of data-class variant groups only the first shows, ' +
-    'or the one holding --show. On the command line, --out <file.png> writes the PNG.',
+    'or the one holding --show. --hide leaves out the items in those layers (and the layers inside them), as hiding them in Pixel Lab does; ' +
+    '--focus adds focusPng, the same render with only that layer\'s items. On the command line, --out <file.png> writes the PNG.',
   params: {
     type: 'object',
     properties: {
@@ -151,6 +157,8 @@ const render = {
       ...RENDER_PARAMS,
       theme: THEME,
       show: { type: 'string', pattern: '^\\d+(\\.\\d+)*$', description: 'an item path whose variant group to show, like 12.0' },
+      hide: { type: 'array', items: { type: 'string' }, description: 'layers (ids or names) whose items are left out' },
+      focus: { type: 'string', description: 'a layer: the result adds focusPng, the render of only its items (and those of the layers inside it)' },
     },
     required: ['name'],
   },
@@ -158,13 +166,15 @@ const render = {
   mutates: false,
   writesPng: true,
   examples: ['pixellab scene render hero-island --scale 2 --out /tmp/hero.png', 'pixellab scene render range-sprite --time 400 --json', 'pixellab scene render hero-island --theme dark --out /tmp/hero-dark.png'],
-  async run(ctx, { name: query, scale, time = 0, show, theme }) {
+  async run(ctx, { name: query, scale, time = 0, show, theme, hide, focus }) {
     const { name } = await ctx.find(query, 'scene');
-    await ctx.doc('scene', name);
+    const scene = await ctx.doc('scene', name);
     const path = show === undefined ? null : parsePath(show);
     if (show !== undefined && !path) throw new UsageError(`--show ${show}: give an item path like 12 or 5.2`);
+    const hidden = hide?.length ? closure(scene, hide.map((/** @type {string} */ ref) => findLayer(scene, ref).id)) : null;
+    const focused = focus === undefined ? null : closure(scene, [findLayer(scene, focus).id]);
     const { sources } = await ctx.sources();
-    return { scene: name, ...renderSceneImage(ctx.site, sources, name, { scale, time, show: path, theme }) };
+    return { scene: name, ...renderSceneImage(ctx.site, sources, name, { scale, time, show: path, theme, hide: hidden, focus: focused }) };
   },
   format: (r) => `${r.scene}: ${r.width}×${r.height} PNG at ${r.scale}×, ${r.items.length} items shown, time ${r.time} ms`,
 };
