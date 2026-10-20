@@ -6,11 +6,12 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 echo "Downloading Claude Code for macOS (arm64)…"
-sleep 0.2
+sleep "${FAKE_CLAUDE_INSTALL_S:-0.2}"
 dest="$HOME/.local/share/claude/fake"
 mkdir -p "$dest" "$HOME/.local/bin"
-cp "$here/claude" "$here/turns.json" "$dest/"
+cp "$here/claude" "$here/fake-claude.mjs" "$here/turns.json" "$dest/"
 chmod +x "$dest/claude"
 echo "Checking the download…"
+sleep "${FAKE_CLAUDE_INSTALL_S:-0.2}"
 ln -sf "$dest/claude" "$HOME/.local/bin/claude"
 echo "Installed claude to ~/.local/bin/claude"

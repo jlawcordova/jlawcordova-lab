@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // A stand-in for the `claude` CLI (docs/intents/2026-10-agent-chat/spec.md, D16), so the app's
 // Agent chat is tested without the owner's plan or the network. It answers what Pixel Lab runs:
 //
