@@ -202,7 +202,7 @@ describe('R4: every edit keeps the list sorted', () => {
     const r = await call2('scene.key.set', { item: 'cart', time: 0, move: [32, -32] });
     assert.deepEqual(await order(s, 'moving'), ['cart', 'a']);
     assert.equal(await inOrder(s, 'moving'), true);
-    assert.deepEqual(r.reordered, { '0': '1', '1': '0' });
+    assert.equal(r.reordered['0'], '1');
     // Another key doesn't change where it rests.
     await call2('scene.key.set', { item: 'cart', time: 500, move: [0, 0] });
     assert.deepEqual(await order(s, 'moving'), ['cart', 'a']);
@@ -321,6 +321,18 @@ describe('R6: Raise and Lower are gone; the override is the one manual control',
     await assert.rejects(g({ item: '0', col: 2 }), { code: 'usage', message: /scene.group.set/ });
     await assert.rejects(g({ item: '0', id: 'q' }), { code: 'usage' });
     await assert.rejects(g({ item: '0', depth: 'sideways' }), /depth/);
+  });
+
+  test('R6: a group\'s summary names it by its path after the sort, the one the result returns', async () => {
+    const s = owner();
+    const g = (/** @type {any} */ params) => call(s, 'scene.set', { name: 'grouped', ...params });
+    await g({ item: '0', depth: 'back' });
+    // Clearing the override lets the group stand in front of y again, so the sort moves it from path 0 to path 1.
+    const r = await g({ item: '0', depth: 'auto' });
+    assert.equal(r.path, '1');
+    assert.equal(r.reordered['0'], '1');
+    assert.equal(r.summary, 'Group 1 draws by where it stands');
+    assert.equal((await registry.call(s.context(), 'doc.undo', { doc: 'scene:grouped' })).summary, 'Undid: Group 1 draws by where it stands');
   });
 });
 

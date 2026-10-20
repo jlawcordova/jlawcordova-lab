@@ -345,9 +345,12 @@ export function setDepth(doc, path, depth) {
     else item.depth = value;
     reorderKeys(item, { id: item.id, class: item.class });
   }
-  const what = isGroup(item) ? `Group ${show(path)}` : item.object;
-  const message = value === undefined ? `${what} draws by where it stands` : `${what} draws ${value === 'front' ? 'in front of' : 'behind'} everything else in its list`;
-  return { path, item, message };
+  /** The message, naming a group by `at`: its path, which the sort may change after this. */
+  const say = (/** @type {string} */ at) => {
+    const what = isGroup(item) ? `Group ${at}` : item.object;
+    return value === undefined ? `${what} draws by where it stands` : `${what} draws ${value === 'front' ? 'in front of' : 'behind'} everything else in its list`;
+  };
+  return { path, item, message: say(show(path)), say };
 }
 
 /**

@@ -30,7 +30,7 @@ async function sceneName(/** @type {any} */ ctx, /** @type {string} */ query) {
  * with the working copy and the item's path, and reports the item's new path.
  * @param {any} ctx
  * @param {{ name: string, item: string }} params
- * @param {(doc: any, path: number[]) => { path: number[], item: any, message: string }} op
+ * @param {(doc: any, path: number[]) => { path: number[], item: any, message: string | ((result: any) => string) }} op
  * @param {string | null} [key]  coalesces rapid repeats
  */
 async function itemEdit(ctx, { name: query, item: ref }, op, key = null) {
@@ -238,7 +238,11 @@ const set = {
     const others = [...fields, 'tile', 'px', 'class', 'id'].filter((k) => params[k] !== undefined);
     if (params.depth !== undefined && !others.length) {
       // The override is the one field a group takes.
-      return itemEdit(ctx, /** @type {any} */ (params), (doc, path) => ops.setDepth(doc, path, params.depth));
+      // A group is named by its path, which the sort that ends the edit can change: say it with the path the result returns.
+      return itemEdit(ctx, /** @type {any} */ (params), (doc, path) => {
+        const r = ops.setDepth(doc, path, params.depth);
+        return { ...r, message: (/** @type {any} */ result) => r.say(result.path) };
+      });
     }
     try {
       return await setEdit(ctx, params, fields);
