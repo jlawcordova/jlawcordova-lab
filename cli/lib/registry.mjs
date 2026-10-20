@@ -21,6 +21,7 @@
 // --dry-run); the servers keep the edits in the session until doc.save.
 
 import artCommands from './commands/art.mjs';
+import chatCommands from './commands/chat.mjs';
 import checkCommands from './commands/check.mjs';
 import docCommands from './commands/doc.mjs';
 import objectEditCommands from './commands/object-edit.mjs';
@@ -139,4 +140,5 @@ export const registry = createRegistry([
   ...artCommands,
   ...docCommands,
   ...proposalCommands,
+  ...chatCommands,
 ]);

@@ -27,6 +27,8 @@ const READS = {
   'activity.list': (r) => `listed ${plural(count(r.entries), 'activity entry', 'activity entries')}`,
   'doc.status': (r) => (r.docs ? `${plural(count(r.docs), 'doc')} open` : `${r.doc}: ${r.dirty ? 'unsaved changes' : 'saved'}`),
   'doc.open': (r) => `opened ${r.doc}`,
+  'chat.ask': (r) => `asked: ${r.question}${r.asked ? '' : ' (no chat attached)'}`,
+  'chat.context': (r) => `built the selection block for ${r.scene ?? r.object}${r.unsaved?.length ? ` (${plural(r.unsaved.length, 'target')} not saved)` : ''}`,
 };
 
 /**
