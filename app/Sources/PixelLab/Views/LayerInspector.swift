@@ -220,13 +220,14 @@ struct ItemLayerLines: View {
             }
         }
         if let g = item.group, let group = doc.groups.first(where: { $0.path == g }) {
+            Text("SVG group \(g)\(Self.attributes(group).map { " · \($0)" } ?? "")")
+                .font(Theme.monoFont(10))
+                .foregroundStyle(Theme.inkMuted)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .help("The site's wrapper around the item (scene group set edits it)")
             HStack(spacing: 6) {
-                Text("SVG group \(g)\(Self.attributes(group).map { " · \($0)" } ?? "")")
-                    .font(Theme.monoFont(10))
-                    .foregroundStyle(Theme.inkMuted)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .help("The site's wrapper around the item (scene group set edits it)")
+                Text("Group depth").font(.caption).foregroundStyle(Theme.inkMuted)
                 Spacer(minLength: 0)
                 groupDepthMenu(group)
             }
@@ -244,8 +245,9 @@ struct ItemLayerLines: View {
             .pickerStyle(.inline)
             .labelsHidden()
         } label: {
-            Text(mode == .auto ? "Depth" : "Depth: \(mode.title)")
-                .font(.system(size: 11))
+            Text(mode.title)
+                .font(.system(size: 11.5))
+                .frame(minWidth: 44)
                 .lineLimit(1)
         }
         .menuStyle(.button)

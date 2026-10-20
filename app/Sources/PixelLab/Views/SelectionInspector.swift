@@ -140,11 +140,12 @@ struct SelectionInspector: View {
 
     private func actions(_ item: SceneItemInfo, editor: SceneEditor) -> some View {
         VStack(spacing: 6) {
-            HStack(spacing: 6) {
-                ActionButton(title: "Snap", symbol: "square.grid.3x3.middle.filled", help: "Snap to the tile under it, at the level it stands on") {
+            if !item.at.isTile {
+                ActionButton(title: "Snap to tile", symbol: "square.grid.3x3.middle.filled", help: "Snap to the tile under it, at the level it stands on") {
                     Task { await editor.snap() }
                 }
-                .disabled(item.at.isTile)
+            }
+            HStack(spacing: 6) {
                 ActionButton(title: "Duplicate", symbol: "plus.square.on.square", help: "Duplicate one column over (⌘D)") {
                     Task { await editor.duplicate() }
                 }
