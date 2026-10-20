@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { crc32, inflateSync } from 'node:zlib';
 
 import { main } from '../lib/cli.mjs';
+import { openDocument } from '../lib/document.mjs';
 
 export const REPO = fileURLToPath(new URL('../..', import.meta.url));
 export const BIN = join(REPO, 'cli', 'bin', 'pixellab.mjs');
@@ -209,6 +210,19 @@ export async function readDoc(path) {
   const text = await readFile(path, 'utf8');
   const mod = await import(`data:text/javascript;base64,${Buffer.from(text).toString('base64')}`);
   return structuredClone(mod.default);
+}
+
+/**
+ * Whether a scene's file on disk has every list of items in depth order
+ * (the engine's own test, on the sources as they are on disk).
+ * @param {{ doc?: string, site?: string }} where  the document, or the site checkout, as the CLI's flags
+ * @param {string} name  the scene
+ */
+export async function sceneIsSorted(where, name) {
+  const site = await openDocument({ ...where, env: {} });
+  const { palette, objects, scenes } = await site.loadDocs();
+  const sources = site.engine.loadSources({ palette, objects: Object.fromEntries(objects), scenes: Object.fromEntries(scenes) });
+  return site.engine.isInDepthOrder(sources, sources.scenes.get(name));
 }
 
 /**

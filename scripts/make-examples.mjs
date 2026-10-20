@@ -135,12 +135,17 @@ export const OBJECTS = {
 // ------------------------------------------------------------------- scenes
 
 /**
- * A placement before it's put in paint order: an object on a tile, with its
+ * A placement before it's put in depth order: an object on a tile, with its
  * layer, an id, and the site's wrapper attributes when it has one.
  * @typedef {{ object: string, tile: number[], layer?: string, id?: string, wrap?: 'ground' | 'object' }} Place
  */
 
-/** How far back an item sits: the back-to-front order of the site's scenes (row + col of its last tile, then level). */
+/**
+ * How far back an item sits: a first guess at the back-to-front order (row +
+ * col of its last tile, then level). It only gives the list a good start, which
+ * keeps the compiler's runs of one color together; writeExamples then puts
+ * every scene in the engine's depth order, which is what the files hold.
+ */
 function depth(/** @type {Place} */ p) {
   const obj = /** @type {any} */ (OBJECTS)[p.object];
   const [w, d] = obj.kind === 'block' ? obj.size : [1, 1];
@@ -149,7 +154,7 @@ function depth(/** @type {Place} */ p) {
 }
 
 /**
- * Turns placements into a scene's items, in back-to-front order, each in the
+ * Turns placements into a scene's items, in a first back-to-front order, each in the
  * site's entrance wrapper when it has one (its data-x/data-y the item's foot).
  * @param {Place[]} places
  * @param {number[]} origin
@@ -361,6 +366,10 @@ export async function writeExamples(out) {
     const objects = Object.fromEntries(ex.objects.map((o) => [o, /** @type {any} */ (OBJECTS)[o]]));
     const problems = engine.validate(engine.loadSources({ palette: paletteData, objects, scenes: ex.scenes }));
     if (problems.length) throw new Error(`examples/${name}.pixellab has problems:\n${problems.join('\n')}`);
+    // The files hold each scene in depth order, as every edit in Pixel Lab leaves it
+    // (docs/intents/2026-10-depth-order/spec.md, R4).
+    const sources = engine.loadSources({ palette: paletteData, objects, scenes: ex.scenes });
+    ex.scenes = Object.fromEntries(Object.entries(ex.scenes).map(([s, data]) => [s, engine.sceneInOrder(sources, data)]));
     const root = join(out, `${name}.pixellab`);
     await rm(root, { recursive: true, force: true });
     await mkdir(join(root, 'objects'), { recursive: true });

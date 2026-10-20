@@ -102,6 +102,46 @@ struct ChecksList: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            problemsList
+            if doc.problems != nil, !doc.warnings.isEmpty {
+                warningsList
+            }
+        }
+    }
+
+    /// Warnings don't fail the check. A scene whose file isn't in depth order
+    /// gets a Sort button (`scene.sort`; docs/intents/2026-10-depth-order/spec.md, R11, D7).
+    private var warningsList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("\(doc.warnings.count) warning\(doc.warnings.count == 1 ? "" : "s")")
+                .font(.callout.weight(.medium)).foregroundStyle(Theme.ink)
+            ForEach(Array(doc.warnings.prefix(50).enumerated()), id: \.offset) { _, w in
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Image(systemName: w.kind == .outOfOrder ? "square.3.layers.3d.down.right" : "exclamationmark.circle.fill")
+                        .foregroundStyle(Theme.gold)
+                        .imageScale(.small)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(w.message).font(.caption).foregroundStyle(Theme.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(w.file).font(Theme.monoFont(10)).foregroundStyle(Theme.inkMuted)
+                    }
+                    Spacer(minLength: 0)
+                    if w.kind == .outOfOrder, doc.ref.kind == .scene {
+                        Button("Sort") { Task { await model.editor.sort() } }
+                            .controlSize(.regular)
+                            .help("Put the items in depth order, in one undo step (⌘Z undoes it)")
+                            .accessibilityLabel("Sort \(doc.ref.name) by depth")
+                    }
+                }
+                .accessibilityElement(children: .contain)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var problemsList: some View {
         if let problems = doc.problems {
             if problems.isEmpty {
                 HStack(alignment: .firstTextBaseline, spacing: 7) {

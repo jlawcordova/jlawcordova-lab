@@ -69,7 +69,7 @@ const list = {
 /** @type {import('../registry.mjs').Command} */
 const show = {
   name: 'object.show',
-  summary: "Show an object's kind, size, anchor, layers, frames, colors and extends",
+  summary: "Show an object's kind, size, anchor, footprint, layers, frames, colors and extends",
   params: {
     type: 'object',
     properties: {
@@ -111,6 +111,8 @@ const show = {
       ...rest,
       file: `objects/${name}.mjs`,
       anchor: [...resolved.anchor],
+      // The tiles a sprite covers, for depth order (a block's size is its footprint).
+      ...(resolved.block ? {} : { footprint: [...resolved.footprint] }),
       character: resolved.character,
       ...(resolved.block
         ? {
@@ -135,6 +137,7 @@ const show = {
       `kind      ${r.kind}${r.extends ? `, extends ${r.extends}` : ''}${r.character ? ', character' : ''}`,
       `size      ${r.size.join('×')}${r.block ? ` (block ${r.block.size.join('×')})` : ''}`,
       `anchor    ${r.anchor.join(', ')}`,
+      ...(r.footprint ? [`footprint ${r.footprint.join('×')} tile${r.footprint[0] * r.footprint[1] === 1 ? '' : 's'}`] : []),
       `summary   ${r.description}`,
     ];
     if (r.block) lines.push(`faces     ${Object.entries(r.block.faces).map(([f, c]) => `${f} ${/** @type {any} */ (c).name}`).join(', ')}`);

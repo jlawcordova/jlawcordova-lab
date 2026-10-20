@@ -1,6 +1,6 @@
 # Example documents (`examples/`)
 
-Two small `.pixellab` documents with scene layers, to try the app on and to test with. They're made from scratch by [`scripts/make-examples.mjs`](../scripts/make-examples.mjs) with the starter palette, so they're the same on every run, and `npm test` checks the committed copies still match it. Neither is the site's art.
+Two small `.pixellab` documents with scene layers, to try the app on and to test with. They're made from scratch by [`scripts/make-examples.mjs`](../scripts/make-examples.mjs) with the starter palette, so they're the same on every run, and `npm test` checks the committed copies still match it. Each scene is written in depth order, back to front by where its items stand, as every edit in the app leaves it; reorder nothing by hand. Neither is the site's art.
 
 | Document | Scenes | What it has |
 | --- | --- | --- |

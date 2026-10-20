@@ -12,7 +12,7 @@ import { after, before, describe, test } from 'node:test';
 import { registry } from '../lib/registry.mjs';
 import { readSource, Session } from '../lib/session.mjs';
 import { openSite } from '../lib/document.mjs';
-import { makeSite, needsSite, readDoc, runCli, SITE_SOURCE, tempDir } from './helpers.mjs';
+import { makeSite, needsSite, readDoc, runCli, sceneIsSorted, SITE_SOURCE, tempDir } from './helpers.mjs';
 
 const SRC = 'src/assets/pixel-art/source';
 
@@ -123,15 +123,21 @@ describe('edit commands (one-shot CLI)', needsSite, () => {
   const SCENE = 'scenes/zz-test.mjs';
   const SPRITE = 'objects/zz-sprite.mjs';
 
+  /** The index of the first item that `match` finds in the scene file as it is now. */
+  const indexOf = async (/** @type {(item: any) => boolean} */ match) => String((await readDoc(path(SCENE))).items.findIndex(match));
+  const tileIs = (/** @type {string} */ tile) => (/** @type {any} */ item) => item.at?.tile?.join(',') === tile;
+
   test('scene.place', async () => {
     const doc = await edit(['scene', 'place', 'zz-test', 'pine', '--at', '0,1,0', '--class', 'sway'], SCENE);
-    // Back to front: after the tile items with row + col 1 (and the pixel item), before [2, 2, 0].
-    assert.deepEqual(doc.items[3], { object: 'pine', class: 'sway', at: { tile: [0, 1, 0] } });
+    // It goes where it stands, not where it was added: the edit leaves the scene in depth order.
+    assert.deepEqual(doc.items.find((/** @type {any} */ i) => i.class === 'sway'), { object: 'pine', class: 'sway', at: { tile: [0, 1, 0] } });
+    assert.equal(await sceneIsSorted({ site: site.root }, 'zz-test'), true);
     const json = await cli(['scene', 'place', 'zz-test', 'tree', '--px', '3,4', '--id', 'tall', '--json']);
     const r = JSON.parse(json.stdout);
-    assert.equal(r.path, '5');
     assert.deepEqual(r.saved, [{ doc: 'scene:zz-test', file: SCENE, wrote: true, hash: r.saved[0].hash }]);
-    assert.deepEqual((await readDoc(path(SCENE))).items[5], { object: 'tree', id: 'tall', at: { px: [3, 4] } });
+    // The path it returns is the one after the sort.
+    assert.deepEqual((await readDoc(path(SCENE))).items[Number(r.path)], { object: 'tree', id: 'tall', at: { px: [3, 4] } });
+    assert.equal(await sceneIsSorted({ site: site.root }, 'zz-test'), true);
     // With no --at or --px: the level-0 tile at the middle of the view, where the lab's cursor starts.
     const middle = JSON.parse((await cli(['scene', 'place', 'zz-test', 'pine', '--dry-run', '--json'])).stdout);
     assert.deepEqual(middle.item.at, { tile: [0, 0, 0] });
@@ -142,48 +148,57 @@ describe('edit commands (one-shot CLI)', needsSite, () => {
   });
 
   test('scene.move by tiles, by pixels, and a key past time 0', async () => {
-    let doc = await edit(['scene', 'move', 'zz-test', '0', '--by', '0,2,1'], SCENE);
-    assert.deepEqual(doc.items[0].at, { tile: [0, 2, 1] });
-    doc = await edit(['scene', 'move', 'zz-test', '2', '--nudge', '-1,2'], SCENE);
-    assert.deepEqual(doc.items[2].at, { px: [9, 12] });
+    let doc = await edit(['scene', 'move', 'zz-test', await indexOf(tileIs('0,0,0')), '--by', '0,2,1'], SCENE);
+    assert.ok(doc.items.some(tileIs('0,2,1')), 'it moved, to wherever it now sorts');
+    doc = await edit(['scene', 'move', 'zz-test', await indexOf((/** @type {any} */ i) => i.at.px?.join() === '10,10'), '--nudge', '-1,2'], SCENE);
+    assert.ok(doc.items.some((/** @type {any} */ i) => i.at.px?.join() === '9,12'));
     doc = await edit(['scene', 'move', 'zz-test', 'home', '--by', '1,0', '--time', '500'], SCENE);
     assert.deepEqual(doc.motion.tracks[0].keys[1], { t: 500, move: [18, 9] });
+    assert.equal(await sceneIsSorted({ site: site.root }, 'zz-test'), true);
   });
 
   test('scene.set: tile, px, a field, class and id', async () => {
-    let doc = await edit(['scene', 'set', 'zz-test', '1', '--tile', '4,4,0'], SCENE);
-    assert.deepEqual(doc.items[1].at, { tile: [4, 4, 0] });
-    doc = await edit(['scene', 'set', 'zz-test', '1', '--level', '2'], SCENE);
-    assert.deepEqual(doc.items[1].at, { tile: [4, 4, 2] });
-    doc = await edit(['scene', 'set', 'zz-test', '1', '--px', '7,8'], SCENE);
-    assert.deepEqual(doc.items[1].at, { px: [7, 8] });
+    const second = await indexOf(tileIs('1,0,0'));
+    let doc = await edit(['scene', 'set', 'zz-test', second, '--tile', '4,4,0'], SCENE);
+    assert.ok(doc.items.some(tileIs('4,4,0')));
+    doc = await edit(['scene', 'set', 'zz-test', await indexOf(tileIs('4,4,0')), '--level', '2'], SCENE);
+    assert.ok(doc.items.some(tileIs('4,4,2')));
+    doc = await edit(['scene', 'set', 'zz-test', await indexOf(tileIs('4,4,2')), '--px', '7,8'], SCENE);
+    assert.ok(doc.items.some((/** @type {any} */ i) => i.at.px?.join() === '7,8'));
     doc = await edit(['scene', 'set', 'zz-test', 'home', '--id', 'cabin', '--class', 'warm glow'], SCENE);
     const cabin = doc.items.find((/** @type {any} */ i) => i.id === 'cabin');
     assert.deepEqual(Object.keys(cabin), ['object', 'id', 'class', 'at']);
     assert.equal(doc.motion.tracks[0].item, 'cabin');
-    const wrong = await cli(['scene', 'set', 'zz-test', '1', '--col', '1']);
+    const wrong = await cli(['scene', 'set', 'zz-test', await indexOf((/** @type {any} */ i) => i.at.px?.join() === '7,8'), '--col', '1']);
     assert.equal(wrong.code, 1);
     assert.match(wrong.stderr, /placed by pixel/);
   });
 
-  test('scene.raise, scene.lower, scene.duplicate, scene.snap, scene.remove', async () => {
-    const before = (await readDoc(path(SCENE))).items.map((/** @type {any} */ i) => i.object);
-    let doc = await edit(['scene', 'raise', 'zz-test', '0'], SCENE);
-    assert.deepEqual(doc.items.slice(0, 2).map((/** @type {any} */ i) => i.object), [before[1], before[0]]);
-    doc = await edit(['scene', 'lower', 'zz-test', '1'], SCENE);
-    assert.deepEqual(doc.items.map((/** @type {any} */ i) => i.object), before);
-    const front = await cli(['scene', 'raise', 'zz-test', String(before.length - 1)]);
-    assert.equal(front.code, 1);
-    assert.match(front.stderr, /already at the front/);
-    doc = await edit(['scene', 'duplicate', 'zz-test', 'cabin'], SCENE);
-    const i = doc.items.findIndex((/** @type {any} */ it) => it.id === 'cabin');
-    assert.equal(doc.items[i + 1].id, undefined);
-    assert.deepEqual(doc.items[i + 1].at.tile, [doc.items[i].at.tile[0] + 1, doc.items[i].at.tile[1], doc.items[i].at.tile[2]]);
-    doc = await edit(['scene', 'snap', 'zz-test', '1'], SCENE);
-    assert.ok(doc.items[1].at.tile);
+  test('scene.duplicate, scene.snap, scene.remove', async () => {
+    let doc = await edit(['scene', 'duplicate', 'zz-test', 'cabin'], SCENE);
+    // The copy has no id and stands one column over; it is listed where it sorts.
+    const cabin = doc.items.find((/** @type {any} */ it) => it.id === 'cabin');
+    const copy = doc.items.find((/** @type {any} */ it) => it.object === 'house' && it.id === undefined);
+    assert.deepEqual(copy.at.tile, [cabin.at.tile[0] + 1, cabin.at.tile[1], cabin.at.tile[2]]);
+    assert.equal(await sceneIsSorted({ site: site.root }, 'zz-test'), true);
+    doc = await edit(['scene', 'snap', 'zz-test', await indexOf((/** @type {any} */ i) => i.at.px?.join() === '7,8')], SCENE);
+    assert.equal(doc.items.some((/** @type {any} */ i) => i.at.px?.join() === '7,8'), false, 'it snapped to a tile');
     doc = await edit(['scene', 'remove', 'zz-test', 'cabin'], SCENE);
     assert.equal(doc.items.some((/** @type {any} */ it) => it.id === 'cabin'), false);
     assert.deepEqual(doc.motion.tracks, []);
+  });
+
+  test('R6: scene.raise and scene.lower are gone; the override is scene.set --depth', async () => {
+    for (const verb of ['raise', 'lower']) {
+      const r = await cli(['scene', verb, 'zz-test', '0']);
+      assert.equal(r.code, 2);
+      assert.match(r.stderr, new RegExp(`unknown command scene ${verb}`));
+    }
+    const first = await indexOf(() => true);
+    const doc = await edit(['scene', 'set', 'zz-test', first, '--depth', 'front'], SCENE);
+    assert.equal(doc.items.at(-1).depth, 'front', 'a front item is the last of its list');
+    const order = ['object', 'id', 'class', 'layer', 'depth', 'at'];
+    assert.deepEqual(Object.keys(doc.items.at(-1)), Object.keys(doc.items.at(-1)).sort((a, b) => order.indexOf(a) - order.indexOf(b)));
   });
 
   test('scene.new and object.new', async () => {
@@ -542,7 +557,17 @@ describe('round trip', needsSite, () => {
 
 
 describe('art.build (spec R7)', needsSite, () => {
-  test("R7: publishes the site's art byte-identical to the committed SVGs, into the legacy publish folder", async () => {
+  // The engine draws items in depth order now (docs/intents/2026-10-depth-order/spec.md, R3), so the site's
+  // hero island and range sprite differ from the SVGs committed under the old order (the same elements, drawn
+  // in another order), and everything stays within its budget.
+  const tags = (/** @type {Buffer} */ svg) => svg.toString('utf8').split(/(?=<)/).sort();
+  /** Whether a published file is the committed one, or the same elements drawn in another order. */
+  const sameButReordered = (/** @type {Buffer} */ built, /** @type {Buffer} */ committed) => {
+    const [a, b] = [tags(built), tags(committed)];
+    return a.length === b.length && a.every((t, i) => t === b[i]);
+  };
+
+  test("R7: publishes the site's art into the legacy publish folder, the committed SVGs or the same elements in depth order", async () => {
     const site = await makeSite();
     try {
       const r = await runCli(['art', 'build', '--site', site.root, '--json'], { env: site.env() });
@@ -559,7 +584,7 @@ describe('art.build (spec R7)', needsSite, () => {
       for (const file of files) {
         const built = await readFile(join(out.publishDir, file));
         const committed = await readFile(join(SITE_SOURCE, 'src/assets/pixel-art', file));
-        assert.ok(built.equals(committed), `${file} differs from the committed SVG`);
+        assert.ok(built.equals(committed) || sameButReordered(built, committed), `${file} differs from the committed SVG by more than the order of its elements`);
       }
     } finally {
       await site.cleanup();

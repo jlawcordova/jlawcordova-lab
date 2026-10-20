@@ -28,7 +28,7 @@ async function sceneDoc(/** @type {any} */ ctx, /** @type {string} */ query) {
   return { name, scene: await ctx.doc('scene', name) };
 }
 
-const at = (/** @type {any} */ a) => (a?.tile ? `tile ${a.tile.join(',')}` : a?.px ? `px ${a.px.join(',')}` : '?');
+const at = (/** @type {any} */ a) => (a?.tile ? `tile ${a.tile.join(',')}` : a?.px ? `px ${a.px.join(',')}${a.level ? ` level ${a.level}` : ''}` : '?');
 
 /** @type {import('../registry.mjs').Command} */
 const list = {
@@ -117,10 +117,12 @@ const show = {
 /** @type {import('../registry.mjs').Command} */
 const items = {
   name: 'scene.items',
-  summary: "List a scene's items in paint order, with stable paths",
+  summary: "List a scene's items in depth order (back to front), with stable paths",
   description:
-    'Paths index into the scene\'s items: "3" is the fourth top-level item, "5.2" the third item inside the group at "5". ' +
-    'Each item has its object, at ({ tile: [col, row, level] } or { px: [x, y] }), class, id, layer, enclosing group and placement point in scene pixels. ' +
+    'Paths index into the scene\'s items: "3" is the fourth top-level item, "5.2" the third item inside the group at "5". The list is in depth order ' +
+    '(every edit keeps it so; scene.sort fixes a file that isn\'t): back to front, by where each item stands. ' +
+    'Each item has its object, at ({ tile: [col, row, level] } or { px: [x, y], level? }), level (a pixel item\'s, 0 unless it says), depth (front or back, when it has the override), ' +
+    'class, id, layer, enclosing group and placement point in scene pixels. A group in groups has its path, attrs, item count and depth. ' +
     'layers lists the scene\'s layers ({ id, name, parent, items }: items counts what is in it and in the layers inside it), in the order the Layers panel shows them.',
   params: { type: 'object', properties: { name: NAME }, required: ['name'] },
   args: ['name'],
@@ -134,7 +136,7 @@ const items = {
     const o = Math.max(6, ...r.items.map((/** @type {any} */ i) => String(i.object).length));
     return r.items
       .map((/** @type {any} */ i) => {
-        const extra = [i.id ? `#${i.id}` : '', i.class ? `.${i.class.replace(/ /g, '.')}` : '', i.layer ? `^${i.layer}` : ''].filter(Boolean).join(' ');
+        const extra = [i.id ? `#${i.id}` : '', i.depth ? `[${i.depth}]` : '', i.class ? `.${i.class.replace(/ /g, '.')}` : '', i.layer ? `^${i.layer}` : ''].filter(Boolean).join(' ');
         return `${i.path.padEnd(w)}  ${String(i.object).padEnd(o)}  ${at(i.at).padEnd(16)}${extra ? ` ${extra}` : ''}`.trimEnd();
       })
       .join('\n');

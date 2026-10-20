@@ -60,6 +60,19 @@ describe('the example documents (R18)', () => {
     }
   });
 
+  test('depth order R4, R3: every example scene is in depth order already, and draws the same in the order it lists as in depth order', async () => {
+    for (const name of Object.keys(examples())) {
+      const doc = await openDocument({ doc: join(EXAMPLES, `${name}.pixellab`), env: { ...process.env, HOME: tmp } });
+      const { palette, objects, scenes } = await doc.loadDocs();
+      const sources = doc.engine.loadSources({ palette, objects: Object.fromEntries(objects), scenes: Object.fromEntries(scenes) });
+      for (const scene of scenes.keys()) {
+        assert.equal(doc.engine.isInDepthOrder(sources, scenes.get(scene)), true, `${name}/${scene} is out of depth order: run npm run examples`);
+        const draw = (/** @type {'list' | 'depth'} */ order) => [...doc.engine.composite(doc.engine.renderScene(sources, scene, { order }).root, { time: 0 })].join(';');
+        assert.equal(draw('depth'), draw('list'), `${name}/${scene}: depth order changes pixels of the file's own order`);
+      }
+    }
+  });
+
   test('R1, R3: the harbor nests layers three deep beside the site\'s { group } wrappers, with items in no layer', async () => {
     const { call } = await open('harbor');
     const r = await call('scene.items', { name: 'harbor' });

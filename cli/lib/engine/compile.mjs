@@ -259,9 +259,10 @@ export async function readSources(dir) {
  * @param {any} sources
  * @param {string} name
  * @param {Budgets} [budgets]  per output file, from the document's manifest
+ * @param {{ order?: 'depth' | 'list' }} [options]  `order: 'list'` draws the items in the file's order (renderScene)
  */
-export function compileScene(sources, name, budgets = {}) {
-  const rects = toRectSvg(renderScene(sources, name), (/** @type {string} */ color) => sources.colors.get(color).hex);
+export function compileScene(sources, name, budgets = {}, options = {}) {
+  const rects = toRectSvg(renderScene(sources, name, options), (/** @type {string} */ color) => sources.colors.get(color).hex);
   const output = optimizeSvg(rects);
   verifyLossless(rects, output);
   const [raw, gz] = [Buffer.byteLength(output), gzipSync(output).length];

@@ -39,7 +39,9 @@ const isVariant = (/** @type {any} */ item) => item && typeof item === 'object' 
  * The scene as the stage shows it (a port of the lab's visibleItems): of each
  * run of sibling data-class groups only one shows, the one holding `selected`,
  * else the first. Returns the trimmed items, and every item that shows, in
- * paint order, with its path into the untrimmed items.
+ * paint order, with its path into the untrimmed items. Items that come from
+ * `engine.sceneAt` carry a `path`, their path in the scene's own items, which
+ * the depth order has moved them from; without one they are where they are listed.
  * @param {any[]} items
  * @param {number[] | null} selected
  * @param {number[]} [prefix]
@@ -50,13 +52,14 @@ export function visibleItems(items, selected, prefix = []) {
   const kept = [];
   /** @type {{ path: number[], item: any }[]} */
   const leaves = [];
+  const pathOf = (/** @type {number} */ i) => items[i]?.path ?? [...prefix, i];
   /** @type {number[]} */
   let run = [];
   const flush = () => {
     if (run.length === 0) return;
-    const holder = run.find((i) => selected && selected.length > prefix.length && selected[prefix.length] === i);
+    const holder = run.find((i) => selected && selected.length > prefix.length && selected[prefix.length] === pathOf(i)[prefix.length]);
     const shown = holder ?? run[0];
-    const sub = visibleItems(items[shown].items ?? [], selected, [...prefix, shown]);
+    const sub = visibleItems(items[shown].items ?? [], selected, pathOf(shown));
     kept.push({ ...items[shown], items: sub.kept });
     leaves.push(...sub.leaves);
     run = [];
@@ -65,12 +68,12 @@ export function visibleItems(items, selected, prefix = []) {
     if (isVariant(item)) return void run.push(i);
     flush();
     if (item && typeof item === 'object' && 'group' in item) {
-      const sub = visibleItems(item.items ?? [], selected, [...prefix, i]);
+      const sub = visibleItems(item.items ?? [], selected, pathOf(i));
       kept.push({ ...item, items: sub.kept });
       leaves.push(...sub.leaves);
     } else {
       kept.push(item);
-      leaves.push({ path: [...prefix, i], item });
+      leaves.push({ path: pathOf(i), item });
     }
   });
   flush();
@@ -92,7 +95,13 @@ export function flattenItems(site, scene) {
     (list ?? []).forEach((item, i) => {
       const path = [...prefix, i];
       if (item && typeof item === 'object' && 'group' in item) {
-        groups.push({ path: pathString(path), attrs: { ...item.group }, items: (item.items ?? []).length, ...(group ? { group } : {}) });
+        groups.push({
+          path: pathString(path),
+          attrs: { ...item.group },
+          items: (item.items ?? []).length,
+          ...(item.depth !== undefined ? { depth: item.depth } : {}),
+          ...(group ? { group } : {}),
+        });
         walk(item.items, path, pathString(path));
         return;
       }
@@ -100,6 +109,9 @@ export function flattenItems(site, scene) {
         path: pathString(path),
         object: item?.object,
         at: item?.at,
+        // A pixel item stands on a level of its own (default 0); a tile's level is its third number.
+        ...(item?.at?.px ? { level: item.at.level ?? 0 } : {}),
+        ...(item?.depth !== undefined ? { depth: item.depth } : {}),
         ...(item?.class !== undefined ? { class: item.class } : {}),
         ...(item?.id !== undefined ? { id: item.id } : {}),
         ...(item?.layer !== undefined ? { layer: item.layer } : {}),
@@ -250,15 +262,18 @@ export function renderSceneImage(site, sources, name, { scale = 1, time = 0, sho
   const origin = scene.origin ?? [0, 0];
   const viewBox = scene.viewBox;
   try {
-    const { motion, ...still } = scene;
-    let posed = motionLib.poseItems(scene.items ?? [], motion, time, (/** @type {any} */ item) => placementPoint(site, item, origin));
+    // The scene as it stands at `time`: every list in the order it draws in then (an item that moves among others
+    // changes place), each tracked item posed. Hiding a layer or showing one variant leaves the rest where it is,
+    // so what's drawn here is drawn in the order given (order 'list').
+    const { items: ordered, ...still } = engine.sceneAt(sources, name, time);
+    let posed = ordered;
     if (hide?.size) posed = hideWhere(posed, (item) => item.layer !== undefined && hide.has(item.layer));
     const { kept, leaves } = visibleItems(posed, show);
     /** The PNG of these items (trimmed to the shown variants), as the scene draws them. */
     const paint = (/** @type {any[]} */ shown) => {
       const view = { ...still, items: motionLib.shownItems(shown) };
       const local = { ...sources, scenes: new Map([[name, view]]) };
-      const { root } = engine.renderScene(local, name);
+      const { root } = engine.renderScene(local, name, { order: 'list' });
       if (theme === 'dark') darkTheme(root);
       return toImage(sources, engine.composite(root, { time }), viewBox, theme === 'dark' ? { [PAGE]: site.theme.darkPage } : {});
     };

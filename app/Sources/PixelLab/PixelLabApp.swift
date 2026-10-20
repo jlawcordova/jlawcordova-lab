@@ -80,12 +80,6 @@ struct PixelLabCommands: Commands {
                 .disabled(!hasSelection)
             Button("Remove Item (⌫ on the stage)") { Task { await model.editor.remove() } }
                 .disabled(!hasSelection)
-            Button("Raise") { Task { await model.editor.raise() } }
-                .keyboardShortcut("]")
-                .disabled(!hasSelection)
-            Button("Lower") { Task { await model.editor.lower() } }
-                .keyboardShortcut("[")
-                .disabled(!hasSelection)
             Button("Snap to Tile") { Task { await model.editor.snap() } }
                 .disabled(model.document?.selectedItem?.at.isTile ?? true)
             Button("Select None") { model.layers.select([]) }

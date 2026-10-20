@@ -2,7 +2,9 @@
 // make, rename, ungroup, assign and move layers. The logic is layer-ops.mjs;
 // each command is one undo step through ctx.edit, so the app and agents get
 // the same edits (an agent's become a proposal at doc_save). Layers never
-// reorder the scene's items, so nothing here changes what's published.
+// reorder the scene's items, so nothing here changes what's published (moving
+// items is the exception: they stand somewhere else, so the session's depth
+// sort may reorder them).
 
 import { UsageError } from '../errors.mjs';
 import * as L from '../layer-ops.mjs';
@@ -154,7 +156,8 @@ const move = {
     'As dragging a selection on the stage: every item moves by --by col,row[,level] tiles (a pixel-placed item by the same screen offset), ' +
     'each once, in one undo step; rapid repeats coalesce. Placements move at rest: an animated item\'s keys are offsets from its placement, ' +
     "so its motion moves with it. Each item's group keeps its data-x/data-y and data-col/data-row in step, as scene.move does (--no-keep-group leaves them). " +
-    'Paint order doesn\'t change.',
+    'Each item then stands at a new depth, so the scene is put in depth order: paths lists the moved items\' paths after that, and reordered says which other paths moved. ' +
+    'Layers themselves never change what is published.',
   params: {
     type: 'object',
     properties: {
@@ -200,7 +203,7 @@ const move = {
         const message = paths.size
           ? `Moved ${what} ${sign(dc)} col, ${sign(dr)} row${dl ? `, ${sign(dl)} level` : ''}${followed.length ? `; ${followed.length} group${followed.length === 1 ? '' : 's'} followed` : ''}`
           : `${what} has no items to move`;
-        return { message, moved: paths.size, by: [dc, dr, dl], ...(followed.length ? { groups: followed } : {}) };
+        return { message, moved: paths.size, paths: [...paths.keys()], by: [dc, dr, dl], ...(followed.length ? { groups: followed } : {}) };
       },
       { key },
     );

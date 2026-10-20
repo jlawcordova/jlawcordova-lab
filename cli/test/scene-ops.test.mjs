@@ -34,25 +34,65 @@ describe('scene ops', needsSite, () => {
   });
   after(() => copy.cleanup());
 
-  test('insertIndex: back to front by row + col, then level, among tile items (lab insertIndex)', () => {
-    const { items } = scene();
-    // The first tile item with a greater row + col, or the same and a higher level.
-    assert.equal(ops.insertIndex(items, [0, 0, 0]), 1); // before b (sum 1)
-    assert.equal(ops.insertIndex(items, [0, 1, 0]), 3); // sum 1: after b, the px item is skipped, before d (sum 2)
-    assert.equal(ops.insertIndex(items, [2, 0, 0]), 4); // sum 2, level 0: after d (level 0, not higher), before e (level 1)
-    assert.equal(ops.insertIndex(items, [1, 1, 1]), 6); // e has the same level, not higher, and a group has no tile: at the end
-    assert.equal(ops.insertIndex(items, [9, 9, 0]), items.length); // nothing in front: at the end (groups have no tile)
+  /** The scene of real sprites that sortScene needs (the fake objects above don't resolve). */
+  const real = () => ({
+    viewBox: [-100, -100, 200, 200],
+    origin: [0, 0],
+    items: [
+      { object: 'pine', id: 'front', at: { tile: [1, 1, 0] } },
+      { object: 'pine', id: 'back', at: { tile: [0, 0, 0] } },
+      { object: 'pine', id: 'middle', at: { tile: [1, 0, 0] } },
+      { object: 'pine', id: 'far', at: { tile: [9, 9, 0] } },
+    ],
+  });
+  const ids = (/** @type {any} */ doc) => doc.items.map((/** @type {any} */ i) => i.id);
+  const sources = async () => {
+    const { palette, objects, scenes } = await site.loadDocs();
+    return site.engine.loadSources({ palette, objects: Object.fromEntries(objects), scenes: Object.fromEntries(scenes) });
+  };
+
+  test('sortScene: back to front by column and row, then level, where items overlap (what insertIndex did for tiles)', async () => {
+    const doc = real();
+    const r = ops.sortScene(site, await sources(), doc);
+    // "front" was listed first but stands in front of "back" and "middle"; "far" overlaps nothing and keeps its place.
+    assert.deepEqual(ids(doc), ['back', 'middle', 'front', 'far']);
+    assert.deepEqual(r.moved, [{ path: '0', to: '2', object: 'pine' }], 'only the item the sort took out of its place is listed');
+    assert.deepEqual(Object.fromEntries(r.remap), { '0': '2', '1': '0', '2': '1' }, 'remap holds every path that changed');
+    // Sorting a sorted scene moves nothing.
+    const again = ops.sortScene(site, await sources(), doc);
+    assert.deepEqual([again.moved, again.remap.size], [[], 0]);
   });
 
-  test('place: on a tile in back-to-front order, by pixel at the end (lab place)', () => {
+  test('sortScene sorts a group as one object and its members inside it; a scene that does not draw is left alone', async () => {
+    const doc = real();
+    doc.items = [
+      { group: { class: 'g' }, items: [{ object: 'pine', id: 'g-front', at: { tile: [1, 1, 0] } }, { object: 'pine', id: 'g-back', at: { tile: [0, 0, 0] } }] },
+      { object: 'pine', id: 'behind-all', at: { tile: [-1, -1, 0] } },
+    ];
+    const r = ops.sortScene(site, await sources(), doc);
+    assert.equal(doc.items[0].id, 'behind-all', 'the group stands in front of it');
+    assert.deepEqual(doc.items[1].items.map((/** @type {any} */ i) => i.id), ['g-back', 'g-front']);
+    assert.deepEqual(Object.fromEntries(r.remap), { '0': '1', '1': '0', '0.0': '1.1', '0.1': '1.0' });
+    assert.ok(r.moved.some((m) => m.group === true || m.object === 'pine'));
+    const broken = { ...real(), items: [{ object: 'no-such-object', at: { tile: [1, 1, 0] } }, { object: 'pine', at: { tile: [0, 0, 0] } }] };
+    const left = ops.sortScene(site, await sources(), broken);
+    assert.deepEqual([left.moved, left.remap.size, broken.items[0].object], [[], 0, 'no-such-object']);
+  });
+
+  test('place: added last, on a tile or by pixel (the session then sorts it, lab place)', () => {
     const doc = scene();
     const r = ops.place(doc, 'pine', { tile: [0, 1, 0] });
-    assert.deepEqual(r.path, [3]);
-    assert.deepEqual(doc.items[3], { object: 'pine', at: { tile: [0, 1, 0] } });
+    assert.deepEqual(r.path, [doc.items.length - 1]);
+    assert.deepEqual(doc.items.at(-1), { object: 'pine', at: { tile: [0, 1, 0] } });
     assert.equal(r.message, 'pine placed at column 0, row 1, level 0');
     const p = ops.place(doc, 'rock', { px: [1, 2] });
     assert.deepEqual(p.path, [doc.items.length - 1]);
     assert.equal(p.message, 'rock placed at x 1, y 2');
+    // A pixel item can stand on a level; level 0 is left out and not spoken.
+    const high = ops.place(doc, 'rock', { px: [1, 2], level: 4 });
+    assert.deepEqual(doc.items.at(-1).at, { px: [1, 2], level: 4 });
+    assert.equal(high.message, 'rock placed at x 1, y 2, level 4');
+    assert.deepEqual(ops.place(doc, 'rock', { px: [1, 2], level: 0 }).item.at, { px: [1, 2] });
   });
 
   test('moveByTiles: a tile item by tiles, a pixel item by the same screen offset (lab moveByTiles)', () => {
@@ -64,6 +104,9 @@ describe('scene ops', needsSite, () => {
     assert.deepEqual(px.at.px, [26, 18]); // (dc - dr) * 16, (dc + dr) * 8
     ops.moveByTiles(px, 0, 1, 1);
     assert.deepEqual(px.at.px, [10, 10]); // -16, +8 - 16
+    assert.deepEqual(px.at, { px: [10, 10], level: 1 }, 'a pixel item stands a level higher too, over the same tile');
+    ops.moveByTiles(px, 0, 0, -1);
+    assert.deepEqual(px.at, { px: [10, 26] }, 'back to level 0, which is left out');
   });
 
   test('moveItem and nudgeItem (lab moveSelected, nudgeSelected)', () => {
@@ -77,6 +120,14 @@ describe('scene ops', needsSite, () => {
     assert.equal(r.message, `b nudged to x ${x + 1}, y ${y - 2}`);
     assert.throws(() => ops.moveItem(site, doc, [5], 1, 0, 0), (err) => err.code === 'is_group');
     assert.throws(() => ops.moveItem(site, doc, [9], 1, 0, 0), (err) => err.code === 'not_found');
+    // A nudge keeps the level the item stands on: a tile item's, or a pixel item's own.
+    const high = { object: 'x', at: { tile: [1, 0, 2] } };
+    doc.items.push(high);
+    ops.nudgeItem(site, doc, [doc.items.length - 1], 1, 0);
+    assert.equal(high.at.level, 2);
+    ops.nudgeItem(site, doc, [doc.items.length - 1], 1, 0);
+    assert.equal(high.at.level, 2);
+    assert.deepEqual(high.at.px, [site.iso.tileToPx([1, 0, 2], doc.origin)[0] + 2, site.iso.tileToPx([1, 0, 2], doc.origin)[1]]);
   });
 
   test('keyedMove: past time 0 an animated item moves its key, made if needed (lab keyedMove)', () => {
@@ -103,30 +154,52 @@ describe('scene ops', needsSite, () => {
     assert.deepEqual(doc.items[2].at.px, [10, 40]);
     // The lab ignores x on a tile item; the port refuses.
     assert.throws(() => ops.setField(doc, [0], 'x', 1), (err) => err.code === 'wrong_placement');
+    // A pixel item has a level too, left out at 0.
+    ops.setField(doc, [2], 'level', 4);
+    assert.deepEqual(doc.items[2].at, { px: [10, 40], level: 4 });
+    assert.equal(ops.setField(doc, [2], 'level', 0).message, 'c moved to x 10, y 40');
+    assert.deepEqual(doc.items[2].at, { px: [10, 40] });
+    assert.throws(() => ops.setField(doc, [2], 'col', 1), (err) => err.code === 'wrong_placement');
   });
 
-  test('snapItem: to the level-0 tile under the placement point (lab snapSelected)', () => {
+  test('snapItem: to the tile under the placement point, at the item\'s level (lab snapSelected)', () => {
     const doc = scene();
     const point = site.iso.tileToPx([2, 1, 0], doc.origin);
     doc.items[2].at = { px: [point[0] + 3, point[1] - 2] };
     assert.equal(ops.snapItem(site, doc, [2]).message, 'c snapped to column 2, row 1, level 0');
     assert.deepEqual(doc.items[2].at, { tile: [2, 1, 0] });
     assert.throws(() => ops.snapItem(site, doc, [2]), /already on a tile/);
+    // A pixel item snaps to the tile at the level it stands on.
+    const high = site.iso.tileToPx([2, 1, 3], doc.origin);
+    doc.items[2].at = { px: [high[0] + 3, high[1] - 2], level: 3 };
+    assert.equal(ops.snapItem(site, doc, [2]).message, 'c snapped to column 2, row 1, level 3');
+    assert.deepEqual(doc.items[2].at, { tile: [2, 1, 3] });
   });
 
-  test('reorderItem swaps within its own list, refusing past either end (lab reorderSelected)', () => {
+  test('setDepth: front, back or auto on an item or a group, keeping the key order (replaces raise and lower)', () => {
     const doc = scene();
-    const r = ops.reorderItem(doc, [0], 1);
-    assert.deepEqual(r.path, [1]);
-    assert.deepEqual(doc.items.slice(0, 2).map((i) => i.object), ['b', 'a']);
-    assert.equal(r.message, 'a raised to 2 of 6 in paint order');
-    assert.equal(ops.reorderItem(doc, [1], -1).message, 'a lowered to 1 of 6 in paint order');
-    assert.throws(() => ops.reorderItem(doc, [0], -1), /already at the back/);
-    assert.throws(() => ops.reorderItem(doc, [5, 1], 1), /already at the front/);
-    assert.deepEqual(ops.reorderItem(doc, [5, 1], -1).path, [5, 0]);
+    doc.items[0].layer = 'l';
+    doc.items[0].id = 'first';
+    const r = ops.setDepth(doc, [0], 'front');
+    assert.equal(r.message, 'a draws in front of everything else in its list');
+    assert.deepEqual(Object.keys(doc.items[0]), ['object', 'id', 'layer', 'depth', 'at']);
+    assert.equal(ops.setDepth(doc, [0], 'back').item.depth, 'back');
+    assert.equal(ops.setDepth(doc, [0], 'auto').message, 'a draws by where it stands');
+    assert.deepEqual(Object.keys(doc.items[0]), ['object', 'id', 'layer', 'at']);
+    // A group takes it too, and writes it after the group's attributes.
+    assert.equal(ops.setDepth(doc, [5], 'back').message, 'Group 5 draws behind everything else in its list');
+    assert.deepEqual(Object.keys(doc.items[5]), ['group', 'depth', 'items']);
+    ops.setDepth(doc, [5], 'auto');
+    assert.deepEqual(Object.keys(doc.items[5]), ['group', 'items']);
+    // And the rest of an item's edits keep the override in its place.
+    ops.setDepth(doc, [5, 0], 'front');
+    ops.setClass(doc, [5, 0], 'sway');
+    assert.deepEqual(Object.keys(doc.items[5].items[0]), ['object', 'id', 'class', 'depth', 'at']);
+    assert.throws(() => ops.setDepth(doc, [0], /** @type {any} */ ('forward')), (err) => err.code === 'usage');
+    assert.throws(() => ops.setDepth(doc, [9], 'front'), (err) => err.code === 'not_found');
   });
 
-  test('duplicateItem: one column over, right after it, without its id (lab duplicateSelected)', () => {
+  test('duplicateItem: one column over, listed right after it (the session sorts), without its id (lab duplicateSelected)', () => {
     const doc = scene();
     const r = ops.duplicateItem(doc, [5, 0]);
     assert.deepEqual(r.path, [5, 1]);

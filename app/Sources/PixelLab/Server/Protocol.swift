@@ -155,10 +155,33 @@ struct CheckProblem: Codable, Sendable, Hashable {
     var text: String
 }
 
+/// A warning of `check`: it doesn't fail the check. `code` says which
+/// (docs/intents/2026-10-depth-order/spec.md, R11, R12).
+struct CheckWarning: Codable, Sendable, Hashable {
+    /// `off_grid`: motion that steps off the grid. `out_of_order`: a scene whose
+    /// file isn't in depth order (Sort fixes it). `copies`: a moving item drawn
+    /// once for each place it takes in the depth order.
+    enum Code: String, Sendable { case offGrid = "off_grid", outOfOrder = "out_of_order", copies }
+
+    var file: String
+    var message: String
+    var text: String
+    var code: String
+    var scene: String?
+    /// `out_of_order`: how many items a sort would move.
+    var moves: Int?
+    /// `copies`: the moving item's id and how many times it's drawn.
+    var item: String?
+    var copies: Int?
+
+    var kind: Code? { Code(rawValue: code) }
+}
+
 struct CheckResult: Codable, Sendable {
     var ok: Bool
     var checked: Int?
     var problems: [CheckProblem]
+    var warnings: [CheckWarning]?
     var summary: String?
 }
 
@@ -175,6 +198,9 @@ struct UndoResult: Codable, Sendable {
     var doc: String
     var changed: Bool?
     var summary: String?
+    /// A scene's undo or redo can give items other paths (it swaps the whole doc):
+    /// old path → new, as for an edit.
+    var reordered: [String: String]?
     var dirty: Bool
     var canUndo: Bool
     var canRedo: Bool
@@ -206,6 +232,14 @@ enum ServerEvent: Sendable {
 struct ItemAt: Codable, Sendable, Hashable {
     var tile: [Int]?
     var px: [Int]?
+    /// A pixel-placed item's level, how high it stands (absent at 0;
+    /// docs/intents/2026-10-depth-order/spec.md, R7).
+    var pxLevel: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case tile, px
+        case pxLevel = "level"
+    }
 
     var isTile: Bool { tile?.count == 3 }
     var col: Int? { tile.flatMap { $0.count == 3 ? $0[0] : nil } }
@@ -214,17 +248,22 @@ struct ItemAt: Codable, Sendable, Hashable {
     var x: Int? { px.flatMap { $0.count == 2 ? $0[0] : nil } }
     var y: Int? { px.flatMap { $0.count == 2 ? $0[1] : nil } }
 
-    /// "column 3, row 4, level 0" or "x 31, y 6".
+    var isPixel: Bool { px?.count == 2 }
+    /// The level the item stands on: a tile's third number, or a pixel item's
+    /// level (0 unless it says). nil when it has no placement.
+    var standingLevel: Int? { level ?? (isPixel ? (pxLevel ?? 0) : nil) }
+
+    /// "column 3, row 4, level 0" or "x 31, y 6" (", level 2" when a pixel item stands above 0).
     var spoken: String {
         if let t = tile, t.count == 3 { return "column \(t[0]), row \(t[1]), level \(t[2])" }
-        if let p = px, p.count == 2 { return "x \(p[0]), y \(p[1])" }
+        if let p = px, p.count == 2 { return "x \(p[0]), y \(p[1])" + (pxLevel.flatMap { $0 != 0 ? ", level \($0)" : nil } ?? "") }
         return "nowhere"
     }
 
-    /// "14,6,1" or "px 31,6".
+    /// "14,6,1" or "px 31,6" ("px 31,6 level 2" above level 0).
     var short: String {
         if let t = tile, t.count == 3 { return "\(t[0]),\(t[1]),\(t[2])" }
-        if let p = px, p.count == 2 { return "px \(p[0]),\(p[1])" }
+        if let p = px, p.count == 2 { return "px \(p[0]),\(p[1])" + (pxLevel.flatMap { $0 != 0 ? " level \($0)" : nil } ?? "") }
         return "?"
     }
 }
@@ -242,6 +281,38 @@ struct SceneItemInfo: Codable, Sendable, Hashable, Identifiable {
     var group: String?
     /// The placement point in scene pixels.
     var point: [Double]?
+    /// `front` or `back` when the item carries the depth override; nil draws it by position.
+    var depth: String?
+
+    /// The Depth control's value.
+    var depthMode: DepthMode { DepthMode(wire: depth) }
+}
+
+/// An item's or a group's depth override (docs/intents/2026-10-depth-order/spec.md, R5):
+/// by where it stands (`auto`), over everything else in its list (`front`) or under it (`back`).
+enum DepthMode: String, CaseIterable, Identifiable, Sendable {
+    case auto, front, back
+    var id: String { rawValue }
+
+    /// A `depth` field from the wire: absent or unknown is `auto`.
+    init(wire: String?) { self = wire.flatMap(DepthMode.init(rawValue:)) ?? .auto }
+
+    var title: String {
+        switch self {
+        case .auto: "Auto"
+        case .front: "Front"
+        case .back: "Back"
+        }
+    }
+
+    /// What it does, for the help text and VoiceOver.
+    var detail: String {
+        switch self {
+        case .auto: "Drawn by where it stands"
+        case .front: "Drawn over everything else in its list"
+        case .back: "Drawn under everything else in its list"
+        }
+    }
 }
 
 /// A layer of `scene.items`: a named, nestable part of the scene, in the
@@ -273,9 +344,13 @@ struct LayerEditResult: Codable, Sendable {
     /// New and assign: how many items joined; ungroup: the paths it held.
     var items: JSONValue?
     var moved: Int?
+    /// Move: the moved items' paths, after the sort.
+    var paths: [String]?
+    /// The paths the depth sort moved (see `EditResult.reordered`).
+    var reordered: [String: String]?
 
     var itemPaths: [String] { items?.arrayValue?.compactMap(\.stringValue) ?? [] }
-    var edit: EditResult { EditResult(doc: doc, changed: changed, summary: summary) }
+    var edit: EditResult { EditResult(doc: doc, changed: changed, summary: summary, reordered: reordered) }
 }
 
 /// A group of `scene.items` (its attributes are `class` and `data-*`).
@@ -284,6 +359,10 @@ struct SceneGroupInfo: Codable, Sendable, Hashable {
     var attrs: [String: String]
     var items: Int
     var group: String?
+    /// `front` or `back` when the group carries the depth override.
+    var depth: String?
+
+    var depthMode: DepthMode { DepthMode(wire: depth) }
 }
 
 struct SceneItemsResult: Codable, Sendable {
@@ -328,6 +407,20 @@ struct EditResult: Codable, Sendable {
     var pixels: Int?
     var layer: Int?
     var frame: Int?
+    /// A scene edit puts the items in depth order. When that moved any, this
+    /// maps each old path to its new one, relative to the doc as the edit left
+    /// it before the sort (docs/intents/2026-10-depth-order/plan.md, "Sorting in the session").
+    var reordered: [String: String]?
+}
+
+/// `scene.sort` on one scene: it names no doc (the command can sort every scene),
+/// so it isn't an `EditResult`. `reordered` is as there.
+struct SceneSortResult: Codable, Sendable {
+    var changed: Bool
+    var summary: String?
+    /// How many published pixels the sort changes (the file's list order against depth order).
+    var changedPixels: Int?
+    var reordered: [String: String]?
 }
 
 // MARK: Object editing (slice 5)
@@ -372,6 +465,9 @@ struct ObjectShowResult: Codable, Sendable {
     var description: String?
     var file: String?
     var anchor: [Int]
+    /// The tiles a sprite covers, wide and deep, for depth order (docs/intents/2026-10-depth-order/spec.md, R8);
+    /// nil for a block, whose size is its footprint.
+    var footprint: [Int]?
     var character: Bool?
     /// The hex values the object paints (the colors meter counts them).
     var usedColors: [String]

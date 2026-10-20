@@ -451,13 +451,56 @@ const resize = {
   format: formatChange,
 };
 
+/** A sprite's footprint: whole tiles wide and deep, 1 to 16 (engine.mjs MAX_FOOTPRINT). */
+const FOOTPRINT = {
+  type: 'array',
+  items: { type: 'integer', minimum: 1, maximum: 16 },
+  minItems: 2,
+  maxItems: 2,
+  description: 'tiles wide and deep: w,d (1 to 16 each)',
+};
+
+/** @type {import('../registry.mjs').Command} */
+const footprint = {
+  name: 'object.footprint',
+  summary: "Set how many tiles a sprite covers (--to w,d), or clear it (--clear)",
+  description:
+    "A sprite sorts against its neighbours in depth order by the ground it covers: a footprint of [wide, deep] tiles from the tile it's placed on, " +
+    "so a house, a locomotive or the crane mast go in front of and behind things by the tiles under them. The default is 1,1. " +
+    "A block's size is its footprint, so blocks refuse this. An object that extends another has the other's footprint unless it sets its own. " +
+    "The scenes that use it are put in order again at their next edit; check warns until then (scene.sort does it now).",
+  params: {
+    type: 'object',
+    properties: { name: NAME, to: FOOTPRINT, clear: { type: 'boolean', default: false, description: 'take the footprint off (a sprite then covers 1,1, or what it extends)' } },
+    required: ['name'],
+  },
+  args: ['name'],
+  mutates: true,
+  examples: ['pixellab object footprint house --to 2,2', 'pixellab object footprint house --clear'],
+  async run(ctx, params) {
+    if (params.to && params.clear) throw new UsageError('object.footprint: give only one of --to, --clear');
+    if (!params.to && !params.clear) throw new UsageError('object.footprint: give --to or --clear');
+    const name = await objectAt(ctx, params.name);
+    return editOf(ctx)({ kind: 'object', name }, (/** @type {any} */ doc) => {
+      if (doc.kind === 'block') throw new UsageError(`${name} is a block; its size is its footprint (${doc.size.slice(0, 2).join('×')} tiles)`);
+      if (params.clear) {
+        delete doc.footprint;
+        return { message: `Footprint of ${name} cleared`, footprint: null };
+      }
+      doc.footprint = [...params.to];
+      return { message: `Footprint of ${name} set to ${params.to.join('×')}`, footprint: [...params.to] };
+    });
+  },
+  format: formatChange,
+};
+
 /** @type {import('../registry.mjs').Command} */
 const create = {
   name: 'object.new',
   summary: 'Make a new object from a starter: a blank sprite, a block, or one that extends another',
   description:
     "The same starters as the lab's New dialog and `npm run art -- --new` (starter.mjs): a sprite of --width × --height (16×16 by default) " +
-    'anchored at its bottom center, a one-level grass block, or an object that --extends another with no rows overridden yet.',
+    'anchored at its bottom center (--footprint says how many tiles it covers, 1,1 unless given), a one-level grass block, or an object that --extends another with no rows overridden yet.',
   params: {
     type: 'object',
     properties: {
@@ -466,12 +509,13 @@ const create = {
       extends: { type: 'string', description: 'the object it extends (a sprite, such as character)' },
       width: { type: 'integer', minimum: 1, maximum: 64, description: 'a new sprite\'s width (default 16)' },
       height: { type: 'integer', minimum: 1, maximum: 64, description: 'a new sprite\'s height (default 16)' },
+      footprint: { ...FOOTPRINT, description: 'the tiles a new sprite covers, for depth order: w,d (default 1,1)' },
     },
     required: ['name'],
   },
   args: ['name'],
   mutates: true,
-  examples: ['pixellab object new small-rock --width 12 --height 8', 'pixellab object new tile-sand --kind block', 'pixellab object new range-hat --extends character'],
+  examples: ['pixellab object new small-rock --width 12 --height 8', 'pixellab object new shed --width 40 --height 32 --footprint 2,1', 'pixellab object new tile-sand --kind block', 'pixellab object new range-hat --extends character'],
   async run(ctx, params) {
     const { name, kind } = params;
     await checkNewName(ctx, name, 'object.new');
@@ -479,12 +523,14 @@ const create = {
     let doc;
     if (kind === 'block') {
       if (params.extends || params.width || params.height) throw new UsageError("object.new --kind block doesn't take --width, --height or --extends; a block's size is in its file, in tiles and levels");
+      if (params.footprint) throw new UsageError("object.new --kind block doesn't take --footprint; a block's size is its footprint");
       doc = starter.starterBlock();
     } else if (params.extends) {
       if (params.width || params.height) throw new UsageError("object.new: --width/--height and --extends don't mix: an object that extends another has its size");
       if (!(await ctx.names('object')).includes(params.extends)) throw new UsageError(`object.new --extends ${params.extends}: no such object`);
       doc = starter.starterExtends(params.extends);
     } else doc = starter.starterSprite(params.width ?? 16, params.height ?? 16);
+    if (params.footprint) doc.footprint = [...params.footprint];
     const label = `Created object ${name}`;
     ctx.session.create(ctx, 'object', name, doc, label);
     return { doc: `object:${name}`, changed: true, summary: label, file: `objects/${name}.mjs` };
@@ -615,4 +661,4 @@ const setMap = {
   format: formatChange,
 };
 
-export default [paint, erase, fill, pick, ...layerCommands, ...frameCommands, animate, still, resize, create, setMap];
+export default [paint, erase, fill, pick, ...layerCommands, ...frameCommands, animate, still, resize, footprint, create, setMap];

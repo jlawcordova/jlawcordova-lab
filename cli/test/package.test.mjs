@@ -22,7 +22,7 @@ describe('package.json (R15)', () => {
   });
 
   test('R15: every export is an engine module that loads, and the engine modules are all exported', async () => {
-    const expected = ['./engine', './iso', './motion', './serialize', './edit', './starter', './svg', './compile', './preview', './document'];
+    const expected = ['./engine', './iso', './depth', './motion', './serialize', './edit', './starter', './svg', './compile', './preview', './document'];
     assert.deepEqual(Object.keys(pkg.exports).sort(), expected.sort());
     for (const [name, file] of Object.entries(pkg.exports)) {
       assert.ok(existsSync(join(REPO, file)), `${name} → ${file} exists`);

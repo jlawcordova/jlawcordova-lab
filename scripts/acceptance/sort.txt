@@ -1,0 +1,23 @@
+# Sort on a document written before depth order (a temp copy of the site's document, unsorted):
+# Checks warns that closeup-front-trees isn't in depth order, Sort puts it in order as one undo step,
+# and the saved file is in order (docs/intents/2026-10-depth-order/spec.md, R4, R11, R14).
+appearance dark
+open scene:closeup-front-trees
+expect warning out_of_order
+expect dirty false
+snapshot @OUT@/sort-warning-dark.png
+select 0
+sort
+expect nowarning out_of_order
+expect dirty true
+snapshot @OUT@/sort-done-dark.png
+# one undo step gives the file's order back, and the warning with it
+undo
+expect warning out_of_order
+expect dirty false
+redo
+expect nowarning out_of_order
+save
+expect dirty false
+cli scene sort closeup-front-trees
+expect cli Already in depth order

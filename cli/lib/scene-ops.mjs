@@ -84,8 +84,21 @@ export function placementPoint(iso, item, origin) {
 }
 
 /**
+ * Sets a pixel-placed item's level, leaving the key out at 0 as the
+ * serializer does (docs/intents/2026-10-depth-order/spec.md, D1).
+ * @param {any} at
+ * @param {number} level
+ */
+function setLevel(at, level) {
+  if (level) at.level = level;
+  else delete at.level;
+}
+
+/**
  * Moves an item by whole tiles and levels, however it's placed: a pixel-placed
- * item moves by the same screen offset. Port of scene-mode.ts moveByTiles.
+ * item moves by the same screen offset, and its level by the same levels, so
+ * it stands over the same tile a level higher (depth order, R7). Port of
+ * scene-mode.ts moveByTiles.
  * @param {any} item
  * @param {number} dc
  * @param {number} dr
@@ -98,33 +111,17 @@ export function moveByTiles(item, dc, dr, dl) {
   } else {
     const [x, y] = item.at.px;
     item.at.px = [x + (dc - dr) * HALF_W, y + (dc + dr) * HALF_H - dl * LEVEL_H];
+    if (dl) setLevel(item.at, (item.at.level ?? 0) + dl);
   }
 }
 
-/**
- * Where a new item goes in the scene's top-level list: back to front by
- * row + col, then level, among the items placed on tiles (lab spec D9.4).
- * Port of scene-mode.ts insertIndex.
- * @param {any[]} items
- * @param {number[]} tile
- */
-export function insertIndex(items, [col, row, level]) {
-  const index = items.findIndex((other) => {
-    const tile = other?.at?.tile;
-    if (!tile) return false;
-    const [c, r, l] = tile;
-    return c + r > col + row || (c + r === col + row && l > level);
-  });
-  return index === -1 ? items.length : index;
-}
-
-/** "column 3, row 4, level 0" or "x 31, y 6". Port of scene-mode.ts spoken. */
+/** "column 3, row 4, level 0", "x 31, y 6" or, for a pixel item standing above level 0, "x 40, y -12, level 4". Port of scene-mode.ts spoken. */
 export function spoken(/** @type {any} */ item) {
   if (item.at.tile) {
     const [c, r, l] = item.at.tile;
     return `column ${c}, row ${r}, level ${l}`;
   }
-  return `x ${item.at.px[0]}, y ${item.at.px[1]}`;
+  return `x ${item.at.px[0]}, y ${item.at.px[1]}${item.at.level ? `, level ${item.at.level}` : ''}`;
 }
 
 /** Takes an item's track out of the scene's motion. Port of scene-mode.ts dropTrack. */
@@ -133,20 +130,29 @@ export function dropTrack(/** @type {any} */ doc, /** @type {string} */ id) {
 }
 
 /**
- * Places an object on a tile, as the newest item in back-to-front order.
- * Port of SceneMode.place. The lab only places on tiles; a pixel placement
- * (which the lab makes by nudging) goes at the end of the top-level list,
- * in front of everything.
+ * An `at` for a new or moved item: a tile, or a pixel point with the level it
+ * stands on (left out at 0).
+ * @param {{ tile?: number[], px?: number[], level?: number }} at
+ */
+function atOf(at) {
+  if (at.tile) return { tile: [...at.tile] };
+  const out = { px: [.../** @type {number[]} */ (at.px)] };
+  return at.level ? { ...out, level: at.level } : out;
+}
+
+/**
+ * Places an object on a tile or at a pixel point, as the newest item of the
+ * scene's list; the session's sort (sortScene) then puts it where it stands.
+ * Port of SceneMode.place, which slotted a tile item in by row and column.
  * @param {any} doc
  * @param {string} object
- * @param {{ tile?: number[], px?: number[] }} at
+ * @param {{ tile?: number[], px?: number[], level?: number }} at
  * @returns {{ path: number[], item: any, message: string }}
  */
 export function place(doc, object, at) {
-  const item = { object, at: at.tile ? { tile: [...at.tile] } : { px: [.../** @type {number[]} */ (at.px)] } };
-  const index = at.tile ? insertIndex(doc.items, at.tile) : doc.items.length;
-  doc.items.splice(index, 0, item);
-  return { path: [index], item, message: `${object} placed at ${spoken(item)}` };
+  const item = { object, at: atOf(at) };
+  doc.items.push(item);
+  return { path: [doc.items.length - 1], item, message: `${object} placed at ${spoken(item)}` };
 }
 
 /**
@@ -209,14 +215,16 @@ export function nudgeItem(site, doc, path, dx, dy, time = 0) {
   const keyed = keyedMove(site.motion, doc, item, dx, dy, time);
   if (keyed) return { path, item, message: keyed, keyed: true };
   const [x, y] = placementPoint(site.iso, item, doc.origin ?? [0, 0]);
-  item.at = { px: [x + dx, y + dy] };
+  // It keeps the level it stands on, so nudging it doesn't change what it stands behind.
+  item.at = atOf({ px: [x + dx, y + dy], level: item.at.tile ? item.at.tile[2] : item.at.level });
   return { path, item, message: `${item.object} nudged to ${spoken(item)}`, keyed: false };
 }
 
 /**
  * Sets one coordinate of an item: col, row or level of an item on a tile,
- * x or y of a pixel-placed one. Port of SceneMode.setField; where the lab
- * ignores a field that doesn't match the placement, this refuses.
+ * x or y of a pixel-placed one, or the level a pixel-placed one stands on.
+ * Port of SceneMode.setField; where the lab ignores a field that doesn't
+ * match the placement, this refuses.
  * @param {any} doc
  * @param {number[]} path
  * @param {'col' | 'row' | 'level' | 'x' | 'y'} field
@@ -226,11 +234,15 @@ export function setField(doc, path, field, value) {
   const item = placedAt(doc, path);
   if (!Number.isInteger(value)) throw new SceneOpError(`${field} must be a whole number`, 'usage');
   const at = item.at;
+  if (field === 'level' && at.px) {
+    setLevel(at, value);
+    return { path, item, message: `${item.object} moved to ${spoken(item)}` };
+  }
   /** @type {Record<string, [number[] | undefined, number]>} */
   const fields = { col: [at.tile, 0], row: [at.tile, 1], level: [at.tile, 2], x: [at.px, 0], y: [at.px, 1] };
   const [list, i] = fields[field] ?? [undefined, 0];
   if (!list) {
-    const placed = at.tile ? 'on a tile (col, row, level)' : 'by pixel (x, y)';
+    const placed = at.tile ? 'on a tile (col, row, level)' : 'by pixel (x, y, level)';
     throw new SceneOpError(`${item.object} at ${show(path)} is placed ${placed}, so it has no ${field}; set tile or px to change how it's placed`, 'wrong_placement');
   }
   list[i] = value;
@@ -243,17 +255,19 @@ export function setField(doc, path, field, value) {
  * `at`); the CLI takes the target directly.
  * @param {any} doc
  * @param {number[]} path
- * @param {{ tile?: number[], px?: number[] }} at
+ * @param {{ tile?: number[], px?: number[], level?: number }} at
  */
 export function setAt(doc, path, at) {
   const item = placedAt(doc, path);
-  item.at = at.tile ? { tile: [...at.tile] } : { px: [.../** @type {number[]} */ (at.px)] };
+  // A pixel point keeps the level the item already stands on, unless the caller gives one.
+  item.at = atOf(at.tile ? at : { px: at.px, level: at.level ?? item.at.level });
   return { path, item, message: `${item.object} moved to ${spoken(item)}` };
 }
 
 /**
- * Snaps a pixel-placed item to the level-0 tile under its placement point.
- * Port of SceneMode.snapSelected.
+ * Snaps a pixel-placed item to the tile under its placement point at the
+ * level it stands on (level 0 unless it has one). Port of SceneMode.snapSelected,
+ * which snapped to level 0.
  * @param {any} site  for iso
  * @param {any} doc
  * @param {number[]} path
@@ -261,33 +275,14 @@ export function setAt(doc, path, at) {
 export function snapItem(site, doc, path) {
   const item = placedAt(doc, path);
   if (item.at.tile) throw new SceneOpError(`${item.object} is already on a tile`, 'already_on_tile');
-  item.at = { tile: site.iso.pxToTile(item.at.px, 0, doc.origin ?? [0, 0]) };
+  item.at = { tile: site.iso.pxToTile(item.at.px, item.at.level ?? 0, doc.origin ?? [0, 0]) };
   return { path, item, message: `${item.object} snapped to ${spoken(item)}` };
 }
 
 /**
- * Moves an item later (forward, delta 1) or earlier (back, delta -1) in
- * paint order, within its list. Port of SceneMode.reorderSelected.
- * @param {any} doc
- * @param {number[]} path
- * @param {1 | -1} delta
- */
-export function reorderItem(doc, path, delta) {
-  const item = placedAt(doc, path);
-  const { list, index } = parentOf(doc, path);
-  const target = index + delta;
-  if (target < 0 || target >= list.length) {
-    throw new SceneOpError(`${item.object} is already ${delta > 0 ? 'at the front' : 'at the back'}`, delta > 0 ? 'at_front' : 'at_back');
-  }
-  [list[index], list[target]] = [list[target], list[index]];
-  const next = [...path.slice(0, -1), target];
-  return { path: next, item, message: `${item.object} ${delta > 0 ? 'raised' : 'lowered'} to ${target + 1} of ${list.length} in paint order` };
-}
-
-/**
- * Duplicates an item one column over (moveByTiles(1, 0, 0)), right after
- * it in paint order. The copy takes no id, so no track either. Port of
- * SceneMode.duplicateSelected.
+ * Duplicates an item one column over (moveByTiles(1, 0, 0)), listed right
+ * after it until the session's sort puts it where it stands. The copy takes
+ * no id, so no track either. Port of SceneMode.duplicateSelected.
  * @param {any} doc
  * @param {number[]} path
  */
@@ -317,14 +312,45 @@ export function removeItem(doc, path) {
 
 /**
  * Rebuilds an item's keys in the canonical order: object, id, class, layer,
- * at (a layer stays as it was: docs/intents/2026-10-scene-layers/spec.md, D1).
+ * depth, at (a layer stays as it was: docs/intents/2026-10-scene-layers/spec.md,
+ * D1; depth: docs/intents/2026-10-depth-order/spec.md, D1).
  * @param {any} item
  * @param {{ id?: string, class?: string }} parts
  */
 function reorderKeys(item, { id, class: cls }) {
-  const { object, at, layer } = item;
+  const { object, at, layer, depth } = item;
   for (const key of Object.keys(item)) delete item[key];
-  Object.assign(item, { object, ...(id === undefined ? {} : { id }), ...(cls === undefined ? {} : { class: cls }), ...(layer === undefined ? {} : { layer }), at });
+  Object.assign(item, { object, ...(id === undefined ? {} : { id }), ...(cls === undefined ? {} : { class: cls }), ...(layer === undefined ? {} : { layer }), ...(depth === undefined ? {} : { depth }), at });
+}
+
+/**
+ * Sets an item's or a group's depth override: 'front' draws it over everything
+ * else in its list, 'back' under everything, and 'auto' takes the override
+ * off, so it draws by where it stands. Keeps the canonical key order.
+ * @param {any} doc
+ * @param {number[]} path  an item's or a group's
+ * @param {'front' | 'back' | 'auto'} depth
+ */
+export function setDepth(doc, path, depth) {
+  const item = itemAt(doc, path);
+  if (!item) throw new SceneOpError(`no item at ${show(path)}`, 'not_found');
+  if (depth !== 'front' && depth !== 'back' && depth !== 'auto') throw new SceneOpError("depth is 'front', 'back' or 'auto'", 'usage');
+  const value = depth === 'auto' ? undefined : depth;
+  if (isGroup(item)) {
+    const { group, items, depth: _old, ...rest } = item;
+    for (const key of Object.keys(item)) delete item[key];
+    Object.assign(item, { group, ...(value === undefined ? {} : { depth: value }), items, ...rest });
+  } else {
+    if (value === undefined) delete item.depth;
+    else item.depth = value;
+    reorderKeys(item, { id: item.id, class: item.class });
+  }
+  /** The message, naming a group by `at`: its path, which the sort may change after this. */
+  const say = (/** @type {string} */ at) => {
+    const what = isGroup(item) ? `Group ${at}` : item.object;
+    return value === undefined ? `${what} draws by where it stands` : `${what} draws ${value === 'front' ? 'in front of' : 'behind'} everything else in its list`;
+  };
+  return { path, item, message: say(show(path)), say };
 }
 
 /**
@@ -527,38 +553,17 @@ export function firstPlaced(/** @type {any[]} */ list, /** @type {number[]} */ p
 }
 
 /**
- * Where a new group around an item on `tile` goes in a list: back to front,
- * judging each group by its first item on a tile (insertIndex, group-aware).
- * @param {any[]} items
- * @param {number[]} tile
- */
-export function insertIndexDeep(items, tile) {
-  const tileOf = (/** @type {any} */ item) => {
-    if (!isGroup(item)) return item?.at?.tile;
-    /** @type {any[]} */
-    const stack = [...(item.items ?? [])];
-    while (stack.length) {
-      const next = stack.shift();
-      if (isGroup(next)) stack.unshift(...(next.items ?? []));
-      else if (next?.at?.tile) return next.at.tile;
-    }
-    return undefined;
-  };
-  return insertIndex(items.map((item) => ({ at: { tile: tileOf(item) } })), tile);
-}
-
-/**
  * Places an object inside a group: an existing one at `group`, and/or a new
- * one with `newGroup` attributes, at `index` in the list it goes into (else
- * back to front for an item on a tile, last for one placed by pixel).
+ * one with `newGroup` attributes. The item (or the new group) goes last in
+ * the list it joins; the session's sort then puts it where it stands.
  * @param {any} doc
  * @param {string} object
- * @param {{ tile?: number[], px?: number[] }} at
- * @param {{ group?: number[] | null, newGroup?: Record<string, string> | null, index?: number }} where
+ * @param {{ tile?: number[], px?: number[], level?: number }} at
+ * @param {{ group?: number[] | null, newGroup?: Record<string, string> | null }} where
  * @returns {{ path: number[], group: number[], item: any, message: string }}
  */
-export function placeInGroup(doc, object, at, { group = null, newGroup = null, index }) {
-  const item = { object, at: at.tile ? { tile: [...at.tile] } : { px: [.../** @type {number[]} */ (at.px)] } };
+export function placeInGroup(doc, object, at, { group = null, newGroup = null }) {
+  const item = { object, at: atOf(at) };
   /** @type {any[]} */
   let list = doc.items;
   if (group) {
@@ -567,18 +572,183 @@ export function placeInGroup(doc, object, at, { group = null, newGroup = null, i
     g.items ??= [];
     list = g.items;
   }
-  const clamp = (/** @type {number} */ i) => {
-    if (i < 0 || i > list.length) throw new SceneOpError(`index ${i} is outside 0 to ${list.length}`, 'out_of_range');
-    return i;
-  };
-  let i;
   if (newGroup) {
-    i = index !== undefined ? clamp(index) : at.tile ? insertIndexDeep(list, at.tile) : list.length;
-    list.splice(i, 0, { group: { ...newGroup }, items: [item] });
-    const gpath = [...(group ?? []), i];
+    list.push({ group: { ...newGroup }, items: [item] });
+    const gpath = [...(group ?? []), list.length - 1];
     return { path: [...gpath, 0], group: gpath, item, message: `${object} placed at ${spoken(item)} in a new group` };
   }
-  i = index !== undefined ? clamp(index) : at.tile ? insertIndex(list, at.tile) : list.length;
-  list.splice(i, 0, item);
-  return { path: [.../** @type {number[]} */ (group), i], group: /** @type {number[]} */ (group), item, message: `${object} placed at ${spoken(item)} in group ${show(/** @type {number[]} */ (group))}` };
+  list.push(item);
+  return { path: [.../** @type {number[]} */ (group), list.length - 1], group: /** @type {number[]} */ (group), item, message: `${object} placed at ${spoken(item)} in group ${show(/** @type {number[]} */ (group))}` };
+}
+
+// Depth order (docs/intents/2026-10-depth-order/spec.md, R4): every scene
+// edit ends by putting each list of items in depth order, so the file, scene
+// items and the Layers panel read back to front.
+
+/**
+ * The longest run of positions that already hold their relative order: the
+ * items of a sorted list that stayed put, so the others are the ones the
+ * sort moved. `order[k]` is the old index of the item now at k.
+ * @param {number[]} order
+ * @returns {Set<number>}  the old indices that stayed
+ */
+function stayed(order) {
+  /** @type {number[]} */
+  const length = [];
+  /** @type {number[]} */
+  const from = [];
+  let best = -1;
+  order.forEach((old, k) => {
+    length[k] = 1;
+    from[k] = -1;
+    for (let j = 0; j < k; j++) if (order[j] < old && length[j] + 1 > length[k]) [length[k], from[k]] = [length[j] + 1, j];
+    if (best < 0 || length[k] > length[best]) best = k;
+  });
+  const out = new Set();
+  for (let k = best; k >= 0; k = from[k]) out.add(order[k]);
+  return out;
+}
+
+/**
+ * Puts every list of the scene's items (the scene's, and each group's) in
+ * depth order, in place. A group sorts as one object in its list and its
+ * members sort inside it. Returns what moved (the items the sort took out of
+ * their place, by path before and after) and `remap`, every path that
+ * changed ("12" → "4", a moved group's members too), for a caller holding
+ * other paths. Nothing is touched if the order can't be worked out (an item
+ * names an object that doesn't resolve): then `moved` and `remap` are empty.
+ * @param {any} site  for the engine's depth order
+ * @param {any} sources  the engine's, to size the items' objects
+ * @param {any} doc
+ * @returns {{ moved: { path: string, to: string, object?: string, group?: true }[], remap: Map<string, string> }}
+ */
+export function sortScene(site, sources, doc) {
+  const origin = doc.origin ?? [0, 0];
+  /** @type {Map<string, any>} */
+  const tracks = new Map((doc.motion?.tracks ?? []).map((/** @type {any} */ track) => [track.item, track]));
+  /** Every item and group of the scene by its path now. */
+  const pathsOf = () => {
+    /** @type {Map<any, string>} */
+    const out = new Map();
+    const walk = (/** @type {any[]} */ list, /** @type {number[]} */ prefix) =>
+      (list ?? []).forEach((item, i) => {
+        out.set(item, show([...prefix, i]));
+        if (isGroup(item)) walk(item.items, [...prefix, i]);
+      });
+    walk(doc.items, []);
+    return out;
+  };
+  /** @type {{ list: any[], order: number[] }[]} */
+  const plans = [];
+  try {
+    const plan = (/** @type {any[]} */ list) => {
+      for (const item of list) if (isGroup(item)) plan(item.items ?? []);
+      plans.push({ list, order: site.engine.depthOrder(sources, list, origin, tracks) });
+    };
+    plan(doc.items ?? []);
+  } catch {
+    return { moved: [], remap: new Map() };
+  }
+  if (plans.every(({ order }) => order.every((old, k) => old === k))) return { moved: [], remap: new Map() };
+  const before = pathsOf();
+  /** @type {any[]} */
+  const jumped = [];
+  for (const { list, order } of plans) {
+    const keep = stayed(order);
+    for (const old of order) if (!keep.has(old)) jumped.push(list[old]);
+    const items = list.slice();
+    order.forEach((old, k) => (list[k] = items[old]));
+  }
+  const after = pathsOf();
+  /** @type {Map<string, string>} */
+  const remap = new Map();
+  for (const [item, path] of before) if (after.get(item) !== path) remap.set(path, /** @type {string} */ (after.get(item)));
+  const moved = jumped
+    .map((item) => ({ path: /** @type {string} */ (before.get(item)), to: /** @type {string} */ (after.get(item)), ...(isGroup(item) ? { group: /** @type {true} */ (true) } : { object: item.object }) }))
+    .sort((a, b) => a.path.localeCompare(b.path, 'en', { numeric: true }));
+  return { moved, remap };
+}
+
+/**
+ * Where a scene's items and groups went between two states of the same scene
+ * (undo and redo swap the whole doc): old path → new path, for the paths that
+ * changed, so a caller holding paths (the app's selection) can follow. Items
+ * are matched by content, in the order they come (so identical items pair
+ * off in order); what's left is matched by object, in order, so an item whose
+ * placement the step changed still pairs with itself. A group goes where its
+ * first item went. Items that exist on one side only aren't in the map.
+ * @param {any} before
+ * @param {any} after
+ * @returns {Map<string, string>}
+ */
+export function pathChanges(before, after) {
+  /** @param {any} doc */
+  const items = (doc) => {
+    /** @type {{ path: string, item: any }[]} */
+    const out = [];
+    const walk = (/** @type {any[]} */ list, /** @type {number[]} */ prefix) =>
+      (list ?? []).forEach((item, i) => {
+        if (isGroup(item)) walk(item.items, [...prefix, i]);
+        else out.push({ path: show([...prefix, i]), item });
+      });
+    walk(doc.items, []);
+    return out;
+  };
+  const was = items(before);
+  const now = items(after);
+  /** @type {Map<string, string>} */
+  const to = new Map();
+  /** @type {Set<number>} */
+  const taken = new Set();
+  /** @type {Map<string, number[]>} */
+  const byContent = new Map();
+  now.forEach(({ item }, i) => {
+    const key = JSON.stringify(item);
+    byContent.set(key, [...(byContent.get(key) ?? []), i]);
+  });
+  const left = [];
+  for (const entry of was) {
+    const i = byContent.get(JSON.stringify(entry.item))?.shift();
+    if (i === undefined) left.push(entry);
+    else {
+      taken.add(i);
+      to.set(entry.path, now[i].path);
+    }
+  }
+  /** @type {Map<string, number[]>} */
+  const byObject = new Map();
+  now.forEach(({ item }, i) => {
+    if (!taken.has(i)) byObject.set(item?.object, [...(byObject.get(item?.object) ?? []), i]);
+  });
+  for (const entry of left) {
+    const i = byObject.get(entry.item?.object)?.shift();
+    if (i !== undefined) to.set(entry.path, now[i].path);
+  }
+  // A group goes where its first item went (the same depth of nesting).
+  /** @type {Set<string>} */
+  const groupsNow = new Set();
+  const collect = (/** @type {any[]} */ list, /** @type {number[]} */ prefix) =>
+    (list ?? []).forEach((item, i) => {
+      if (!isGroup(item)) return;
+      groupsNow.add(show([...prefix, i]));
+      collect(item.items, [...prefix, i]);
+    });
+  collect(after.items, []);
+  const groups = (/** @type {any[]} */ list, /** @type {number[]} */ prefix) =>
+    (list ?? []).forEach((item, i) => {
+      if (!isGroup(item)) return;
+      const path = [...prefix, i];
+      const first = (/** @type {any} */ g, /** @type {number[]} */ p) => {
+        for (const [k, m] of (g.items ?? []).entries()) return isGroup(m) ? first(m, [...p, k]) : show([...p, k]);
+        return undefined;
+      };
+      const moved = first(item, path);
+      const there = moved === undefined ? undefined : to.get(moved);
+      const parent = there?.split('.').slice(0, path.length).join('.');
+      if (parent !== undefined && groupsNow.has(parent)) to.set(show(path), parent);
+      groups(item.items, path);
+    });
+  groups(before.items, []);
+  for (const [path, next] of [...to]) if (path === next) to.delete(path);
+  return to;
 }

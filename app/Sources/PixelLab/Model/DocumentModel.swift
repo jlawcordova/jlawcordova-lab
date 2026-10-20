@@ -41,6 +41,8 @@ final class DocumentModel {
     var render: StageImage?
     /// nil until the first `check` comes back.
     var problems: [CheckProblem]?
+    /// `check`'s warnings: they don't fail it (off the grid, out of depth order, a moving item's copies).
+    var warnings: [CheckWarning] = []
     var checkSummary: String?
     var checkedCount: Int?
     var error: String?
@@ -72,13 +74,46 @@ final class DocumentModel {
 
     var selectedItem: SceneItemInfo? { selectedPath.flatMap { itemsByPath[$0] } }
 
+    /// The SVG group around an item when the item is its only member. Such a
+    /// group sorts as the item does, so the item's Depth control reads and
+    /// writes the group's depth (docs/intents/2026-10-depth-order/spec.md, R9, D7).
+    func soleGroup(of item: SceneItemInfo) -> SceneGroupInfo? {
+        guard let path = item.group, let group = groups.first(where: { $0.path == path }), group.items == 1 else { return nil }
+        return group
+    }
+
+    /// What the Depth control shows for an item: its wrapper's depth when it is alone in it, else its own.
+    func depthMode(of item: SceneItemInfo) -> DepthMode {
+        soleGroup(of: item)?.depthMode ?? item.depthMode
+    }
+
     /// The selected layer, when the selection is one layer.
     var selectedLayer: String? {
         if selection.count == 1, case .layer(let id) = selection[0] { return id }
         return nil
     }
 
-    func setItems(_ r: SceneItemsResult) {
+    /// Scene edits whose results have come back (each may have given items
+    /// other paths, `reordered`), and how many of them the items list was
+    /// asked for after: nil when it was asked for while an edit was on its way.
+    /// `scene.items` comes back on its own schedule, before an edit's result or
+    /// after it, so a path in the list and a path the app holds mean the same
+    /// item only when the two match (`LayersModel.itemsCurrent`).
+    @ObservationIgnored private(set) var edits = 0
+    @ObservationIgnored private(set) var itemsAsOf: Int?
+
+    /// An edit's result came back: lists asked for before now are from before it.
+    func editReturned() { edits += 1 }
+
+    /// The list a `scene.items` sent now will be: `edits`, or nil while an edit is on its way.
+    func itemsStamp(editsPending: Int) -> Int? { editsPending == 0 ? edits : nil }
+
+    /// `scene.items` came back, as of now.
+    func setItems(_ r: SceneItemsResult) { setItems(r, asOf: edits) }
+
+    /// `scene.items` came back; `asOf` is its `itemsStamp` from when it was asked for.
+    func setItems(_ r: SceneItemsResult, asOf: Int?) {
+        itemsAsOf = asOf
         items = r.items
         groups = r.groups
         itemsByPath = Dictionary(r.items.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
@@ -99,4 +134,15 @@ final class DocumentModel {
 
     var isDirty: Bool { status?.dirty ?? false }
     var title: String { ref.name }
+
+    /// The warning that this scene's file isn't in depth order, when it isn't (Sort fixes it).
+    var outOfOrder: CheckWarning? { warnings.first { $0.kind == .outOfOrder && ($0.scene ?? ref.name) == ref.name } }
+
+    /// A scene edit put the items in depth order and moved some: the selection
+    /// follows its items to their new paths.
+    func follow(_ reordered: [String: String]) {
+        guard !reordered.isEmpty else { return }
+        let next = selection.map { $0.following(reordered) }
+        if next != selection { selection = next }
+    }
 }

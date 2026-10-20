@@ -1,0 +1,67 @@
+# Depth order on the harbor example (examples/harbor.pixellab, a temp copy): the front pine moved behind
+# the red house draws behind its wall, the Depth override draws it over the wall, and the saved file is in
+# depth order (docs/intents/2026-10-depth-order/spec.md, R4, R5, R9, R15).
+# Pixels are scene pixels: -13,-3 is a wall pixel of the red house that the pine (tile 0,1) overlaps once it
+# is moved there. The wall's red is #9E3B4B, the pine's green #4E6B3A.
+appearance dark
+open scene:harbor-flat
+# the front pine stands at tile 5,6; nothing in front of the house yet
+select 80.0
+expect object pine
+expect at 5,6,0
+expect depth auto
+expect scenepixel -13,-3 #9E3B4B
+# move it −5,−5 to tile 0,1, behind the red house's walls: the wall draws over it
+move -5 -5
+expect at 0,1,0
+expect scenepixel -13,-3 #9E3B4B
+# the list followed: the pine is listed before the house's walls, and the selection followed the pine
+expect order selected walls@1,1,1
+expect object pine
+expect nowarning out_of_order
+snapshot @OUT@/example-depth-pine-behind-dark.png
+# harbor-flat wraps each piece in its own { group }, and the pine is alone in its wrapper, so the Depth
+# control sets the wrapper's depth: Front draws it over everything in its list, the wall included; Auto puts it back
+depth front
+expect depth front
+expect groupdepth selected front
+expect scenepixel -13,-3 #4E6B3A
+expect object pine
+snapshot @OUT@/example-depth-pine-front-dark.png
+depth auto
+expect depth auto
+expect groupdepth selected auto
+expect scenepixel -13,-3 #9E3B4B
+# undo and redo take the sorting with them, and the selection follows the pine to its new path:
+# three undos give the old list back, three redos the new one
+undo
+expect depth front
+undo
+undo
+expect object pine
+expect at 5,6,0
+expect order walls@1,1,1 pine@5,6,0
+redo
+redo
+redo
+expect object pine
+expect at 0,1,0
+expect depth auto
+expect order selected walls@1,1,1
+expect scenepixel -13,-3 #9E3B4B
+# the file is written in depth order: nothing for Sort to do, and the CLI agrees
+save
+expect dirty false
+expect nowarning out_of_order
+cli scene sort harbor-flat
+expect cli Already in depth order
+cli check harbor-flat
+appearance light
+snapshot @OUT@/example-depth-pine-behind-light.png
+# a sprite's footprint (the object panel's steppers): pine covers 1×1 until it says; undo gives it back
+open object:pine
+expect footprint 1,1
+footprint 2,2
+expect footprint 2,2
+undo
+expect footprint 1,1

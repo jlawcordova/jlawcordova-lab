@@ -12,9 +12,12 @@ import Foundation
 ///     select <path>|#<id>|none    click <x> <y>           clicktile <col> <row> <level>
 ///     hover <col> <row> <level>   place [<col> <row> <level>]
 ///     drag <dc> <dr> [hold]       dragpx <dx> <dy> [hold] release | cancel
-///     key <spec> (right, opt+up, shift+down, delete, return, esc, v, 2, ])
+///     key <spec> (right, opt+up, shift+down, delete, return, esc, v, 2)
 ///     move <dc> <dr> [<dl>]       nudge <dx> <dy>         set <col|row|level|x|y> <n>
-///     class <text>  id <text>     raise lower duplicate remove snap
+///     class <text>  id <text>     duplicate remove snap
+///     depth front|back|auto   (the selected item's Depth control: the group's when the item is alone in its SVG group)
+///     groupdepth <group path>|selected front|back|auto   (the wrapper line's menu, for a group of several items; `selected` is the item's group)
+///     sort   (Checks' Sort button: the scene's items in depth order)   set level <n>  (a pixel item's, too)
 ///     undo redo save [force] revert publish [<dir>] done   saveas <path.pixellab>
 ///     time <ms>  play  pause  tracks on|off   zoom fit|1-4   sidebar library|items
 ///     search <text>   wait <ms>   snapshot <file.png>   log <text>
@@ -23,6 +26,12 @@ import Foundation
 ///     expect dirty|selected|object|at|items|problems|build|outputs|publishdir|document|tool|time <value>
 ///     expect scenes|objects|zoom|badge|theme|ghosttime <value>   expect scenepixel <x>,<y> <#RRGGBB|empty>
 ///     expect stale true|false     (the banner shows)   expect mergealert true|false
+///     expect depth front|back|auto (what the Depth control shows)   expect level <n>   expect groupdepth <path>|selected front|back|auto
+///     expect order <entry entry …>   (the scene's items in list order: each entry is a path, `#id`, `selected`,
+///         an object name (its first item) or `name@col,row,level`; they must appear in that order)
+///     expect warning <code>   expect nowarning <code>   (check's warnings: off_grid, out_of_order, copies)
+///     expect cli <text>   (the last `cli` step's output contains it)
+///     expect footprint <w>,<d>   (the open sprite's)   footprint <w>,<d>   (object mode: the Footprint steppers)
 ///
 /// Scene layers (docs/intents/2026-10-scene-layers/spec.md, D14; targets are
 /// `layer:<id>` or an item path):
@@ -72,6 +81,8 @@ final class ScriptRunner {
     let lines: [String]
     let size: CGSize
     private var failures = 0
+    /// What the last `cli` step printed, for `expect cli`.
+    private var lastCLIOutput = ""
 
     init(url: URL, lines: [String], size: CGSize) {
         self.url = url
@@ -167,7 +178,7 @@ final class ScriptRunner {
         let doc = model.document
         func needEdit(_ r: EditResult?) throws -> String? {
             guard let r else { throw Failure(model.notice ?? "the edit failed") }
-            return [r.summary, r.path.map { "path \($0)" }].compactMap { $0 }.joined(separator: ", ")
+            return [r.summary, r.path.map { "path \($0)" }, r.reordered.flatMap { $0.isEmpty ? nil : "reordered \($0.count)" }].compactMap { $0 }.joined(separator: ", ")
         }
         switch words[0] {
         case "open":
@@ -287,8 +298,6 @@ final class ScriptRunner {
                 case .char("z"): if k.shift { await model.redo() } else { await model.undo() }
                 case .char("s"): await model.save()
                 case .char("b"): await model.publish()
-                case .char("]"): await editor.raise()
-                case .char("["): await editor.lower()
                 default: throw Failure("no menu command for \(words[1])")
                 }
                 return nil
@@ -308,8 +317,28 @@ final class ScriptRunner {
         case "id":
             await editor.setID(words.dropFirst().joined(separator: " "))
             return nil
-        case "raise": return try needEdit(await editor.raise())
-        case "lower": return try needEdit(await editor.lower())
+        case "depth":
+            guard let mode = DepthMode(rawValue: try arg(words, 1)) else { throw Failure("depth front|back|auto") }
+            guard doc?.selectedItem != nil else { throw Failure("nothing selected") }
+            if let doc, let item = doc.selectedItem, doc.depthMode(of: item) == mode { return "already \(mode.rawValue)" }
+            return try needEdit(await editor.setDepth(mode))
+        case "groupdepth":
+            guard let mode = DepthMode(rawValue: try arg(words, 2)) else { throw Failure("groupdepth <group path>|selected front|back|auto") }
+            // `selected`: the wrapper of the selected item.
+            let path = words[1] == "selected" ? (doc?.selectedItem?.group ?? "") : words[1]
+            guard doc?.groups.contains(where: { $0.path == path }) == true else { throw Failure("no group at \(path.isEmpty ? "the selected item" : path)") }
+            if doc?.groups.first(where: { $0.path == path })?.depthMode == mode { return "already \(mode.rawValue)" }
+            return try needEdit(await editor.setGroupDepth(path, mode))
+        case "sort":
+            guard let r = await editor.sort() else { throw Failure(model.notice ?? "the sort failed") }
+            return [r.summary, r.reordered.flatMap { $0.isEmpty ? nil : "reordered \($0.count)" }].compactMap { $0 }.joined(separator: ", ")
+        case "footprint":
+            let parts = try arg(words, 1).split(separator: ",").compactMap { Int($0) }
+            guard parts.count == 2 else { throw Failure("footprint <w>,<d>") }
+            guard model.objectEditor.footprint != nil else { throw Failure("no sprite open") }
+            let r = await model.objectEditor.setFootprint(width: parts[0], depth: parts[1])
+            guard r != nil else { throw Failure(model.notice ?? "the footprint didn't change") }
+            return r?.summary
         case "duplicate": return try needEdit(await editor.duplicate())
         case "remove": return try needEdit(await editor.remove())
         case "snap": return try needEdit(await editor.snap())
@@ -332,6 +361,7 @@ final class ScriptRunner {
                 if let id = model.document?.ref.id, model.staleDocs.contains(id) || model.document?.isDirty == false { break }
             }
             try? await Task.sleep(for: .milliseconds(300))
+            lastCLIOutput = out
             return out.split(separator: "\n").last.map(String.init)
         case "stale":
             switch try arg(words, 1) {
@@ -918,6 +948,41 @@ final class ScriptRunner {
         case "frames": got = String(model.objectEditor.frameCount)
         case "hidden": got = model.objectEditor.hidden.sorted().map(String.init).joined(separator: ",")
         case "calls": got = String(model.objectEditor.lastStrokeCalls)
+        // What the Depth control shows: the group's depth when the item is alone in its SVG group.
+        case "depth": got = doc.flatMap { d in d.selectedItem.map { d.depthMode(of: $0).rawValue } } ?? "none"
+        case "level": got = doc?.selectedItem?.at.standingLevel.map(String.init) ?? "none"
+        case "groupdepth":
+            let parts = words.dropFirst(2)
+            guard let given = parts.first, case let path = given == "selected" ? (doc?.selectedItem?.group ?? "") : given,
+                  let group = doc?.groups.first(where: { $0.path == path }) else { throw Failure("expect groupdepth <group path>|selected front|back|auto") }
+            let wantMode = parts.dropFirst().joined(separator: " ")
+            guard group.depthMode.rawValue == wantMode else { throw Failure("expected groupdepth \(path) \(wantMode), got \(group.depthMode.rawValue)") }
+            return "groupdepth \(path) = \(wantMode)"
+        case "order":
+            guard let doc, !doc.items.isEmpty else { throw Failure("no items") }
+            // Spaces or commas separate the entries (a `name@col,row,level` keeps its commas).
+            let entries = want.split(separator: " ").flatMap { $0.contains("@") ? [String($0)] : $0.split(separator: ",").map(String.init) }
+            guard entries.count >= 2 else { throw Failure("expect order <entry,entry,…> (two or more)") }
+            var positions: [Int] = []
+            for entry in entries {
+                guard let i = Self.position(of: entry, in: doc) else { throw Failure("expect order: no item matches \(entry)") }
+                positions.append(i)
+            }
+            guard zip(positions, positions.dropFirst()).allSatisfy({ $0 < $1 }) else {
+                throw Failure("expected order \(want), but they stand at list positions \(positions.map(String.init).joined(separator: ","))")
+            }
+            return "order \(want) (positions \(positions.map(String.init).joined(separator: ",")))"
+        case "cli":
+            guard lastCLIOutput.contains(want) else { throw Failure("expected the last cli output to contain \"\(want)\", got: \(lastCLIOutput.split(separator: "\n").last.map(String.init) ?? "nothing")") }
+            return "cli output has \"\(want)\""
+        case "warning", "nowarning":
+            let has = doc?.warnings.contains { $0.code == want } ?? false
+            guard has == (what == "warning") else {
+                throw Failure("expected \(what) \(want), but the warnings are \(doc?.warnings.map(\.code).joined(separator: ",") ?? "unknown")")
+            }
+            return "\(what) \(want)"
+        case "footprint":
+            got = model.objectEditor.footprint.map { "\($0.width),\($0.depth)" } ?? "none"
         case "doc": got = doc?.ref.id ?? "none"
         case "mode": got = model.mode.rawValue
         case "proposals": got = String(model.agent.proposals.count)
@@ -968,6 +1033,21 @@ final class ScriptRunner {
         return "\(what) = \(got)"
     }
 
+    /// Where an entry of `expect order` stands in the scene's items (list order):
+    /// a path, `#id`, `selected`, an object name (its first item) or `name@col,row,level`.
+    static func position(of entry: String, in doc: DocumentModel) -> Int? {
+        let items = doc.items
+        if entry == "selected" { return doc.selectedPath.flatMap { p in items.firstIndex { $0.path == p } } }
+        if entry.hasPrefix("#") { return items.firstIndex { $0.id == String(entry.dropFirst()) } }
+        if LayerTarget(spec: entry) != nil, let i = items.firstIndex(where: { $0.path == entry }) { return i }
+        let parts = entry.split(separator: "@", maxSplits: 1).map(String.init)
+        guard let name = parts.first else { return nil }
+        if parts.count == 2 {
+            return items.firstIndex { $0.object == name && $0.at.tile.map { $0.map(String.init).joined(separator: ",") } == parts[1] }
+        }
+        return items.firstIndex { $0.object == name }
+    }
+
     /// Waits until edits, renders, checks, item lists and the build are done
     /// and the stage has been steady for a moment (at most 30 s).
     private func settle(_ model: AppModel) async {
@@ -981,6 +1061,8 @@ final class ScriptRunner {
                 if model.newDoc?.creating == true { return true }
                 if model.agent.busy { return true }
                 guard let doc = model.document else { return false }
+                // A scene's items as of the last edit's result, so Moved by and the inspector read them.
+                if doc.ref.kind == .scene, doc.itemsLoaded, !model.layers.itemsCurrent { return true }
                 return doc.rendering || doc.checking || doc.loadingItems || doc.render == nil || !model.thumbnails.isIdle
             }()
             if busy { steadySince = nil } else {
@@ -990,6 +1072,6 @@ final class ScriptRunner {
             try? await Task.sleep(for: .milliseconds(50))
         }
         let d = model.document
-        log("(still busy after 30 s: edits \(model.editor.pendingEdits), build \(model.build?.running == true), rendering \(d?.rendering ?? false), checking \(d?.checking ?? false), items \(d?.loadingItems ?? false), thumbnails idle \(model.thumbnails.isIdle))")
+        log("(still busy after 30 s: edits \(model.editor.pendingEdits), build \(model.build?.running == true), rendering \(d?.rendering ?? false), checking \(d?.checking ?? false), items \(d?.loadingItems ?? false), items current \(model.layers.itemsCurrent), thumbnails idle \(model.thumbnails.isIdle))")
     }
 }

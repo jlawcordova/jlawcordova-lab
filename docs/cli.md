@@ -35,6 +35,7 @@
 | [`object animate`](#objectanimate) | Turn a still layer into one of the site's frame loops, or switch a loop's kind | edit |
 | [`object erase`](#objecterase) | Erase pixels of an object (make them transparent), on a layer and frame | edit |
 | [`object fill`](#objectfill) | Flood-fill from a pixel with a palette color, on a layer and frame | edit |
+| [`object footprint`](#objectfootprint) | Set how many tiles a sprite covers (--to w,d), or clear it (--clear) | edit |
 | [`object frame add`](#objectframeadd) | Add a blank frame after a frame of a layer's loop | edit |
 | [`object frame delete`](#objectframedelete) | Delete a frame of a loop (not the only one) | edit |
 | [`object frame duplicate`](#objectframeduplicate) | Duplicate a frame of a loop, just after it | edit |
@@ -50,7 +51,7 @@
 | [`object pick`](#objectpick) | The color at a pixel of an object, on a layer and frame (the Picker) | read |
 | [`object render`](#objectrender) | Render one object to a transparent PNG | read |
 | [`object resize`](#objectresize) | Pad or crop a sprite's maps to a width and height (at the right and bottom) | edit |
-| [`object show`](#objectshow) | Show an object's kind, size, anchor, layers, frames, colors and extends | read |
+| [`object show`](#objectshow) | Show an object's kind, size, anchor, footprint, layers, frames, colors and extends | read |
 | [`object still`](#objectstill) | Turn a frame loop back into a still layer, keeping one frame | edit |
 | [`palette get`](#paletteget) | List the palette: every color name, hex and tier | read |
 | [`proposal apply`](#proposalapply) | Apply a proposal: check its base, validate it, write the doc's source and remove the proposal | writes files |
@@ -58,9 +59,9 @@
 | [`proposal reject`](#proposalreject) | Reject a proposal: delete it, leaving the site as it is | writes files |
 | [`proposal render`](#proposalrender) | Render a proposal's doc as it would be once applied, without writing anything | read |
 | [`proposal show`](#proposalshow) | Show a proposal: its edits, the source, and a diff from the file as it is now | read |
-| [`scene duplicate`](#sceneduplicate) | Duplicate an item one column over, right after it in paint order | edit |
+| [`scene duplicate`](#sceneduplicate) | Duplicate an item one column over, where the copy stands in depth order | edit |
 | [`scene group set`](#scenegroupset) | Set or remove a group's class and data attributes, or set its data-x and data-y to its first item's foot | edit |
-| [`scene items`](#sceneitems) | List a scene's items in paint order, with stable paths | read |
+| [`scene items`](#sceneitems) | List a scene's items in depth order (back to front), with stable paths | read |
 | [`scene key delete`](#scenekeydelete) | Delete a key of an item's track (not the one at 0: remove the track for that) | edit |
 | [`scene key move`](#scenekeymove) | Move a key of an item's track to another time | edit |
 | [`scene key set`](#scenekeyset) | Set a key of an item's track: its move, show and pose at a time (made if there's no key there) | edit |
@@ -70,18 +71,17 @@
 | [`scene layer rename`](#scenelayerrename) | Rename a layer | edit |
 | [`scene layer ungroup`](#scenelayerungroup) | Ungroup a layer: what it held moves up one level and stays where it is | edit |
 | [`scene list`](#scenelist) | List every scene | read |
-| [`scene lower`](#scenelower) | Lower an item: paint it one earlier, behind the item before it | edit |
 | [`scene motion path`](#scenemotionpath) | Key an item along a polyline on the grid, at a steady speed or between two times | edit |
 | [`scene motion set`](#scenemotionset) | Set the length of a scene's motion loop (making the motion if it has none) | edit |
 | [`scene move`](#scenemove) | Move an item by tiles and levels (--by) or by pixels (--nudge) | edit |
 | [`scene new`](#scenenew) | Make a new, empty scene (the starter: a 128×128 view around tile 0,0,0) | edit |
 | [`scene place`](#sceneplace) | Place an object on a tile (or at a pixel point) in a scene | edit |
-| [`scene raise`](#sceneraise) | Raise an item: paint it one later, in front of the next item | edit |
 | [`scene remove`](#sceneremove) | Remove an item (and its motion track, if it has an id) | edit |
 | [`scene render`](#scenerender) | Render a scene to a transparent PNG, with item bounds | read |
-| [`scene set`](#sceneset) | Set an item's tile or pixel point, one coordinate, its class or its id | edit |
+| [`scene set`](#sceneset) | Set an item's tile or pixel point, one coordinate, its level, depth override, class or id | edit |
 | [`scene show`](#sceneshow) | Show a scene's settings, size, objects and motion | read |
-| [`scene snap`](#scenesnap) | Snap a pixel-placed item to the level-0 tile under its placement point | edit |
+| [`scene snap`](#scenesnap) | Snap a pixel-placed item to the tile under its placement point, at the level it stands on | edit |
+| [`scene sort`](#scenesort) | Put a scene's items (or every scene's) in depth order, and say what moved | edit |
 | [`scene track add`](#scenetrackadd) | Add a motion track for an item (it needs an id): one key at 0, the rest frame | edit |
 | [`scene track remove`](#scenetrackremove) | Remove an item's motion track, with all its keys | edit |
 
@@ -294,7 +294,7 @@ Validate the sources with the engine, all of them or one doc.
 pixellab check [name] [--kind <object|scene>]
 ```
 
-Problems are the engine's "<file>: <where>: <rule>" lines. With a name, only the problems in that doc and the files it uses (palette.mjs, the objects it places or extends) are listed. On the command line, the exit code is 1 when there are problems. Warnings don't fail the check: a scene's key-to-key moves (the loop back to the first key included) whose steps aren't 1 px straight, 1:1 or 2:1, so the item jumps instead of walking the grid; scene.motion.path makes on-grid keys.
+Problems are the engine's "<file>: <where>: <rule>" lines. With a name, only the problems in that doc and the files it uses (palette.mjs, the objects it places or extends) are listed. On the command line, the exit code is 1 when there are problems. Warnings don't fail the check, and each has a code. off_grid: a scene's key-to-key moves (the loop back to the first key included) whose steps aren't 1 px straight, 1:1 or 2:1, so the item jumps instead of walking the grid; scene.motion.path makes on-grid keys. out_of_order: a scene whose file lists its items out of depth order (it still publishes in depth order; scene.sort writes the file in order), with how many items would move. copies: a moving item that takes several places among the others as it moves is drawn once for each place in the SVG, which adds to its size; the warning says how many.
 
 read-only · MCP tool `check`
 
@@ -334,7 +334,7 @@ Merge the changes to a doc's file on disk into its working copy, keeping the uns
 pixellab doc merge <doc>
 ```
 
-A three-way line merge: the file as the doc was opened or last saved, the file now, and the working copy. One undo step; the doc stays dirty with its own edits. A doc with no unsaved edits just reloads. When both sides changed the same lines it refuses with code merge_conflict (details: [{ base: [from, to], ours: [lines], theirs: [lines] }]) and changes nothing. Returns { doc, merged, changed, summary, dirty, canUndo, canRedo }.
+A three-way line merge: the file as the doc was opened or last saved, the file now, and the working copy. One undo step; the doc stays dirty with its own edits. A doc with no unsaved edits just reloads. When both sides changed the same lines it refuses with code merge_conflict (details: [{ base: [from, to], ours: [lines], theirs: [lines] }]) and changes nothing. The merged scene is put in depth order, in the same step (a line merge cannot judge overlaps): sorted says how many items moved. Returns { doc, merged, changed, summary, dirty, canUndo, canRedo, sorted? }.
 
 edits docs · session only (`serve`) · MCP tool `doc_merge`
 
@@ -366,6 +366,8 @@ Redo the last undone edit to an open doc.
 pixellab doc redo <doc>
 ```
 
+A scene edit and its depth sort are one step, so undoing it can give items other paths. When it does, the result has reordered: every path that changed, old → new (an item whose placement the step changed pairs with itself), for a caller holding paths.
+
 edits docs · session only (`serve`) · MCP tool `doc_redo`
 
 | param | type | | description |
@@ -380,7 +382,7 @@ Load an open doc from disk again, only if no unsaved work is lost.
 pixellab doc reload <doc>
 ```
 
-Reloads when the working copy has no edits its file lacks: it is clean, or it matches the file (as after its proposal was applied). Refuses with code dirty (details: the edits that would be lost) when there are unsaved edits, and with code proposed while its proposal waits for the owner. Returns { doc, reloaded, changed, summary, dirty, canUndo, canRedo }; reloaded is false when the doc already matched the file. doc.revert is the one that drops edits.
+Reloads when the working copy has no edits its file lacks: it is clean, or it matches the file (as after its proposal was applied). Refuses with code dirty (details: the edits that would be lost) when there are unsaved edits, and with code proposed while its proposal waits for the owner. Returns { doc, reloaded, changed, summary, dirty, canUndo, canRedo }; reloaded is false when the doc already matched the file. A scene whose file is not in depth order (a hand edit) is sorted as a step of its own: the result has sorted (how many items moved), the doc is then unsaved, and one undo gives back exactly the file. doc.revert is the one that drops edits.
 
 edits docs · session only (`serve`) · MCP tool `doc_reload`
 
@@ -444,6 +446,8 @@ Undo the last edit to an open doc.
 ```
 pixellab doc undo <doc>
 ```
+
+A scene edit and its depth sort are one step, so undoing it can give items other paths. When it does, the result has reordered: every path that changed, old → new (an item whose placement the step changed pairs with itself), for a caller holding paths.
 
 edits docs · session only (`serve`) · MCP tool `doc_undo`
 
@@ -566,6 +570,29 @@ edits docs · MCP tool `object_fill`
 
 ```sh
 pixellab object fill pine --x 3 --y 4 --color grass-1
+```
+
+#### object.footprint
+
+Set how many tiles a sprite covers (--to w,d), or clear it (--clear).
+
+```
+pixellab object footprint <name> [--to <n,…>] [--clear]
+```
+
+A sprite sorts against its neighbours in depth order by the ground it covers: a footprint of [wide, deep] tiles from the tile it's placed on, so a house, a locomotive or the crane mast go in front of and behind things by the tiles under them. The default is 1,1. A block's size is its footprint, so blocks refuse this. An object that extends another has the other's footprint unless it sets its own. The scenes that use it are put in order again at their next edit; check warns until then (scene.sort does it now).
+
+edits docs · MCP tool `object_footprint`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | object name (or objects/<name>) |
+| `--to` | list of integer |  | tiles wide and deep: w,d (1 to 16 each) |
+| `--clear` | boolean | default `false` | take the footprint off (a sprite then covers 1,1, or what it extends) |
+
+```sh
+pixellab object footprint house --to 2,2
+pixellab object footprint house --clear
 ```
 
 #### object.frame.add
@@ -737,10 +764,10 @@ pixellab object map set pebble .gg. gwwg gwwg .gg. --keys '{"g": "grass-2", "w":
 Make a new object from a starter: a blank sprite, a block, or one that extends another.
 
 ```
-pixellab object new <name> [--kind <sprite|block>] [--extends <text>] [--width <n>] [--height <n>]
+pixellab object new <name> [--kind <sprite|block>] [--extends <text>] [--width <n>] [--height <n>] [--footprint <n,…>]
 ```
 
-The same starters as the lab's New dialog and `npm run art -- --new` (starter.mjs): a sprite of --width × --height (16×16 by default) anchored at its bottom center, a one-level grass block, or an object that --extends another with no rows overridden yet.
+The same starters as the lab's New dialog and `npm run art -- --new` (starter.mjs): a sprite of --width × --height (16×16 by default) anchored at its bottom center (--footprint says how many tiles it covers, 1,1 unless given), a one-level grass block, or an object that --extends another with no rows overridden yet.
 
 edits docs · MCP tool `object_new`
 
@@ -751,9 +778,11 @@ edits docs · MCP tool `object_new`
 | `--extends` | string |  | the object it extends (a sprite, such as character) |
 | `--width` | integer |  | a new sprite's width (default 16) (1 to 64) |
 | `--height` | integer |  | a new sprite's height (default 16) (1 to 64) |
+| `--footprint` | list of integer |  | the tiles a new sprite covers, for depth order: w,d (default 1,1) |
 
 ```sh
 pixellab object new small-rock --width 12 --height 8
+pixellab object new shed --width 40 --height 32 --footprint 2,1
 pixellab object new tile-sand --kind block
 pixellab object new range-hat --extends character
 ```
@@ -845,7 +874,7 @@ edits docs · MCP tool `object_resize`
 
 #### object.show
 
-Show an object's kind, size, anchor, layers, frames, colors and extends.
+Show an object's kind, size, anchor, footprint, layers, frames, colors and extends.
 
 ```
 pixellab object show <name> [--doc]
@@ -976,13 +1005,13 @@ read-only · MCP tool `proposal_show`
 
 #### scene.duplicate
 
-Duplicate an item one column over, right after it in paint order.
+Duplicate an item one column over, where the copy stands in depth order.
 
 ```
 pixellab scene duplicate <name> <item>
 ```
 
-As the lab's Duplicate: the copy is moved one column (a tile, or the same screen offset by pixel) and takes no id, so no motion track.
+As the lab's Duplicate: the copy is moved one column (a tile, or the same screen offset by pixel) and takes no id, so no motion track. It is listed where it sorts, which is usually next to the original; the result has its path after the sort.
 
 edits docs · MCP tool `scene_duplicate`
 
@@ -1017,13 +1046,13 @@ pixellab scene group set hero-island truck-a --attrs '{"data-enter": "object"}'
 
 #### scene.items
 
-List a scene's items in paint order, with stable paths.
+List a scene's items in depth order (back to front), with stable paths.
 
 ```
 pixellab scene items <name>
 ```
 
-Paths index into the scene's items: "3" is the fourth top-level item, "5.2" the third item inside the group at "5". Each item has its object, at ({ tile: [col, row, level] } or { px: [x, y] }), class, id, layer, enclosing group and placement point in scene pixels. layers lists the scene's layers ({ id, name, parent, items }: items counts what is in it and in the layers inside it), in the order the Layers panel shows them.
+Paths index into the scene's items: "3" is the fourth top-level item, "5.2" the third item inside the group at "5". The list is in depth order (every edit keeps it so; scene.sort fixes a file that isn't): back to front, by where each item stands. Each item has its object, at ({ tile: [col, row, level] } or { px: [x, y], level? }), level (a pixel item's, 0 unless it says), depth (front or back, when it has the override), class, id, layer, enclosing group and placement point in scene pixels. A group in groups has its path, attrs, item count and depth. layers lists the scene's layers ({ id, name, parent, items }: items counts what is in it and in the layers inside it), in the order the Layers panel shows them.
 
 read-only · MCP tool `scene_items`
 
@@ -1126,7 +1155,7 @@ Move layers (every item in them, and in the layers inside them) and items by til
 pixellab scene layer move <name> [layer] [--layers <text,…>] [--items <text,…>] --by <n,…> [--keep-group]
 ```
 
-As dragging a selection on the stage: every item moves by --by col,row[,level] tiles (a pixel-placed item by the same screen offset), each once, in one undo step; rapid repeats coalesce. Placements move at rest: an animated item's keys are offsets from its placement, so its motion moves with it. Each item's group keeps its data-x/data-y and data-col/data-row in step, as scene.move does (--no-keep-group leaves them). Paint order doesn't change.
+As dragging a selection on the stage: every item moves by --by col,row[,level] tiles (a pixel-placed item by the same screen offset), each once, in one undo step; rapid repeats coalesce. Placements move at rest: an animated item's keys are offsets from its placement, so its motion moves with it. Each item's group keeps its data-x/data-y and data-col/data-row in step, as scene.move does (--no-keep-group leaves them). Each item then stands at a new depth, so the scene is put in depth order: paths lists the moved items' paths after that, and reordered says which other paths moved. Layers themselves never change what is published.
 
 edits docs · MCP tool `scene_layer_move`
 
@@ -1223,23 +1252,6 @@ pixellab scene list
 
 read-only · MCP tool `scene_list`
 
-#### scene.lower
-
-Lower an item: paint it one earlier, behind the item before it.
-
-```
-pixellab scene lower <name> <item>
-```
-
-Swaps the item with its neighbour in its own list (the scene's items, or its group's), as the lab's Raise and Lower do. Returns its new path.
-
-edits docs · MCP tool `scene_lower`
-
-| param | type | | description |
-| --- | --- | --- | --- |
-| `name` (positional) | string | required | scene name (or scenes/<name>) |
-| `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id |
-
 #### scene.motion.path
 
 Key an item along a polyline on the grid, at a steady speed or between two times.
@@ -1290,7 +1302,7 @@ Move an item by tiles and levels (--by) or by pixels (--nudge).
 pixellab scene move <name> <item> [--keep-group] [--by <n,…>] [--nudge <n,…>] [--time <n>]
 ```
 
-As the lab's arrow keys: --by col,row[,level] moves an item on a tile by whole tiles (a pixel-placed item moves by the same screen offset); --nudge x,y moves it by pixels, and an item on a tile is then placed by pixel. With --time past 0, an animated item (one with an id and a motion track) moves at that time instead: the key there, made if needed, takes the move. Rapid repeats coalesce into one undo step. A move at rest keeps the item's group in step: data-x/data-y that were its placement point or foot, and data-col/data-row that were its tile, follow it (--no-keep-group leaves them); the result has the group when they did.
+As the lab's arrow keys: --by col,row[,level] moves an item on a tile by whole tiles (a pixel-placed item moves by the same screen offset, and its level by the same levels, so it stands over the same tile a level higher); --nudge x,y moves it by pixels, and an item on a tile is then placed by pixel at the level it stood on. With --time past 0, an animated item (one with an id and a motion track) moves at that time instead: the key there, made if needed, takes the move. Rapid repeats coalesce into one undo step. A move at rest keeps the item's group in step: data-x/data-y that were its placement point or foot, and data-col/data-row that were its tile, follow it (--no-keep-group leaves them); the result has the group when they did. The scene is then put in depth order: the result has the item's path after that, and reordered says which other paths moved.
 
 edits docs · MCP tool `scene_move`
 
@@ -1327,10 +1339,10 @@ edits docs · MCP tool `scene_new`
 Place an object on a tile (or at a pixel point) in a scene.
 
 ```
-pixellab scene place <name> <object> [--at <n,…>] [--px <n,…>] [--class <text>] [--id <text>] [--group <text>] [--new-group <json>] [--foot] [--index <n>] [--layer <text>]
+pixellab scene place <name> <object> [--at <n,…>] [--px <n,…>] [--level <n>] [--class <text>] [--id <text>] [--group <text>] [--new-group <json>] [--foot] [--layer <text>]
 ```
 
-Like the lab's Place tool: an item on a tile goes in back-to-front order (by row + col, then level, among the items on tiles), so it paints in front of what's behind it. A pixel placement goes last, in front of everything. With neither --at nor --px, it goes on the level-0 tile at the middle of the view, where the lab's cursor starts. --group puts it inside an existing group (the group's path, or an item inside it); --new-group wraps it in a new group with those attributes (class and data-*, like {"class": "enter", "data-enter": "object"}), and --foot sets that group's data-x and data-y to the item's foot. --index is its position in the list it goes into (0 is the back); by default an item on a tile goes back to front there (a new group judged by its first item on a tile) and one placed by pixel goes last. --layer puts it in a scene layer (its id or name; layers are apart from groups and never change paint order). Returns the new item's path, and its group's.
+Like the lab's Place tool, but the item goes where it stands: it is added to its list and the scene's items are put in depth order, so it draws behind what is in front of it and over what is behind (scene.items shows the order). With neither --at nor --px, it goes on the level-0 tile at the middle of the view, where the lab's cursor starts. --px takes --level, how high the item stands (default 0), which is only for depth: its pixel point is where its foot is drawn. --group puts it inside an existing group (the group's path, or an item inside it); --new-group wraps it in a new group with those attributes (class and data-*, like {"class": "enter", "data-enter": "object"}), and --foot sets that group's data-x and data-y to the item's foot. --layer puts it in a scene layer (its id or name; layers are apart from groups and never change paint order). Returns the new item's path after the sort, and its group's; reordered says which other paths the sort moved.
 
 edits docs · MCP tool `scene_place`
 
@@ -1340,37 +1352,21 @@ edits docs · MCP tool `scene_place`
 | `object` (positional) | string | required | the object to place |
 | `--at` | list of integer |  | a tile: col,row,level |
 | `--px` | list of integer |  | a point in scene pixels: x,y |
+| `--level` | integer |  | with --px: how high the item stands, for depth order (default 0) |
 | `--class` | string |  | a class list for the item |
 | `--id` | string |  | an id for the item (lowercase kebab-case, unique in the scene) |
 | `--group` | string |  | an existing group to place it in: its path, or an item (path or id) inside it |
 | `--new-group` | object |  | attributes of a new group around the item (class, data-*), as JSON on the command line |
 | `--foot` | boolean | default `false` | with --new-group: set its data-x and data-y to the item's foot |
-| `--index` | integer |  | its position in the list it goes into (0 is the back) (at least 0) |
 | `--layer` | string |  | a layer of the scene for the new item to join: its id, or its name (scene items lists them) |
 
 ```sh
 pixellab scene place hero-island pine --at 14,6,1
 pixellab scene place range-sprite boxes --px 40,12 --dry-run
+pixellab scene place hero-island crane-jib --px 40,-12 --level 4
 pixellab scene place hero-island crate --at 3,1,1 --new-group '{"class": "enter", "data-enter": "object"}' --foot
 pixellab scene place hero-island pine --at 3,1,1 --layer railway
 ```
-
-#### scene.raise
-
-Raise an item: paint it one later, in front of the next item.
-
-```
-pixellab scene raise <name> <item>
-```
-
-Swaps the item with its neighbour in its own list (the scene's items, or its group's), as the lab's Raise and Lower do. Returns its new path.
-
-edits docs · MCP tool `scene_raise`
-
-| param | type | | description |
-| --- | --- | --- | --- |
-| `name` (positional) | string | required | scene name (or scenes/<name>) |
-| `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id |
 
 #### scene.remove
 
@@ -1417,13 +1413,13 @@ pixellab scene render hero-island --theme dark --out /tmp/hero-dark.png
 
 #### scene.set
 
-Set an item's tile or pixel point, one coordinate, its class or its id.
+Set an item's tile or pixel point, one coordinate, its level, depth override, class or id.
 
 ```
-pixellab scene set <name> <item> [--keep-group] [--tile <n,…>] [--px <n,…>] [--col <n>] [--row <n>] [--level <n>] [--x <n>] [--y <n>] [--class <text>] [--id <text>]
+pixellab scene set <name> <item> [--keep-group] [--tile <n,…>] [--px <n,…>] [--col <n>] [--row <n>] [--level <n>] [--x <n>] [--y <n>] [--depth <front|back|auto>] [--class <text>] [--id <text>]
 ```
 
---tile col,row,level or --px x,y place the item there (changing how it's placed if need be); --col, --row, --level (an item on a tile) and --x, --y (a pixel-placed item) set one coordinate, like the lab's Selected fields. --class sets the class list and --id the id; an empty value removes it. An id's motion track follows it when it's renamed and goes with it when it's removed. All in one undo step. Moving it keeps its group's data-x/data-y and data-col/data-row in step, as scene.move does (--no-keep-group leaves them).
+--tile col,row,level or --px x,y place the item there (changing how it's placed if need be; a pixel point keeps the level the item stands on); --col, --row, --level (an item on a tile) and --x, --y (a pixel-placed item) set one coordinate, like the lab's Selected fields. --level also sets how high a pixel-placed item stands, which only matters for depth order. --depth is the override: front draws the item over everything else in its list, back under everything, auto takes the override off so it draws by where it stands. It also takes a group's path, as the only field (a group's attributes are scene.group.set). --class sets the class list and --id the id; an empty value removes it. An id's motion track follows it when it's renamed and goes with it when it's removed. All in one undo step, after which the scene is in depth order (the result has the item's path after that; reordered says what moved). Moving it keeps its group's data-x/data-y and data-col/data-row in step, as scene.move does (--no-keep-group leaves them).
 
 edits docs · MCP tool `scene_set`
 
@@ -1436,15 +1432,17 @@ edits docs · MCP tool `scene_set`
 | `--px` | list of integer |  | a point in scene pixels: x,y |
 | `--col` | integer |  |  |
 | `--row` | integer |  |  |
-| `--level` | integer |  |  |
+| `--level` | integer |  | the level of an item on a tile, or how high a pixel-placed item stands |
 | `--x` | integer |  |  |
 | `--y` | integer |  |  |
+| `--depth` | `front` \| `back` \| `auto` |  | front or back draws it over or under everything else in its list; auto clears the override |
 | `--class` | string |  | a class list, or '' to remove it |
 | `--id` | string |  | an id, or '' to remove it |
 
 ```sh
 pixellab scene set hero-island 0.0 --tile 3,4,0
 pixellab scene set hero-island 0.0 --class 'sway slow'
+pixellab scene set hero-island 140 --depth back
 ```
 
 #### scene.show
@@ -1464,13 +1462,13 @@ read-only · MCP tool `scene_show`
 
 #### scene.snap
 
-Snap a pixel-placed item to the level-0 tile under its placement point.
+Snap a pixel-placed item to the tile under its placement point, at the level it stands on.
 
 ```
 pixellab scene snap <name> <item> [--keep-group]
 ```
 
-Its group's data-x/data-y and data-col/data-row follow it, as scene.move keeps them (--no-keep-group leaves them).
+A pixel item with no level snaps to a level-0 tile. Its group's data-x/data-y and data-col/data-row follow it, as scene.move keeps them (--no-keep-group leaves them).
 
 edits docs · MCP tool `scene_snap`
 
@@ -1479,6 +1477,28 @@ edits docs · MCP tool `scene_snap`
 | `name` (positional) | string | required | scene name (or scenes/<name>) |
 | `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id |
 | `--keep-group` | boolean | default `true` | keep the item's group in step: data-x/data-y that were its placement point or foot, and data-col/data-row that were its tile, follow it |
+
+#### scene.sort
+
+Put a scene's items (or every scene's) in depth order, and say what moved.
+
+```
+pixellab scene sort [name] [--all]
+```
+
+Every edit to a scene already keeps its items in depth order (back to front, by where each stands); this is for a scene whose file isn't, such as one written by hand or made before depth order. A group sorts as one object and its members sort inside it. One undo step per scene. Returns { moved: [{ scene, path, to, object | group }], changedPixels, scenes: [{ scene, moved, changedPixels }] }: moved lists the items the sort took out of their place (paths before and after), and changedPixels counts the pixels that differ at time 0 between the scene drawn in its file's list order (as engines before depth order publish it) and in depth order, which is what the site sees when it adopts this engine. Give a scene or --all. For one scene, reordered maps every path the sort changed to its new path. With --dry-run on the command line nothing is written and the diff shows the new order.
+
+edits docs · MCP tool `scene_sort`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string |  | scene name (or scenes/<name>); leave out with --all |
+| `--all` | boolean | default `false` | sort every scene |
+
+```sh
+pixellab scene sort hero-island --dry-run
+pixellab scene sort --all
+```
 
 #### scene.track.add
 
