@@ -56,6 +56,10 @@ struct SelectionInspector: View {
                         Task { await editor.setID(editor.idDraft) }
                     }
                     actions(item, editor: editor)
+                    AnimationSection(item: item)
+                    if model.timeline.selectedKeyIsOfSelection, let key = model.timeline.selectedKeyData, let filled = model.timeline.selectedFilled {
+                        KeyInspector(item: item, key: key, filled: filled)
+                    }
                 } else {
                     HStack(spacing: 6) {
                         ForEach(["Col", "Row", "Level"], id: \.self) { field in
@@ -219,6 +223,8 @@ struct Thumb: View {
 struct CoordField: View {
     var label: String
     var value: Int
+    /// An inherited value (the KEY section): shown muted until it's set.
+    var dimmed = false
     var set: (Int) -> Void
     var step: (Int) -> Void
 
@@ -229,7 +235,7 @@ struct CoordField: View {
                 TextField(label, value: Binding(get: { value }, set: { if $0 != value { set($0) } }), format: IntegerFormatStyle<Int>().grouping(.never))
                     .textFieldStyle(.plain)
                     .font(Theme.monoFont(12))
-                    .foregroundStyle(Theme.ink)
+                    .foregroundStyle(dimmed ? Theme.inkMuted : Theme.ink)
                     .padding(.leading, 7)
                     // A new field when the value changes elsewhere (an arrow key,
                     // a drag, undo): a value-bound field keeps showing its old text.

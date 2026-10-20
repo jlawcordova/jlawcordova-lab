@@ -90,6 +90,28 @@ struct PixelLabCommands: Commands {
                 .disabled(model.document?.selectedItem?.at.isTile ?? true)
             Button("Select None") { model.editor.select(nil) }
                 .disabled(!hasSelection)
+            Divider()
+            // The animation pane (docs/intents/2026-10-animation-pane/spec.md, R10).
+            Button("Add Key at Playhead") { Task { await model.timeline.addKey() } }
+                .keyboardShortcut("k", modifiers: [.command, .option])
+                .disabled(!(hasSelection && model.timeline.canAddKey))
+            Button("Delete Key") { Task { await model.timeline.deleteKey() } }
+                .keyboardShortcut(.delete, modifiers: [.command, .option])
+                .disabled(!(model.mode == .scene && model.timeline.canDeleteKey))
+            Button("Previous Key") { model.timeline.stepKey(-1) }
+                .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+                .disabled(!(hasSelection && model.timeline.selectedTrack != nil))
+            Button("Next Key") { model.timeline.stepKey(1) }
+                .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+                .disabled(!(hasSelection && model.timeline.selectedTrack != nil))
+            if model.mode == .scene, model.timeline.selectedTrack != nil {
+                Button("Remove Track") { Task { await model.timeline.removeTrack() } }
+            } else {
+                Button("Animate Item") { Task { await model.timeline.addTrack() } }
+                    .disabled(!(hasSelection && model.timeline.canAnimate))
+            }
+            Button(model.timeline.showTracks ? "Hide Animation Pane" : "Show Animation Pane") { model.timeline.showTracks.toggle() }
+                .disabled(!(model.mode == .scene && model.timeline.hasMotion))
         }
         CommandGroup(replacing: .undoRedo) {
             Button("Undo") { undoOrText(Selector(("undo:"))) { await model.undo() } }
