@@ -198,6 +198,9 @@ struct UndoResult: Codable, Sendable {
     var doc: String
     var changed: Bool?
     var summary: String?
+    /// A scene's undo or redo can give items other paths (it swaps the whole doc):
+    /// old path → new, as for an edit.
+    var reordered: [String: String]?
     var dirty: Bool
     var canUndo: Bool
     var canRedo: Bool

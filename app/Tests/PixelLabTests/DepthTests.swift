@@ -91,6 +91,29 @@ import Testing
         #expect(try decode(SceneSortResult.self, #"{"changed":false,"summary":"Already in depth order","moved":[],"changedPixels":0}"#).reordered == nil)
     }
 
+    @Test func testR4UndoResultsCarryReorderedToo() throws {
+        let r = try decode(UndoResult.self, #"{"doc":"scene:x","changed":true,"summary":"Undid: pine moved","dirty":false,"canUndo":false,"canRedo":true,"reordered":{"8":"80","80":"8"}}"#)
+        #expect(r.reordered == ["8": "80", "80": "8"])
+        #expect(try decode(UndoResult.self, #"{"doc":"scene:x","dirty":false,"canUndo":false,"canRedo":false}"#).reordered == nil)
+    }
+
+    @MainActor @Test func testR14AnItemAloneInItsGroupReadsAndWritesTheGroupsDepth() {
+        let doc = DocumentModel(ref: DocRef(.scene, "harbor"))
+        doc.groups = [
+            SceneGroupInfo(path: "0", attrs: [:], items: 1, depth: "front"),
+            SceneGroupInfo(path: "1", attrs: [:], items: 2, depth: "back"),
+        ]
+        let alone = SceneItemInfo(path: "0.0", object: "pine", at: ItemAt(tile: [0, 1, 0]), group: "0", depth: "back")
+        let shared = SceneItemInfo(path: "1.0", object: "grass", at: ItemAt(tile: [0, 0, 0]), group: "1")
+        let bare = SceneItemInfo(path: "2", object: "rock", at: ItemAt(tile: [1, 0, 0]), depth: "front")
+        #expect(doc.soleGroup(of: alone)?.path == "0")
+        #expect(doc.depthMode(of: alone) == .front, "the group's, not the item's own back")
+        #expect(doc.soleGroup(of: shared) == nil)
+        #expect(doc.depthMode(of: shared) == .auto, "the item's own, with several in the group")
+        #expect(doc.soleGroup(of: bare) == nil)
+        #expect(doc.depthMode(of: bare) == .front)
+    }
+
     @MainActor @Test func testR4TheSelectionFollowsItsItemsToTheirNewPaths() {
         let doc = DocumentModel(ref: DocRef(.scene, "harbor"))
         // The pine (3) and the house (4) swap places; layer ids and other paths stay.

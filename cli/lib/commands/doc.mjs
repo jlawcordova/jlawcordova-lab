@@ -67,6 +67,8 @@ export default [
   {
     name: 'doc.undo',
     summary: 'Undo the last edit to an open doc',
+    description:
+      'A scene edit and its depth sort are one step, so undoing it can give items other paths. When it does, the result has reordered: every path that changed, old → new (an item whose placement the step changed pairs with itself), for a caller holding paths.',
     params: docParams(),
     args: ['doc'],
     mutates: true,
@@ -80,6 +82,8 @@ export default [
   {
     name: 'doc.redo',
     summary: 'Redo the last undone edit to an open doc',
+    description:
+      'A scene edit and its depth sort are one step, so undoing it can give items other paths. When it does, the result has reordered: every path that changed, old → new (an item whose placement the step changed pairs with itself), for a caller holding paths.',
     params: docParams(),
     args: ['doc'],
     mutates: true,

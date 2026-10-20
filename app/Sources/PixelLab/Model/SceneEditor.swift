@@ -417,10 +417,12 @@ final class SceneEditor {
 
     /// The Depth control: draw the selected item by where it stands (`auto`), over
     /// everything else in its list (`front`) or under it (`back`)
-    /// (docs/intents/2026-10-depth-order/spec.md, R5, R14).
+    /// (docs/intents/2026-10-depth-order/spec.md, R5, R14). An item alone in its
+    /// SVG group sorts as that group, so the control sets the group's depth.
     @discardableResult
     func setDepth(_ mode: DepthMode) async -> EditResult? {
-        guard let item = selected, item.depthMode != mode else { return nil }
+        guard let doc, let item = selected, doc.depthMode(of: item) != mode else { return nil }
+        if let group = doc.soleGroup(of: item) { return await setGroupDepth(group.path, mode) }
         return await edit("scene.set", ["item": .string(item.path), "depth": .string(mode.rawValue)])
     }
 

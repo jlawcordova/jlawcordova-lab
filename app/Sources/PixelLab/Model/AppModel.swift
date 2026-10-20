@@ -775,6 +775,8 @@ final class AppModel {
             doc.status = DocStatus(doc: r.doc, dirty: r.dirty, canUndo: r.canUndo, canRedo: r.canRedo)
             if r.dirty { dirtyDocs.insert(r.doc) } else { dirtyDocs.remove(r.doc) }
             if let s = r.summary { lastEdit = s }
+            // The step may have given items other paths: the selection follows its items.
+            if document === doc { layers.followSort(r.reordered) }
         } catch {
             notice = error.localizedDescription
         }

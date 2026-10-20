@@ -103,9 +103,12 @@ struct SelectionInspector: View {
     /// Auto draws it by where it stands; Front and Back draw it over or under
     /// everything else in its list (R5).
     private func depthControl(_ item: SceneItemInfo, editor: SceneEditor) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        // Alone in its SVG group, the item sorts as the group does: the control reads and writes the group's depth.
+        let mode = doc.depthMode(of: item)
+        let sole = doc.soleGroup(of: item) != nil
+        return VStack(alignment: .leading, spacing: 4) {
             Text("Depth").font(.caption).foregroundStyle(Theme.inkMuted)
-            Picker("Depth", selection: Binding(get: { item.depthMode }, set: { mode in Task { await editor.setDepth(mode) } })) {
+            Picker("Depth", selection: Binding(get: { mode }, set: { mode in Task { await editor.setDepth(mode) } })) {
                 ForEach(DepthMode.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
@@ -113,12 +116,14 @@ struct SelectionInspector: View {
             .controlSize(.large)
             .help("Front draws it over everything in its list; Back under everything")
             .accessibilityLabel("Depth")
-            .accessibilityValue(item.depthMode.title)
-            .accessibilityHint(item.depthMode.detail)
-            // An item inside a { group } wrapper sorts only among that group's items; the wrapper is what sorts in the scene.
-            Text(item.group == nil
-                 ? item.depthMode.detail + "."
-                 : item.depthMode.detail.replacingOccurrences(of: "its list", with: "its SVG group") + ". To move it among the scene's items, set the Group depth above.")
+            .accessibilityValue(mode.title)
+            .accessibilityHint(mode.detail)
+            // In a { group } wrapper with other items, the item sorts only among the group's items; the wrapper is what sorts in the scene.
+            Text(sole
+                 ? mode.detail + ". It's the only item in its SVG group, so this sets the group's depth."
+                 : item.group == nil
+                 ? mode.detail + "."
+                 : mode.detail.replacingOccurrences(of: "its list", with: "its SVG group") + ". To move it among the scene's items, set the Group depth above.")
                 .font(.caption)
                 .foregroundStyle(Theme.inkMuted)
                 .lineLimit(4)

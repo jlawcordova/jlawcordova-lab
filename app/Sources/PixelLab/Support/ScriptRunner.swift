@@ -15,8 +15,8 @@ import Foundation
 ///     key <spec> (right, opt+up, shift+down, delete, return, esc, v, 2)
 ///     move <dc> <dr> [<dl>]       nudge <dx> <dy>         set <col|row|level|x|y> <n>
 ///     class <text>  id <text>     duplicate remove snap
-///     depth front|back|auto   (the selected item's Depth control)   groupdepth <group path>|selected front|back|auto
-///         (the wrapper line's menu; `selected` is the selected item's group)
+///     depth front|back|auto   (the selected item's Depth control: the group's when the item is alone in its SVG group)
+///     groupdepth <group path>|selected front|back|auto   (the wrapper line's menu, for a group of several items; `selected` is the item's group)
 ///     sort   (Checks' Sort button: the scene's items in depth order)   set level <n>  (a pixel item's, too)
 ///     undo redo save [force] revert publish [<dir>] done   saveas <path.pixellab>
 ///     time <ms>  play  pause  tracks on|off   zoom fit|1-4   sidebar library|items
@@ -26,7 +26,7 @@ import Foundation
 ///     expect dirty|selected|object|at|items|problems|build|outputs|publishdir|document|tool|time <value>
 ///     expect scenes|objects|zoom|badge|theme|ghosttime <value>   expect scenepixel <x>,<y> <#RRGGBB|empty>
 ///     expect stale true|false     (the banner shows)   expect mergealert true|false
-///     expect depth front|back|auto   expect level <n>   expect groupdepth <path>|selected front|back|auto
+///     expect depth front|back|auto (what the Depth control shows)   expect level <n>   expect groupdepth <path>|selected front|back|auto
 ///     expect order <entry entry …>   (the scene's items in list order: each entry is a path, `#id`, `selected`,
 ///         an object name (its first item) or `name@col,row,level`; they must appear in that order)
 ///     expect warning <code>   expect nowarning <code>   (check's warnings: off_grid, out_of_order, copies)
@@ -320,7 +320,7 @@ final class ScriptRunner {
         case "depth":
             guard let mode = DepthMode(rawValue: try arg(words, 1)) else { throw Failure("depth front|back|auto") }
             guard doc?.selectedItem != nil else { throw Failure("nothing selected") }
-            if doc?.selectedItem?.depthMode == mode { return "already \(mode.rawValue)" }
+            if let doc, let item = doc.selectedItem, doc.depthMode(of: item) == mode { return "already \(mode.rawValue)" }
             return try needEdit(await editor.setDepth(mode))
         case "groupdepth":
             guard let mode = DepthMode(rawValue: try arg(words, 2)) else { throw Failure("groupdepth <group path>|selected front|back|auto") }
@@ -948,7 +948,8 @@ final class ScriptRunner {
         case "frames": got = String(model.objectEditor.frameCount)
         case "hidden": got = model.objectEditor.hidden.sorted().map(String.init).joined(separator: ",")
         case "calls": got = String(model.objectEditor.lastStrokeCalls)
-        case "depth": got = doc?.selectedItem?.depthMode.rawValue ?? "none"
+        // What the Depth control shows: the group's depth when the item is alone in its SVG group.
+        case "depth": got = doc.flatMap { d in d.selectedItem.map { d.depthMode(of: $0).rawValue } } ?? "none"
         case "level": got = doc?.selectedItem?.at.standingLevel.map(String.init) ?? "none"
         case "groupdepth":
             let parts = words.dropFirst(2)

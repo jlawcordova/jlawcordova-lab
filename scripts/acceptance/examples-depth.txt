@@ -20,25 +20,34 @@ expect order selected walls@1,1,1
 expect object pine
 expect nowarning out_of_order
 snapshot @OUT@/example-depth-pine-behind-dark.png
-# harbor-flat wraps each piece in its own { group }, so the override goes on the pine's wrapper (the
-# wrapper line's Depth menu): Front draws it over everything in its list, the wall included; Auto puts it back
-groupdepth selected front
+# harbor-flat wraps each piece in its own { group }, and the pine is alone in its wrapper, so the Depth
+# control sets the wrapper's depth: Front draws it over everything in its list, the wall included; Auto puts it back
+depth front
+expect depth front
 expect groupdepth selected front
 expect scenepixel -13,-3 #4E6B3A
 expect object pine
 snapshot @OUT@/example-depth-pine-front-dark.png
-groupdepth selected auto
+depth auto
+expect depth auto
 expect groupdepth selected auto
 expect scenepixel -13,-3 #9E3B4B
-# undo and redo take the sorting with them: three undos give the old list back, three redos the new one
+# undo and redo take the sorting with them, and the selection follows the pine to its new path:
+# three undos give the old list back, three redos the new one
+undo
+expect depth front
 undo
 undo
-undo
+expect object pine
+expect at 5,6,0
 expect order walls@1,1,1 pine@5,6,0
 redo
 redo
 redo
-expect order pine@0,1,0 walls@1,1,1
+expect object pine
+expect at 0,1,0
+expect depth auto
+expect order selected walls@1,1,1
 expect scenepixel -13,-3 #9E3B4B
 # the file is written in depth order: nothing for Sort to do, and the CLI agrees
 save

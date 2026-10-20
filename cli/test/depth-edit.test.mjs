@@ -171,6 +171,29 @@ describe('R4: every edit keeps the list sorted', () => {
     assert.equal(await inOrder(s), true);
   });
 
+  test('R4: undo of a sorting edit says where items went (and redo says it back)', async () => {
+    const s = owner();
+    const ref = 'scene:stand';
+    await call(s, 'scene.move', { item: 'd', by: [-2, -2] });
+    // d went to the front of the list, so a, b and c are one later; undo puts d back at 3 and the rest a place earlier.
+    const undone = await registry.call(s.context(), 'doc.undo', { doc: ref });
+    assert.deepEqual(undone.reordered, { '0': '3', '1': '0', '2': '1', '3': '2' }, 'old path → new path, d included though its placement changed');
+    const redone = await registry.call(s.context(), 'doc.redo', { doc: ref });
+    assert.deepEqual(redone.reordered, { '3': '0', '0': '1', '1': '2', '2': '3' });
+    // A step that moves no paths says nothing.
+    await call(s, 'scene.set', { item: 'a', class: 'x' });
+    assert.equal((await registry.call(s.context(), 'doc.undo', { doc: ref })).reordered, undefined);
+  });
+
+  test('R4: undo of a sorting edit moves a group with its first item', async () => {
+    const s = owner();
+    // The group (x at 1,1) is listed before y (0,0), which it stands in front of: the first edit sorts the scene.
+    const r = await call(s, 'scene.set', { name: 'grouped', item: '1', class: 'z' });
+    assert.deepEqual(r.reordered, { '0': '1', '0.0': '1.0', '1': '0' });
+    const undone = await registry.call(s.context(), 'doc.undo', { doc: 'scene:grouped' });
+    assert.deepEqual(undone.reordered, { '1': '0', '1.0': '0.0', '0': '1' }, 'the group and its member, old → new');
+  });
+
   test('R4: a motion edit that moves a track\'s first key re-sorts (the item rests somewhere else)', async () => {
     const s = owner();
     const call2 = (/** @type {string} */ name, /** @type {any} */ params) => call(s, name, { name: 'moving', ...params });

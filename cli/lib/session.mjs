@@ -44,7 +44,7 @@ import { CommandError, NotFoundError } from './errors.mjs';
 import { layersOf, placedItems } from './layer-ops.mjs';
 import { foldScene, merge3 } from './merge.mjs';
 import { unsavedInApp } from './open-docs.mjs';
-import { sortScene } from './scene-ops.mjs';
+import { pathChanges, sortScene } from './scene-ops.mjs';
 import { createState, newProposalId, stateDir, writeAtomic } from './state.mjs';
 
 export const UNDO_LIMIT = 200;
@@ -370,12 +370,15 @@ export class Session {
       if (which === 'undo') entry.undone.push(...snap.labels.map((l) => `Undid: ${l}`));
       else entry.undone.splice(Math.max(0, entry.undone.length - snap.labels.length));
     }
+    const left = entry.doc;
     entry.doc = JSON.parse(snap.before);
     entry.last = null;
     ctx.invalidate();
     this.changed(entry);
+    // The step swaps the whole doc, so the paths of its items can change (a sorting edit undone): say where they went.
+    const reordered = entry.kind === 'scene' ? pathChanges(left, entry.doc) : new Map();
     const what = snap.labels.length === 1 ? snap.labels[0] : `${snap.labels[snap.labels.length - 1]} (${snap.labels.length} edits)`;
-    return { doc: ref, changed: true, summary: `${which === 'undo' ? 'Undid' : 'Redid'}: ${what}`, ...this.status(entry) };
+    return { doc: ref, changed: true, summary: `${which === 'undo' ? 'Undid' : 'Redid'}: ${what}`, ...this.status(entry), ...(reordered.size ? { reordered: Object.fromEntries(reordered) } : {}) };
   }
 
   /**

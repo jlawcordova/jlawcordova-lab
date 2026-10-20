@@ -226,10 +226,13 @@ struct ItemLayerLines: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .help("The site's wrapper around the item (scene group set edits it)")
-            HStack(spacing: 6) {
-                Text("Group depth").font(.caption).foregroundStyle(Theme.inkMuted)
-                Spacer(minLength: 0)
-                groupDepthMenu(group)
+            // Alone in the group, the item's own Depth control is the group's: no second control.
+            if group.items > 1 {
+                HStack(spacing: 6) {
+                    Text("Group depth").font(.caption).foregroundStyle(Theme.inkMuted)
+                    Spacer(minLength: 0)
+                    groupDepthMenu(group)
+                }
             }
         }
     }
@@ -245,20 +248,19 @@ struct ItemLayerLines: View {
             .pickerStyle(.inline)
             .labelsHidden()
         } label: {
-            // A chip of the field style, so it reads the same whether or not the window is key.
             HStack(spacing: 5) {
-                Text(mode.title).font(.system(size: 11.5)).foregroundStyle(Theme.ink)
+                Text(mode.title).font(Theme.monoFont(12)).foregroundStyle(Theme.ink)
                 Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .semibold)).foregroundStyle(Theme.inkMuted)
             }
-            .padding(.horizontal, 8)
-            .frame(minWidth: 62, minHeight: 26)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
-            .contentShape(Rectangle())
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
+        // The look of the inspector's fields (Theme.card, 5 pt corners), put on the menu itself: a menu flattens its label.
+        .padding(.horizontal, 8)
+        .frame(minWidth: 78, minHeight: 26)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
         .help("Depth of the SVG group: Front draws it over everything in its list, Back under everything")
         .accessibilityLabel("Group depth")
         .accessibilityValue(mode.title)

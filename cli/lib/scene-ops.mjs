@@ -665,3 +665,87 @@ export function sortScene(site, sources, doc) {
     .sort((a, b) => a.path.localeCompare(b.path, 'en', { numeric: true }));
   return { moved, remap };
 }
+
+/**
+ * Where a scene's items and groups went between two states of the same scene
+ * (undo and redo swap the whole doc): old path → new path, for the paths that
+ * changed, so a caller holding paths (the app's selection) can follow. Items
+ * are matched by content, in the order they come (so identical items pair
+ * off in order); what's left is matched by object, in order, so an item whose
+ * placement the step changed still pairs with itself. A group goes where its
+ * first item went. Items that exist on one side only aren't in the map.
+ * @param {any} before
+ * @param {any} after
+ * @returns {Map<string, string>}
+ */
+export function pathChanges(before, after) {
+  /** @param {any} doc */
+  const items = (doc) => {
+    /** @type {{ path: string, item: any }[]} */
+    const out = [];
+    const walk = (/** @type {any[]} */ list, /** @type {number[]} */ prefix) =>
+      (list ?? []).forEach((item, i) => {
+        if (isGroup(item)) walk(item.items, [...prefix, i]);
+        else out.push({ path: show([...prefix, i]), item });
+      });
+    walk(doc.items, []);
+    return out;
+  };
+  const was = items(before);
+  const now = items(after);
+  /** @type {Map<string, string>} */
+  const to = new Map();
+  /** @type {Set<number>} */
+  const taken = new Set();
+  /** @type {Map<string, number[]>} */
+  const byContent = new Map();
+  now.forEach(({ item }, i) => {
+    const key = JSON.stringify(item);
+    byContent.set(key, [...(byContent.get(key) ?? []), i]);
+  });
+  const left = [];
+  for (const entry of was) {
+    const i = byContent.get(JSON.stringify(entry.item))?.shift();
+    if (i === undefined) left.push(entry);
+    else {
+      taken.add(i);
+      to.set(entry.path, now[i].path);
+    }
+  }
+  /** @type {Map<string, number[]>} */
+  const byObject = new Map();
+  now.forEach(({ item }, i) => {
+    if (!taken.has(i)) byObject.set(item?.object, [...(byObject.get(item?.object) ?? []), i]);
+  });
+  for (const entry of left) {
+    const i = byObject.get(entry.item?.object)?.shift();
+    if (i !== undefined) to.set(entry.path, now[i].path);
+  }
+  // A group goes where its first item went (the same depth of nesting).
+  /** @type {Set<string>} */
+  const groupsNow = new Set();
+  const collect = (/** @type {any[]} */ list, /** @type {number[]} */ prefix) =>
+    (list ?? []).forEach((item, i) => {
+      if (!isGroup(item)) return;
+      groupsNow.add(show([...prefix, i]));
+      collect(item.items, [...prefix, i]);
+    });
+  collect(after.items, []);
+  const groups = (/** @type {any[]} */ list, /** @type {number[]} */ prefix) =>
+    (list ?? []).forEach((item, i) => {
+      if (!isGroup(item)) return;
+      const path = [...prefix, i];
+      const first = (/** @type {any} */ g, /** @type {number[]} */ p) => {
+        for (const [k, m] of (g.items ?? []).entries()) return isGroup(m) ? first(m, [...p, k]) : show([...p, k]);
+        return undefined;
+      };
+      const moved = first(item, path);
+      const there = moved === undefined ? undefined : to.get(moved);
+      const parent = there?.split('.').slice(0, path.length).join('.');
+      if (parent !== undefined && groupsNow.has(parent)) to.set(show(path), parent);
+      groups(item.items, path);
+    });
+  groups(before.items, []);
+  for (const [path, next] of [...to]) if (path === next) to.delete(path);
+  return to;
+}

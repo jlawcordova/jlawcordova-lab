@@ -74,6 +74,19 @@ final class DocumentModel {
 
     var selectedItem: SceneItemInfo? { selectedPath.flatMap { itemsByPath[$0] } }
 
+    /// The SVG group around an item when the item is its only member. Such a
+    /// group sorts as the item does, so the item's Depth control reads and
+    /// writes the group's depth (docs/intents/2026-10-depth-order/spec.md, R9, D7).
+    func soleGroup(of item: SceneItemInfo) -> SceneGroupInfo? {
+        guard let path = item.group, let group = groups.first(where: { $0.path == path }), group.items == 1 else { return nil }
+        return group
+    }
+
+    /// What the Depth control shows for an item: its wrapper's depth when it is alone in it, else its own.
+    func depthMode(of item: SceneItemInfo) -> DepthMode {
+        soleGroup(of: item)?.depthMode ?? item.depthMode
+    }
+
     /// The selected layer, when the selection is one layer.
     var selectedLayer: String? {
         if selection.count == 1, case .layer(let id) = selection[0] { return id }
