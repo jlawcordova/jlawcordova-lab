@@ -119,18 +119,19 @@ export function itemsInLayers(doc, ids) {
 
 /**
  * Sets (or with null takes off) an item's layer, keeping the canonical key
- * order object, id, class, layer, at.
+ * order object, id, class, layer, depth, at.
  * @param {any} item
  * @param {string | null} layer
  */
 export function setItemLayer(item, layer) {
-  const { object, id, class: cls, at, layer: _old, ...rest } = item;
+  const { object, id, class: cls, at, layer: _old, depth, ...rest } = item;
   for (const key of Object.keys(item)) delete item[key];
   Object.assign(item, {
     object,
     ...(id === undefined ? {} : { id }),
     ...(cls === undefined ? {} : { class: cls }),
     ...(layer === null ? {} : { layer }),
+    ...(depth === undefined ? {} : { depth }),
     at,
     ...rest,
   });

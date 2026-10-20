@@ -248,6 +248,36 @@ describe('paint order and output (R2)', () => {
     assert.equal(paintOrder(await working(s)), before);
   });
 
+  test('R2, depth order R4: a layer edit on a scene whose file is out of depth order sorts it, and publishes the same bytes', async () => {
+    // The two ground cubes listed the wrong way round: the cube at 1,0 stands in front of the one at 0,0 but is listed first.
+    const group = (/** @type {number} */ c) => `    {
+      group: { class: 'enter', 'data-enter': 'ground', 'data-col': '${c}', 'data-row': '0', 'data-x': '${c * 16}', 'data-y': '${c * 8}' },
+      items: [
+        { object: 'block', at: { tile: [${c}, 0, 0] } },
+      ],
+    },
+`;
+    const swapped = YARD.replace(group(0) + group(1), group(1) + group(0));
+    assert.notEqual(swapped, YARD);
+    const d = await makeDocument({ files: { 'scenes/yard.mjs': swapped } });
+    try {
+      const build = async () => {
+        const out = join(d.base, 'out');
+        const r = await runCli(['art', 'build', '--dir', out, '--document', d.root], { env: d.env });
+        assert.equal(r.code, 0, r.stderr);
+        return readFile(join(out, 'yard.svg'));
+      };
+      const before = await build();
+      const made = await runCli(['scene', 'layer', 'new', 'yard', '--layer-name', 'Ground', '--items', '0.0,1.0', '--document', d.root], { env: d.env });
+      assert.equal(made.code, 0, made.stderr);
+      const text = await readFile(join(d.root, 'scenes/yard.mjs'), 'utf8');
+      assert.ok(text.indexOf("tile: [0, 0, 0]") < text.indexOf("tile: [1, 0, 0]"), 'the edit sorted the scene: the cube behind is listed first');
+      assert.ok((await build()).equals(before), 'and the SVG is the same bytes: the engine draws in depth order whatever the file lists');
+    } finally {
+      await d.cleanup();
+    }
+  });
+
   test('R2: ungrouping the last layer takes the layers list away, so the file is what it was', async () => {
     const s = session();
     await call(s, 'scene.layer.new', { layerName: 'Ground', items: ['0.0', '1.0'] });

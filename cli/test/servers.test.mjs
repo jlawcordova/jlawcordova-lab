@@ -77,7 +77,8 @@ describe('serve --stdio', needsSite, () => {
     const saved = await server.request('doc.save', { doc: 'scene:footer-grass' });
     assert.equal(saved.result.wrote, true);
     assert.deepEqual((await server.waitFor(changed, { since })).params, { doc: 'scene:footer-grass', dirty: false, canUndo: true, canRedo: false });
-    assert.deepEqual((await readDoc(file)).items.at(-1), { object: 'pine', at: { tile: [0, 0, 0] } });
+    // The session sorted the scene as part of the edit, so the pine is where it stands, not last.
+    assert.deepEqual((await readDoc(file)).items.find((/** @type {any} */ i) => i.object === 'pine'), { object: 'pine', at: { tile: [0, 0, 0] } });
     const info = await server.request('session.info');
     assert.deepEqual(info.result.docs, [{ doc: 'scene:footer-grass', dirty: false, canUndo: true, canRedo: false }]);
   });
@@ -266,7 +267,7 @@ describe('serve --mcp --direct', needsSite, () => {
       await server.request('tools/call', { name: 'scene_place', arguments: { name: 'footer-grass', object: 'pine', at: [1, 0, 0] } });
       const saved = (await server.request('tools/call', { name: 'doc_save', arguments: { doc: 'scene:footer-grass' } })).result;
       assert.equal(saved.structuredContent.wrote, true);
-      assert.deepEqual((await readDoc(join(site.sourceDir, 'scenes/footer-grass.mjs'))).items.at(-1), { object: 'pine', at: { tile: [1, 0, 0] } });
+      assert.deepEqual((await readDoc(join(site.sourceDir, 'scenes/footer-grass.mjs'))).items.find((/** @type {any} */ i) => i.object === 'pine'), { object: 'pine', at: { tile: [1, 0, 0] } });
       assert.deepEqual(await readdir(join(state, 'proposals')).catch(() => []), []);
     } finally {
       server.child.kill();

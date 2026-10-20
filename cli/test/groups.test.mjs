@@ -129,32 +129,42 @@ describe('scene.group.set (R10)', () => {
 });
 
 describe('scene.place into groups (R11)', () => {
-  test('R11: into an existing group, back to front there or at an index', async () => {
+  test('R11: into an existing group, where it stands among that group\'s items', async () => {
     const s = session();
     const r = await call(s, 'scene.place', { object: 'pebble', at: [1, 0, 1], group: '0' });
-    assert.deepEqual([r.path, r.group.path], ['0.1', '0']);
-    const first = await call(s, 'scene.place', { object: 'pebble', px: [5, 5], group: 'rock', index: 0 });
-    assert.equal(first.path, '1.0');
-    assert.equal((await call(s, 'scene.items', {})).items.find((/** @type {any} */ i) => i.id === 'rock').path, '1.1');
+    assert.deepEqual([r.path, r.group.path], ['0.1', '0'], 'nothing it overlaps: it joins the end');
+    // Below the cube it is behind it: it is listed first, and the cube moves to second.
+    const behind = await call(session(), 'scene.place', { object: 'pebble', at: [1, 0, -1], group: '0' });
+    assert.deepEqual([behind.path, behind.group.path], ['0.0', '0']);
+    assert.equal(behind.reordered['0.0'], '0.1', 'the cube moved down one');
+    // Into the group around the rock, with nothing it overlaps: it joins last, and the rock keeps its place.
+    const fresh = session();
+    const far = await call(fresh, 'scene.place', { object: 'pebble', px: [5, 5], group: 'rock' });
+    assert.equal(far.path, '1.1');
+    assert.equal((await call(fresh, 'scene.items', {})).items.find((/** @type {any} */ i) => i.id === 'rock').path, '1.0');
   });
 
-  test('R11: into a new group with its foot, placed back to front among groups', async () => {
+  test('R11: into a new group with its foot, the group goes where its item stands among the groups', async () => {
     const s = session();
-    const r = await call(s, 'scene.place', { object: 'stone', px: [0, 0], newGroup: { class: 'enter', 'data-enter': 'object' }, foot: true, index: 1 });
-    assert.deepEqual(r.group, { path: '1', attrs: { class: 'enter', 'data-enter': 'object', 'data-x': '2', 'data-y': '3' } });
-    assert.equal(r.path, '1.0');
-    // On a tile, a new group goes where its item would, judging groups by their first item on a tile.
+    const r = await call(s, 'scene.place', { object: 'stone', px: [0, 0], newGroup: { class: 'enter', 'data-enter': 'object' }, foot: true });
+    assert.deepEqual(r.group.attrs, { class: 'enter', 'data-enter': 'object', 'data-x': '2', 'data-y': '3' });
+    assert.equal(r.path, `${r.group.path}.0`);
+    const stone = (await call(s, 'scene.items', {})).items.find((/** @type {any} */ i) => i.group === r.group.path);
+    assert.equal(stone.path, r.path, 'the path it returns is where it is after the sort');
+    // On a tile, a new group goes where its item stands: the cube at 0,0,0 is behind the cube at 1,0,0, so its group is listed first.
     const t = await call(s, 'scene.place', { object: 'block', at: [0, 0, 0], newGroup: { 'data-enter': 'ground' } });
-    assert.equal(t.group.path, '0', 'in front of nothing: before the group whose cube is at row + col 1');
-    const nested = await call(s, 'scene.place', { object: 'pebble', at: [1, 0, 1], group: '1', newGroup: { 'data-part': 'top' } });
+    const items = (await call(s, 'scene.items', {})).items;
+    const [new0, cube1] = [items.find((/** @type {any} */ i) => i.path === t.path), items.find((/** @type {any} */ i) => i.object === 'block' && i.at.tile.join() === '1,0,0')];
+    assert.ok(Number(new0.path.split('.')[0]) < Number(cube1.path.split('.')[0]), 'before the group whose cube is at 1,0,0');
+    const nested = await call(s, 'scene.place', { object: 'pebble', at: [1, 0, 1], group: t.group.path, newGroup: { 'data-part': 'top' } });
     assert.equal(nested.path.split('.').length, 3);
   });
 
-  test('R11: --index at the top level, and the refusals', async () => {
+  test('R6, R11: a top-level item goes where it stands (--index is gone), and the refusals', async () => {
     const s = session();
-    const r = await call(s, 'scene.place', { object: 'pebble', at: [9, 9, 0], index: 0 });
-    assert.equal(r.path, '0');
-    await assert.rejects(call(s, 'scene.place', { object: 'pebble', at: [9, 9, 0], group: '1', index: 9 }), { code: 'out_of_range' });
+    const r = await call(s, 'scene.place', { object: 'pebble', at: [9, 9, 0] });
+    assert.equal(r.path, '4', 'nothing overlaps it, so it joins the end of the list');
+    await assert.rejects(call(s, 'scene.place', { object: 'pebble', at: [9, 9, 0], index: 0 }), /unknown param index/);
     await assert.rejects(call(s, 'scene.place', { object: 'pebble', at: [9, 9, 0], group: '4' }), { code: 'not_in_group' });
     await assert.rejects(call(s, 'scene.place', { object: 'pebble', at: [9, 9, 0], newGroup: { onclick: 'x' } }), /class or data-\*/);
     await assert.rejects(call(s, 'scene.place', { object: 'pebble', at: [9, 9, 0], foot: true }), { code: 'usage' });
