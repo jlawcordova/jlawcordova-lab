@@ -40,7 +40,7 @@ Other helpers: `runCli()` and `spawnCli()` run the real binary, `startServer()` 
 | `sync.test.mjs` | settling proposals, `doc.reload`, edits since disk, the app's open docs, `doc.merge` and the merge in `proposal.apply` |
 | `merge.test.mjs` | the three-way line merge |
 | `groups.test.mjs` | group attributes following moves, `scene.group.set`, placing into groups |
-| `motion-commands.test.mjs` | tracks and keys, `check`'s off-grid warnings, `scene.motion.path` |
+| `motion-commands.test.mjs` | tracks and keys (`scene.key.set` pinning without values), `check`'s off-grid warnings, `scene.motion.path` |
 | `map-set.test.mjs` | `object.map.set` |
 | `activity-and-proposals.test.mjs` | activity summaries, proposal order |
 | `docs-site.test.mjs` | the docs site: Markdown rendering, anchors, links, the full build |
@@ -90,7 +90,7 @@ appearance light
 snapshot /tmp/shots/placed-light.png
 ```
 
-There are actions for scene mode (`select`, `click`, `hover`, `place`, `drag`, `key`, `move`, `nudge`, `set`, `raise`, `undo`, `save`, `build`, `time`, …), object mode (`mode object`, `color`, `stroke`, `mousepath`, `erase`, `px`, `fill`, `pick`, `layer`, `frame`, `animate`, `onion`, `new object`, …), the Agent window (`agent open`, `proposal select`, `approve`, `reject`, `answer`, `ghost`, `agentkey`, …) and files changing on disk (`cli <args…>` runs the bundled CLI on the script's document, as an outside editor; `stale merge|reload|keep` presses the changed-on-disk bar's buttons), and `expect`s for each (`expect pixel 7,7 roof-1`, `expect scenepixel x,y #RRGGBB`, `expect proposals 2`, `expect stale true`, …). The full list is the comment at the top of `app/Sources/PixelLab/Support/ScriptRunner.swift`; add to it when a feature needs a new action.
+There are actions for scene mode (`select`, `click`, `hover`, `place`, `drag`, `key`, `move`, `nudge`, `set`, `raise`, `undo`, `save`, `build`, `time`, …), the animation pane (`tracks on`, `keyframe select|add|delete|move|next|prev`, `keyset move|show|pose|time`, `track add|remove`, `loop`, `panekey`, …), object mode (`mode object`, `color`, `stroke`, `mousepath`, `erase`, `px`, `fill`, `pick`, `layer`, `frame`, `animate`, `onion`, `new object`, …), the Agent window (`agent open`, `proposal select`, `approve`, `reject`, `answer`, `ghost`, `agentkey`, …) and files changing on disk (`cli <args…>` runs the bundled CLI on the script's document, as an outside editor; `stale merge|reload|keep` presses the changed-on-disk bar's buttons), and `expect`s for each (`expect pixel 7,7 roof-1`, `expect scenepixel x,y #RRGGBB`, `expect proposals 2`, `expect stale true`, …). The full list is the comment at the top of `app/Sources/PixelLab/Support/ScriptRunner.swift`; add to it when a feature needs a new action.
 
 ## Snapshots
 

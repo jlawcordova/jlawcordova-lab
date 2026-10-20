@@ -11,6 +11,7 @@
 > - Edits to one item within a second merge into one undo step (meant for held keys; two quick, different moves undo together).
 > - Place level is manual (the stepper or the selected item's level); it doesn't infer the top of the block under the pointer.
 > - Hit-testing uses each object's frame-0 art, so a pixel that only shows in another loop frame can miss.
+> - The timeline's tracks list became the animation pane (keys selected, added, dragged and edited) in [`../2026-10-animation-pane/spec.md`](../2026-10-animation-pane/spec.md). Not there yet: multi-key selection, copy and paste of keys.
 > - Library drag-and-drop, Space-panning and the Save/Don't Save prompt on quit are wired but only exercised by hand, not by the script hook.
 > - The Agent window's activity list opens scrolled so its first visible row is partly clipped; live updates while the app runs were verified in slice 6, not re-run here.
 > - The dark-theme shadow recolor follows the site's `[data-enter="shadow"]` rule in `hero.css`; if the site adds other dark-theme pixel rules, `render.mjs` needs the same.

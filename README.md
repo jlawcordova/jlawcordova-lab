@@ -64,6 +64,10 @@ It reopens the last scene or object you had open, else the hero island. The wind
 
 **Scene mode.** The left sidebar lists every scene and, under it, the **Library** of objects (or the scene's **Items** tree). The stage draws the scene crisply at Fit or 1×–4× on the 32×16 isometric grid; in the night appearance the hero island's drop shadow takes the page color, as the site's dark theme does. Pick an object in the library and click a tile with the Place tool (⌥-click places by pixel, or drag a thumbnail onto the stage). Click an item to select it; drag it, use the arrow keys, or edit Col, Row and Level (X and Y for pixel-placed items) in the inspector. Raise, Lower, Duplicate, Remove and Snap to Tile are in the inspector and the Edit menu. Everything undoes. Scenes with motion get a timeline: Play (⌥⌘P) and scrub.
 
+**Animation.** The timeline's disclosure opens the **animation pane**, a dope sheet like Unity's Animation window or Rive's timeline: a row per animated item with its keys as diamonds on the scrubber's scale (hollow where the key hides the item, a dot for a pose), and the gold playhead across them. Click an item on the stage and its row is highlighted; click a key to select it and take the playhead there, so the stage shows the item at that key; drag a key along its row to move it in time (snapped to 100 ms). **+** adds a key at the playhead for the selected item, pinned where it is, and **−** deletes the selected key (the key at 0 is the rest frame and stays). The inspector's KEY section shows the selected key's time, Move X and Y, Show and Pose, each either set on the key or inherited from the key before (dimmed, with a Clear to inherit again), and its ANIMATION section animates an item that has an ID (a 4 s loop if the scene has none) or removes its track; the pane's Loop field sets the loop's length. Moving the item on the stage with the playhead past 0 keys it there, as before, and selects that key. With the pane focused, ← → step the playhead, ⇧← ⇧→ walk the keys, K adds a key, ⌫ deletes it, Space plays and Esc deselects; the Edit menu has the same, with ⌥⌘ shortcuts.
+
+![The animation pane](docs/screenshots/animation-pane-dark.png)
+
 **Object mode.** Open an object (double-click it in the library, or switch the Scene/Object control with an item selected). Paint with the Pencil, Eraser, Fill and Picker from the palette (the color cap is shown and enforced), switch layers and frames, turn a layer into a frame loop, toggle the onion skin, and watch the preview at 1× and 2× on a tile. File › New Scene… and New Object… make new docs from the engine's starters.
 
 **Checks.** The inspector's CHECKS section validates the open doc with the engine after every edit; a problem that names an item selects it when clicked. Save (⌘S) refuses a doc with problems and explains why, and asks before overwriting a file that changed on disk.
@@ -102,6 +106,9 @@ It reopens the last scene or object you had open, else the hero island. The wind
 | ⌘S / ⇧⌘S | Save / Save As… (a copy of the whole document) |
 | ⌘B | Publish |
 | ⌥⌘P | Play / pause the timeline |
+| ⌥⌘K / ⌥⌘⌫ | Add a key at the playhead / delete the selected key |
+| ⌥⌘← / ⌥⌘→ | Previous / next key of the selected item |
+| ← → , ⇧← ⇧→, K, ⌫, Space, Esc | Animation pane (focused): step the playhead, walk the keys, add a key, delete it, play, deselect |
 | ⌘N / ⇧⌘N | New Scene / New Object |
 | ⌥⌘N / ⌘O | New Document… / Open Document… |
 | ⌥⌘I | Show or hide the inspector |
