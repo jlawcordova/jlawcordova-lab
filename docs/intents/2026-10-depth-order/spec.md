@@ -70,10 +70,10 @@ New module `cli/lib/engine/depth.mjs`, pure, no Node or DOM APIs, exported from 
 ### D3. Keeping the list sorted (R4, R11)
 
 - `cli/lib/scene-ops.mjs` gains `sortScene(doc, sources)`, which reorders `doc.items` and each group's `items` in place with D2's order, and returns the paths that moved. `insertIndex` and `insertIndexDeep` are removed (placing appends, then sorts).
-- Every scene edit in `scene-ops.mjs` and `layer-ops.mjs` runs `sortScene` before it returns, inside the edit, so the session's undo step holds both. Returned paths are the item's path after the sort (callers already take the returned path).
+- Every scene edit runs `sortScene` before it returns, inside the edit, so the session's undo step holds both. The session's edit of a scene doc ends with it, which covers the `scene-ops.mjs`, `layer-ops.mjs` and motion edits alike (a change to a track's first key moves the item's rest frame, and so its depth). Returned paths are the item's path after the sort, and a result says which paths the sort moved, so a caller holding other paths (the app's selection) can follow them.
 - Merges (`doc.merge`, approving into an open copy) and `doc.reload` sort the result when they adopt it into an open session; a saved file is always written sorted. Opening a scene doesn't rewrite it; `check` says when it's out of order.
 - An edit to an object's `size` or `footprint` changes the depth of the scenes using it. Their output stays right (R3); their files are re-sorted at their next edit, and `check` warns until then.
-- `scene.sort` (`name` or `--all`, `dryRun?`): sorts and returns `moved` (paths, before → after) and `changedPixels` (the published render before and after, at time 0). It's an edit like any other, so over MCP it's a proposal.
+- `scene.sort` (`name` or `--all`): sorts and returns `moved` (paths, before → after) and `changedPixels`: how many pixels differ, at time 0, between the scene drawn in its file's list order (as engines before this change publish it) and in depth order. The published render doesn't depend on the list's order (R3), so that's the change the site sees when it adopts this engine. It's an edit like any other, so over MCP it's a proposal. The CLI's global `--dry-run` shows the diff and writes nothing; over MCP the sort stays in memory until `doc_save`, as any edit does.
 
 ### D4. Commands (R6, R7, R8, R13)
 
