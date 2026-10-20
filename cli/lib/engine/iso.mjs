@@ -34,6 +34,22 @@ export function pxToTile([x, y], level, [ox, oy]) {
 }
 
 /**
+ * Where the pixel (x, y) stands at `level`, in tile space, unrounded: the
+ * inverse of tileToPx for any point, not only a tile's center. Every whole
+ * pixel gives a multiple of 1/32 of a tile, which doubles hold exactly (the
+ * depth order relies on it). `+ 0` turns a -0 into 0.
+ * @param {number[]} pixel
+ * @param {number} level
+ * @param {number[]} origin
+ * @returns {[number, number]}
+ */
+export function pxToTileExact([x, y], level, [ox, oy]) {
+  const sum = (y - oy + level * LEVEL_H) / (TILE_H / 2);
+  const diff = (x - ox) / (TILE_W / 2);
+  return [(sum + diff) / 2 + 0, (sum - diff) / 2 + 0];
+}
+
+/**
  * The pixels of the tile whose top-face center is (cx, cy), as "x,y". A pixel
  * belongs to the top face when its center, (x + ½, y + ½), satisfies
  * |dx|/16 + |dy|/8 < 1 from the tile's center. Pixel centers are half-way
