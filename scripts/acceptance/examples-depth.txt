@@ -49,3 +49,10 @@ expect cli Already in depth order
 cli check harbor-flat
 appearance light
 snapshot @OUT@/example-depth-pine-behind-light.png
+# a sprite's footprint (the object panel's steppers): pine covers 1×1 until it says; undo gives it back
+open object:pine
+expect footprint 1,1
+footprint 2,2
+expect footprint 2,2
+undo
+expect footprint 1,1
