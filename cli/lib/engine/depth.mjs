@@ -288,7 +288,10 @@ export function movingOrder(nodes) {
         }
       }
     }
-    // The chain: each still node comes after the one before it.
+    // The chain: each still node comes after the one before it. The loop below
+    // only ever offers the next still node (stills[head]), so these edges
+    // block nothing today. They are kept because they state the invariant the
+    // still nodes keep (their own order) and guard it if the offering changes.
     for (let a = 1; a < stills.length; a++) {
       after[stills[a - 1]].push(stills[a]);
       waiting[stills[a]]++;

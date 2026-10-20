@@ -482,7 +482,7 @@ const footprint = {
     if (!params.to && !params.clear) throw new UsageError('object.footprint: give --to or --clear');
     const name = await objectAt(ctx, params.name);
     return editOf(ctx)({ kind: 'object', name }, (/** @type {any} */ doc) => {
-      if (doc.kind === 'block') throw new CommandError(`${name} is a block; its size is its footprint (${doc.size.slice(0, 2).join('×')} tiles)`, { code: 'not_editable' });
+      if (doc.kind === 'block') throw new UsageError(`${name} is a block; its size is its footprint (${doc.size.slice(0, 2).join('×')} tiles)`);
       if (params.clear) {
         delete doc.footprint;
         return { message: `Footprint of ${name} cleared`, footprint: null };

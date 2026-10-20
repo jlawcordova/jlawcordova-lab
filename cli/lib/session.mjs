@@ -308,7 +308,8 @@ export class Session {
     }
     const after = JSON.stringify(entry.doc);
     const changed = after !== before;
-    const message = result.message ?? 'changed';
+    // A message may be a function of the result, so it can name what the sort moved by its path after the sort.
+    const message = (typeof result.message === 'function' ? result.message(result) : result.message) ?? 'changed';
     if (changed) {
       const time = this.now();
       const top = entry.undo[entry.undo.length - 1];

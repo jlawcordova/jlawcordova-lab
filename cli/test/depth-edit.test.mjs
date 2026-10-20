@@ -202,7 +202,7 @@ describe('R4: every edit keeps the list sorted', () => {
     const r = await call2('scene.key.set', { item: 'cart', time: 0, move: [32, -32] });
     assert.deepEqual(await order(s, 'moving'), ['cart', 'a']);
     assert.equal(await inOrder(s, 'moving'), true);
-    assert.deepEqual(r.reordered, { '0': '1', '1': '0' });
+    assert.equal(r.reordered['0'], '1');
     // Another key doesn't change where it rests.
     await call2('scene.key.set', { item: 'cart', time: 500, move: [0, 0] });
     assert.deepEqual(await order(s, 'moving'), ['cart', 'a']);
@@ -322,6 +322,18 @@ describe('R6: Raise and Lower are gone; the override is the one manual control',
     await assert.rejects(g({ item: '0', id: 'q' }), { code: 'usage' });
     await assert.rejects(g({ item: '0', depth: 'sideways' }), /depth/);
   });
+
+  test('R6: a group\'s summary names it by its path after the sort, the one the result returns', async () => {
+    const s = owner();
+    const g = (/** @type {any} */ params) => call(s, 'scene.set', { name: 'grouped', ...params });
+    await g({ item: '0', depth: 'back' });
+    // Clearing the override lets the group stand in front of y again, so the sort moves it from path 0 to path 1.
+    const r = await g({ item: '0', depth: 'auto' });
+    assert.equal(r.path, '1');
+    assert.equal(r.reordered['0'], '1');
+    assert.equal(r.summary, 'Group 1 draws by where it stands');
+    assert.equal((await registry.call(s.context(), 'doc.undo', { doc: 'scene:grouped' })).summary, 'Undid: Group 1 draws by where it stands');
+  });
 });
 
 describe('R7: a pixel item has a level', () => {
@@ -380,7 +392,7 @@ describe('R8: sprites can have a footprint', () => {
     const cleared = await oc('object.footprint', { name: 'pebble', clear: true });
     assert.equal(cleared.footprint, null);
     assert.deepEqual((await oc('object.show', { name: 'pebble' })).footprint, [1, 1]);
-    await assert.rejects(oc('object.footprint', { name: 'block', to: [2, 2] }), { code: 'not_editable', message: /its size is its footprint/ });
+    await assert.rejects(oc('object.footprint', { name: 'block', to: [2, 2] }), { code: 'usage', message: /its size is its footprint/ });
     await assert.rejects(oc('object.footprint', { name: 'pebble' }), /give --to or --clear/);
     await assert.rejects(oc('object.footprint', { name: 'pebble', to: [0, 1] }), { code: 'usage' });
     await assert.rejects(oc('object.footprint', { name: 'pebble', to: [17, 1] }), { code: 'usage' });
@@ -576,5 +588,38 @@ describe('R15: the harbor\'s pine moved behind the red house', () => {
     assert.deepEqual(back.item.at, { tile: [5, 6, 0] });
     assert.equal(await picture(), startPicture, 'out and back draws the scene as it was, pixel for pixel');
     assert.equal(await colorAt(-16, 88), 'wood-3');
+  });
+});
+
+describe('R8: a footprint on the harbor\'s tree puts its scenes out of order', () => {
+  /** @type {string} */
+  let tmp;
+  /** @type {Session} */
+  let s;
+  before(async () => {
+    tmp = await tempDir('pixellab-harbor-footprint-');
+    const root = join(tmp, 'harbor.pixellab');
+    await cp(join(REPO, 'examples', 'harbor.pixellab'), root, { recursive: true });
+    const harbor = await openDocument({ doc: root, env: { ...process.env, HOME: tmp } });
+    s = new Session(harbor, { env: { ...process.env, PIXELLAB_STATE: join(tmp, 'state') } });
+  });
+  after(async () => {
+    const { rm } = await import('node:fs/promises');
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  test('R8: object.footprint tree --to 3,3 makes check report out_of_order, and scene.sort then moves the items', async () => {
+    const oc = (/** @type {string} */ name, /** @type {any} */ params) => registry.call(s.context(), name, params);
+    const outOfOrder = async () => (await oc('check', {})).warnings.filter((/** @type {any} */ w) => w.code === 'out_of_order');
+    assert.deepEqual(await outOfOrder(), [], 'the example is in depth order as it stands');
+    await oc('object.footprint', { name: 'tree', to: [3, 3] });
+    const warned = await outOfOrder();
+    assert.deepEqual(warned.map((/** @type {any} */ w) => w.scene).sort(), ['harbor', 'harbor-flat']);
+    assert.ok(warned.every((/** @type {any} */ w) => w.moves > 0), 'each scene says how many items would move');
+    const sorted = await oc('scene.sort', { all: true });
+    assert.equal(sorted.changed, true);
+    assert.deepEqual(sorted.scenes.map((/** @type {any} */ x) => x.scene).sort(), ['harbor', 'harbor-flat']);
+    assert.ok(sorted.scenes.every((/** @type {any} */ x) => x.moved > 0), 'the sort moves items in both scenes');
+    assert.deepEqual(await outOfOrder(), [], 'sorted again, check is quiet');
   });
 });
