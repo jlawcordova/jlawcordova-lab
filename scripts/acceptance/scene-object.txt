@@ -48,9 +48,23 @@ undo
 expect at 5,0,1
 redo
 expect at 4,0,1
-# raise, lower, duplicate, remove
-lower
-raise
+# the depth override replaces raise and lower. The pine stands at 4,0,1; at px 65,0 it draws over the
+# island's ground (the pine's green, #8FA56E). Back draws it before everything else in its list, so the
+# ground's sand (#C9B79A) covers it there; Front and Auto draw it over
+expect object pine
+expect at 4,0,1
+expect depth auto
+expect scenepixel 65,0 #8FA56E
+depth back
+expect depth back
+expect scenepixel 65,0 #C9B79A
+depth front
+expect depth front
+expect scenepixel 65,0 #8FA56E
+depth auto
+expect depth auto
+expect scenepixel 65,0 #8FA56E
+# duplicate, remove
 duplicate
 expect object pine
 remove

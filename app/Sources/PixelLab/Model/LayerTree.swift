@@ -16,6 +16,13 @@ enum LayerTarget: Hashable, Sendable, CustomStringConvertible {
     var layerID: String? { if case .layer(let id) = self { return id }; return nil }
     var itemPath: String? { if case .item(let p) = self { return p }; return nil }
 
+    /// Where this target is after a depth sort moved the paths in `reordered`
+    /// (old → new). A layer is named by its id, so it doesn't move.
+    func following(_ reordered: [String: String]) -> LayerTarget {
+        if case .item(let p) = self, let to = reordered[p] { return .item(to) }
+        return self
+    }
+
     /// `layer:<id>` or an item path (`12`, `5.2`).
     init?(spec: String) {
         if spec.hasPrefix("layer:") {
@@ -267,6 +274,13 @@ struct MovedBaseline: Equatable, Sendable {
         self.path = path
         object = item.object
         at = item.at
+    }
+
+    /// The first item moved to a new path when the depth sort ran: keep measuring it.
+    func following(_ reordered: [String: String]) -> MovedBaseline {
+        var b = self
+        if let to = reordered[path] { b.path = to }
+        return b
     }
 
     /// Whole tiles (col, row) from where the item stood; nil if it's gone or

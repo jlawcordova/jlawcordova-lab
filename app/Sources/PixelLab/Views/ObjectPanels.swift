@@ -176,6 +176,9 @@ struct ObjectInspector: View {
                     FramesSection(objects: objects)
                 }
                 ObjectFactsSection(objects: objects)
+                if objects.footprint != nil {
+                    FootprintSection(objects: objects)
+                }
                 InspectorSection("Preview") {
                     PreviewTile(render: doc.render)
                     Text("At 1× and 2×, standing on one tile, at the frame shown.")
@@ -425,6 +428,43 @@ struct ObjectFactsSection: View {
                 }
                 .accessibilityLabel(label)
         }
+    }
+}
+
+/// FOOTPRINT (sprites only): how many tiles the sprite covers, wide and deep,
+/// so it sorts against its neighbours by the ground under it
+/// (docs/intents/2026-10-depth-order/spec.md, R8, D7). A block's size is its footprint.
+struct FootprintSection: View {
+    var objects: ObjectEditor
+
+    var body: some View {
+        InspectorSection("Footprint") {
+            if let f = objects.footprint {
+                HStack(spacing: 14) {
+                    tiles("Wide", value: f.width) { w in Task { await objects.setFootprint(width: w, depth: f.depth) } }
+                    tiles("Deep", value: f.depth) { d in Task { await objects.setFootprint(width: f.width, depth: d) } }
+                }
+                Text("Tiles it covers from the tile it's placed on, 1 to 16 each way. A house or a locomotive sorts against its neighbours by this ground.")
+                    .font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(4)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func tiles(_ label: String, value: Int, set: @escaping (Int) -> Void) -> some View {
+        HStack(spacing: 6) {
+            Text(label).font(.caption).foregroundStyle(Theme.inkMuted)
+            Text("\(value)")
+                .font(Theme.monoFont(12))
+                .foregroundStyle(Theme.ink)
+                .frame(minWidth: 20, alignment: .trailing)
+            Stepper(label, value: Binding(get: { value }, set: { if $0 != value { set($0) } }), in: ObjectEditor.footprintRange)
+                .labelsHidden()
+                .controlSize(.regular)
+                .accessibilityLabel("Footprint \(label.lowercased())")
+                .accessibilityValue("\(value) tile\(value == 1 ? "" : "s")")
+        }
+        .accessibilityElement(children: .contain)
     }
 }
 

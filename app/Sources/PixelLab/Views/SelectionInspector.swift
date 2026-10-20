@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// SELECTED and POSITION for the selected scene item: its object and
-/// thumbnail, Col/Row/Level (or X/Y for a pixel-placed item) bound to
-/// `scene.set` and `scene.move`, Class and ID, and Raise, Lower, Snap to
+/// thumbnail, Col/Row/Level (or X/Y/Level for a pixel-placed item) bound to
+/// `scene.set` and `scene.move`, the Depth control (Auto, Front, Back;
+/// docs/intents/2026-10-depth-order/spec.md, R14), Class and ID, and Snap to
 /// tile, Duplicate, Remove.
 struct SelectionInspector: View {
     var doc: DocumentModel
@@ -47,6 +48,7 @@ struct SelectionInspector: View {
             InspectorSection("Position") {
                 if let item = doc.selectedItem {
                     position(item, editor: editor)
+                    depthControl(item, editor: editor)
                     textField("Class", text: Binding(get: { editor.classDraft }, set: { editor.classDraft = $0 }), prompt: "none") {
                         Task { await editor.setClass(editor.classDraft) }
                     }
@@ -88,11 +90,44 @@ struct SelectionInspector: View {
             HStack(spacing: 6) {
                 CoordField(label: "X", value: p[0]) { v in Task { await editor.set("x", v) } } step: { d in Task { await editor.nudge(dx: d, dy: 0) } }
                 CoordField(label: "Y", value: p[1]) { v in Task { await editor.set("y", v) } } step: { d in Task { await editor.nudge(dx: 0, dy: d) } }
+                // How high it stands, so it sorts against the tiles around it (R7).
+                CoordField(label: "Level", value: item.at.pxLevel ?? 0) { v in Task { await editor.set("level", v) } } step: { d in Task { await editor.move(dc: 0, dr: 0, dl: d) } }
             }
-            Text("Placed by pixel. Snap to tile puts it on the level-0 tile under it.")
+            Text("Placed by pixel. Level is how high it stands, for depth. Snap puts it on the tile under it, at its level.")
                 .font(.caption)
                 .foregroundStyle(Theme.inkMuted)
                 .lineLimit(3)
+        }
+    }
+
+    /// Auto draws it by where it stands; Front and Back draw it over or under
+    /// everything else in its list (R5).
+    private func depthControl(_ item: SceneItemInfo, editor: SceneEditor) -> some View {
+        // Alone in its SVG group, the item sorts as the group does: the control reads and writes the group's depth.
+        let mode = doc.depthMode(of: item)
+        let sole = doc.soleGroup(of: item) != nil
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("Depth").font(.caption).foregroundStyle(Theme.inkMuted)
+            Picker("Depth", selection: Binding(get: { mode }, set: { mode in Task { await editor.setDepth(mode) } })) {
+                ForEach(DepthMode.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.large)
+            .help("Front draws it over everything in its list; Back under everything")
+            .accessibilityLabel("Depth")
+            .accessibilityValue(mode.title)
+            .accessibilityHint(mode.detail)
+            // In a { group } wrapper with other items, the item sorts only among the group's items; the wrapper is what sorts in the scene.
+            Text(sole
+                 ? mode.detail + ". It's the only item in its SVG group, so this sets the group's depth."
+                 : item.group == nil
+                 ? mode.detail + "."
+                 : mode.detail.replacingOccurrences(of: "its list", with: "its SVG group") + ". To move it among the scene's items, set the Group depth above.")
+                .font(.caption)
+                .foregroundStyle(Theme.inkMuted)
+                .lineLimit(4)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -113,17 +148,10 @@ struct SelectionInspector: View {
 
     private func actions(_ item: SceneItemInfo, editor: SceneEditor) -> some View {
         VStack(spacing: 6) {
-            HStack(spacing: 6) {
-                ActionButton(title: "Raise", symbol: "square.2.layers.3d.top.filled", help: "Paint it one later, in front of the next item (])") {
-                    Task { await editor.raise() }
-                }
-                ActionButton(title: "Lower", symbol: "square.2.layers.3d.bottom.filled", help: "Paint it one earlier, behind the item before it ([)") {
-                    Task { await editor.lower() }
-                }
-                ActionButton(title: "Snap", symbol: "square.grid.3x3.middle.filled", help: "Snap to the level-0 tile under it") {
+            if !item.at.isTile {
+                ActionButton(title: "Snap to tile", symbol: "square.grid.3x3.middle.filled", help: "Snap to the tile under it, at the level it stands on") {
                     Task { await editor.snap() }
                 }
-                .disabled(item.at.isTile)
             }
             HStack(spacing: 6) {
                 ActionButton(title: "Duplicate", symbol: "plus.square.on.square", help: "Duplicate one column over (⌘D)") {

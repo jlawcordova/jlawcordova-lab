@@ -659,6 +659,28 @@ final class ObjectEditor {
         return r
     }
 
+    /// A sprite's footprint, tiles wide and deep (nil for a block, whose size is its footprint).
+    var footprint: (width: Int, depth: Int)? {
+        guard let f = info?.footprint, f.count == 2 else { return nil }
+        return (f[0], f[1])
+    }
+
+    static let footprintRange = 1...16
+
+    /// The Footprint steppers (`object.footprint`): how many tiles the sprite covers,
+    /// so it sorts against its neighbours by the ground under it
+    /// (docs/intents/2026-10-depth-order/spec.md, R8).
+    @discardableResult
+    func setFootprint(width: Int, depth: Int) async -> EditResult? {
+        guard let current = footprint else { return nil }
+        guard Self.footprintRange.contains(width), Self.footprintRange.contains(depth) else {
+            say("Use whole numbers from 1 to 16")
+            return nil
+        }
+        guard current.width != width || current.depth != depth else { return nil }
+        return await edit("object.footprint", ["to": [JSONValue(width), JSONValue(depth)]])
+    }
+
     // MARK: Renders
 
     /// The render params for a frame with the visible layers.

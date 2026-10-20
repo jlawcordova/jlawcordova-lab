@@ -366,6 +366,8 @@ Redo the last undone edit to an open doc.
 pixellab doc redo <doc>
 ```
 
+A scene edit and its depth sort are one step, so undoing it can give items other paths. When it does, the result has reordered: every path that changed, old → new (an item whose placement the step changed pairs with itself), for a caller holding paths.
+
 edits docs · session only (`serve`) · MCP tool `doc_redo`
 
 | param | type | | description |
@@ -444,6 +446,8 @@ Undo the last edit to an open doc.
 ```
 pixellab doc undo <doc>
 ```
+
+A scene edit and its depth sort are one step, so undoing it can give items other paths. When it does, the result has reordered: every path that changed, old → new (an item whose placement the step changed pairs with itself), for a caller holding paths.
 
 edits docs · session only (`serve`) · MCP tool `doc_undo`
 

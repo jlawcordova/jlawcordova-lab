@@ -41,6 +41,8 @@ final class DocumentModel {
     var render: StageImage?
     /// nil until the first `check` comes back.
     var problems: [CheckProblem]?
+    /// `check`'s warnings: they don't fail it (off the grid, out of depth order, a moving item's copies).
+    var warnings: [CheckWarning] = []
     var checkSummary: String?
     var checkedCount: Int?
     var error: String?
@@ -72,6 +74,19 @@ final class DocumentModel {
 
     var selectedItem: SceneItemInfo? { selectedPath.flatMap { itemsByPath[$0] } }
 
+    /// The SVG group around an item when the item is its only member. Such a
+    /// group sorts as the item does, so the item's Depth control reads and
+    /// writes the group's depth (docs/intents/2026-10-depth-order/spec.md, R9, D7).
+    func soleGroup(of item: SceneItemInfo) -> SceneGroupInfo? {
+        guard let path = item.group, let group = groups.first(where: { $0.path == path }), group.items == 1 else { return nil }
+        return group
+    }
+
+    /// What the Depth control shows for an item: its wrapper's depth when it is alone in it, else its own.
+    func depthMode(of item: SceneItemInfo) -> DepthMode {
+        soleGroup(of: item)?.depthMode ?? item.depthMode
+    }
+
     /// The selected layer, when the selection is one layer.
     var selectedLayer: String? {
         if selection.count == 1, case .layer(let id) = selection[0] { return id }
@@ -99,4 +114,15 @@ final class DocumentModel {
 
     var isDirty: Bool { status?.dirty ?? false }
     var title: String { ref.name }
+
+    /// The warning that this scene's file isn't in depth order, when it isn't (Sort fixes it).
+    var outOfOrder: CheckWarning? { warnings.first { $0.kind == .outOfOrder && ($0.scene ?? ref.name) == ref.name } }
+
+    /// A scene edit put the items in depth order and moved some: the selection
+    /// follows its items to their new paths.
+    func follow(_ reordered: [String: String]) {
+        guard !reordered.isEmpty else { return }
+        let next = selection.map { $0.following(reordered) }
+        if next != selection { selection = next }
+    }
 }

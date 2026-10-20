@@ -146,7 +146,17 @@ final class LayersModel {
         }
         syncDraft()
         app?.editor.syncDrafts()
-        if let l = doc?.selectedItem?.at.level { app?.editor.placeLevel = l }
+        if let l = doc?.selectedItem?.at.standingLevel { app?.editor.placeLevel = l }
+    }
+
+    /// A scene edit put the items in depth order and moved some (`reordered`,
+    /// old path → new): the selection, the Moved by baseline and the hover
+    /// follow their items.
+    func followSort(_ reordered: [String: String]?) {
+        guard let reordered, !reordered.isEmpty else { return }
+        doc?.follow(reordered)
+        baseline = baseline?.following(reordered)
+        hover = hover?.following(reordered)
     }
 
     /// The layer and name the name field last took, so a reload doesn't overwrite typing.
@@ -465,6 +475,8 @@ final class LayersModel {
         defer { app.editor.pendingEdits -= 1 }
         do {
             let r: LayerEditResult = try await connection.call(method, p)
+            // The edit may have put the items in depth order (a move gives them new depths): follow the paths it moved.
+            if app.document === doc { followSort(r.reordered) }
             if let s = r.summary { app.lastEdit = s }
             app.notice = nil
             return r
