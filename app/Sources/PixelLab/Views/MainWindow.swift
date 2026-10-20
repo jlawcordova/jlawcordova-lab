@@ -57,8 +57,9 @@ struct DocumentWindow: View {
             .background(Theme.hero)
         }
         .inspector(isPresented: $model.showInspector) {
-            InspectorView()
-                .inspectorColumnWidth(min: 230, ideal: 264, max: 360)
+            // Inspector | ✦ Agent (docs/intents/2026-10-agent-chat/spec.md, D12).
+            RightColumn()
+                .inspectorColumnWidth(min: 260, ideal: 340, max: 520)
         }
         // The layer menu, over the whole window (docs/intents/2026-10-scene-layers/spec.md, D9).
         .overlay { LayerMenuLayer() }
@@ -276,15 +277,16 @@ struct AccentButtonStyle: ButtonStyle {
     }
 }
 
-/// The toolbar's way into the Agent window, with the count of proposals
-/// waiting (a small accent badge; nothing when there are none).
+/// The toolbar's way into the Agent tab (docs/intents/2026-10-agent-chat/spec.md, D13), with
+/// the count of proposals waiting (a small accent badge; nothing when there are none).
 struct AgentToolbarButton: View {
     var agent: AgentModel
+    @Environment(AppModel.self) private var model
 
     var body: some View {
         let n = agent.pendingCount
         Button {
-            agent.showWindow()
+            model.showAgentTab()
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "sparkles")
@@ -298,7 +300,7 @@ struct AgentToolbarButton: View {
                 }
             }
         }
-        .help(n == 0 ? "Agent: activity and proposals (⌥⌘A)" : "\(n) proposal\(n == 1 ? "" : "s") from agents to review (⌥⌘A)")
+        .help(n == 0 ? "Agent: chat with Claude about the scene (⌥⌘A)" : "Agent: \(n) proposal\(n == 1 ? "" : "s") to review (⌥⌘A)")
         .accessibilityLabel(n == 0 ? "Agent" : "Agent, \(n) proposal\(n == 1 ? "" : "s") to review")
     }
 }

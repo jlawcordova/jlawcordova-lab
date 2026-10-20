@@ -64,6 +64,12 @@ final class AppModel {
     let timeline = TimelineModel()
     /// The Agent window: proposals, activity and the ghost preview.
     let agent = AgentModel()
+    /// The Agent tab's chat with Claude Code (docs/intents/2026-10-agent-chat/spec.md).
+    let chat = ChatModel()
+    /// The right column's tab (spec D12): remembered, except under the script hook or a snapshot.
+    var rightTab: RightTab = RightTab(rawValue: UserDefaults.standard.string(forKey: SettingsKey.rightTab) ?? "") ?? .inspector {
+        didSet { if script == nil, snapshot == nil { UserDefaults.standard.set(rightTab.rawValue, forKey: SettingsKey.rightTab) } }
+    }
     /// The palette (`palette.get`), in its order, and by name and hex.
     var palette: [PaletteColor] = []
     var paletteByName: [String: PaletteColor] = [:]
@@ -95,6 +101,7 @@ final class AppModel {
         objectEditor.app = self
         timeline.app = self
         agent.app = self
+        chat.app = self
     }
     @ObservationIgnored private(set) var connection: ServerConnection?
     @ObservationIgnored private var eventsTask: Task<Void, Never>?
@@ -208,6 +215,8 @@ final class AppModel {
         await agent.load()
         document = nil
         phase = .ready
+        chat.documentChanged()
+        if rightTab == .agent { chat.start() }
         await openInitialDoc()
     }
 
@@ -822,12 +831,24 @@ final class AppModel {
         }
     }
 
+    /// The toolbar's sparkle, Window › Agent (⌥⌘A), Ask Claude about this: the Agent tab, shown.
+    func showAgentTab(focusInput: Bool = false) {
+        showInspector = true
+        rightTab = .agent
+        chat.start()
+        if focusInput { chat.focusRequest += 1 }
+        mainWindow?.makeKeyAndOrderFront(nil)
+    }
+
     func setZoomLevel(index: Int) {
         let levels = Zoom.levels(for: mode)
         guard levels.indices.contains(index) else { return }
         zoom = .level(levels[index])
     }
 }
+
+/// The right column's tabs (docs/intents/2026-10-agent-chat/spec.md, D12).
+enum RightTab: String, Sendable { case inspector, agent }
 
 /// A save the server refused: problems to fix, or a file changed on disk.
 struct SaveAlert: Identifiable {

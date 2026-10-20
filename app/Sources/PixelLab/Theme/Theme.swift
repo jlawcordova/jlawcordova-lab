@@ -32,6 +32,10 @@ enum Theme {
     static let gridStrong = dynamic(night: 0xF1E8D8, nightAlpha: 0.13, day: 0x5A3E2B, dayAlpha: 0.2)
     /// Under the stage's dashed outlines, so they read over any art.
     static let halo = dynamic(night: 0x1C1712, nightAlpha: 0.7, day: 0xF4EDE0, dayAlpha: 0.8)
+    /// Claude's avatar: terracotta, the same in both appearances (docs/intents/2026-10-agent-chat/spec.md, D14).
+    static let claude = dynamic(night: 0xD97757, day: 0xD97757)
+    /// The asterisk on Claude's avatar.
+    static let onClaude = dynamic(night: 0xFFF7F0, day: 0xFFF7F0)
     /// A selected row: the accent, faint.
     static let selection = dynamic(night: 0x8CBC86, nightAlpha: 0.18, day: 0x3F6B45, dayAlpha: 0.16)
 

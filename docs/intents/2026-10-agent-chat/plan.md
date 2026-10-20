@@ -34,7 +34,8 @@
 - `app/Sources/PixelLab/Theme/Theme.swift`: `claude`, `onClaude`.
 - `app/Sources/PixelLab/Support/ScriptRunner.swift`: D15's setup, tab, chat, step, question and link actions.
 - `app/Tests/PixelLabTests/ChatTests.swift` (new), `app/Tests/PixelLabTests/Fixtures/stream-*.jsonl` (new): the parser, rows, steps, links, store round trip, locator order. `app/Package.swift` if the fixtures need a resources entry for the test target.
-- `scripts/fake-claude/claude`, `scripts/fake-claude/turns.json`, `scripts/fake-claude/install.sh`, `scripts/fake-claude/README.md` (all new): D16.
+- `scripts/fake-claude/claude`, `scripts/fake-claude/fake-claude.mjs`, `scripts/fake-claude/turns.json`, `scripts/fake-claude/install.sh`, `scripts/fake-claude/README.md` (all new): D16.
+- `scripts/acceptance.sh`: runs `chat-setup.txt` with the fake, and checks the chat's proposal, activity lines and chats files.
 - `scripts/acceptance/chat-setup.txt` (new): the setup flow, from no `claude` to the chat.
 
 **PR 3, context, proposals and the Agent window (`feat/agent-chat-context`)**

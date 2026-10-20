@@ -12,7 +12,9 @@
 # then the example documents' layers, read from a file, on temp copies of
 # examples/ (examples-harbor.txt, examples-town.txt), and depth order on the harbor example: the front
 # pine moved behind the red house draws behind its wall, the Depth override draws it over, and the saved
-# file is in order (examples-depth.txt). The temp site is put in depth order first, with the bundled CLI's
+# file is in order (examples-depth.txt). The Agent chat (docs/intents/2026-10-agent-chat/) runs against the fake
+# Claude Code in scripts/fake-claude/, from an empty temp home: install, sign in and chat on a temp harbor copy
+# (chat-setup.txt), never the owner's Claude Code or plan. The temp site is put in depth order first, with the bundled CLI's
 # scene sort --all, and that is the base it starts from; a copy of the site's own document, unsorted,
 # checks the Checks warning and its Sort button (sort.txt).
 # The real checkout is only read (copied). Exits 0 if every step passed.
@@ -87,6 +89,22 @@ run_example examples-harbor.txt examples-harbor.log harbor
 run_example examples-town.txt examples-town.log town
 echo "==> depth order: the pine moved behind the house, the override, the saved file"
 run_example examples-depth.txt examples-depth.log harbor
+echo "==> the Agent chat: Claude Code's setup (the fake), chats, steps, a question, Stop"
+claude_home="$out/claude-home" chat_state="$out/chat-state"
+rm -rf "$claude_home" "$chat_state" && mkdir -p "$claude_home" "$chat_state"
+doc="$out/examples/chat.pixellab"
+rm -rf "$doc" && cp -R "$root/examples/harbor.pixellab" "$doc"
+sed "s#@OUT@#$shots#g" "$root/scripts/acceptance/chat-setup.txt" > "$out/chat-setup.txt"
+FAKE_CLAUDE_INSTALL_S=1 FAKE_CLAUDE_LOGIN_MS=2500 PIXELLAB_CLAUDE_HOME="$claude_home" PIXELLAB_CLAUDE_INSTALLER="$root/scripts/fake-claude/install.sh" \
+  PIXELLAB_SCRIPT="$out/chat-setup.txt" PIXELLAB_DOC="$doc" PIXELLAB_STATE="$chat_state" "$app/Contents/MacOS/PixelLab" 2>&1 | grep '^script:' > "$out/chat-setup.log" || true
+tail -1 "$out/chat-setup.log"
+grep -q 'all steps passed' "$out/chat-setup.log"
+proposal=$(ls "$chat_state"/proposals/*.json | head -1)
+grep -q '"chat": {' "$proposal" && grep -q '"number": 1' "$proposal" || { echo "the chat's proposal doesn't name its chat and number" >&2; exit 1; }
+grep -q '"chat":{"id"' "$chat_state/activity.jsonl" || { echo "no chat lines in the activity log" >&2; exit 1; }
+[[ $(ls "$chat_state"/chats/*.json | wc -l | tr -d ' ') == 2 ]] || { echo "expected 2 chats in the state dir" >&2; exit 1; }
+[[ -z $(find "$doc" -name '*.json' ! -name manifest.json) ]] || { echo "chat state went into the document" >&2; exit 1; }
+echo "the chat's proposals name their chat and number; 2 chats kept in the state dir, none in the document"
 echo "==> sort: a document written before depth order, the Checks warning, Sort, save"
 doc="$out/examples/unsorted.pixellab"
 rm -rf "$doc" && cp -R "$real/src/assets/pixel-art/jlawcordova.pixellab" "$doc"

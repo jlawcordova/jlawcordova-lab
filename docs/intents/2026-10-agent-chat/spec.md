@@ -186,7 +186,7 @@ With nothing: `  (nothing selected: the whole scene is in view)`. A group lists 
 
 - **The chat on the MCP side.** `serve --mcp` reads `PIXELLAB_CHAT` and `PIXELLAB_CHAT_TITLE` from its environment into the session. A proposal it writes gains `chat: { id, title }`. Each activity line gains `agent` (the MCP client's name and version) and, from a chat, `chat: { id, title }`.
 - **Numbers.** `state.writeProposal` gives a proposal a `number` the first time it's written: it appends the id to `proposal-numbers.log` in the state dir (one line per proposal, append-only, so two servers writing at once each get their own line) and the number is that line's position. A rewritten proposal keeps it. `proposal.list` and `proposal.show` return `number` and `chat`; older proposals have neither and show without a number.
-- **Cards.** A `doc_save` tool result with `proposal` adds a proposal message `{ proposal, number, doc, summary, edits }` (the result carries `edits` and its summary). Its status: waiting while `proposal.list` has it; `applied` or `rejected` when the app approved or rejected it (from the card, the banner or the Agent window, which tell the chat model); `elsewhere` when it left the list otherwise ("Settled outside Pixel Lab"). Card buttons: **Approve** and **Reject** select it in `AgentModel` and run its `approve()` / `reject()` (the same questions and alerts); **Show on stage / Hide on stage** selects it with the ghost on, or turns the ghost off; **Diff in the Agent window** selects it and opens the window. The chat notes "You approved #12 · wrote scenes/harbor.mjs" or "You rejected #12 · nothing changed".
+- **Cards.** A `doc_save` tool result with `proposal` adds a proposal message `{ proposal, number, doc, edits }`, titled with its one edit or "2 edits to harbor". It goes after Claude's next words (or at the turn's end), so the card follows the reply about it, as in the prototype. Its status: waiting while `proposal.list` has it; `applied` or `rejected` when the app approved or rejected it (from the card, the banner or the Agent window, which tell the chat model); `elsewhere` when it left the list otherwise ("Settled outside Pixel Lab"). Card buttons: **Approve** and **Reject** select it in `AgentModel` and run its `approve()` / `reject()` (the same questions and alerts); **Show on stage / Hide on stage** selects it with the ghost on, or turns the ghost off; **Diff in the Agent window** selects it and opens the window. The chat notes "You approved #12 · wrote scenes/harbor.mjs" or "You rejected #12 · nothing changed".
 - **Ghosts per chat.** When a turn in the open chat makes a proposal, it's selected with its ghost on. Opening another chat, or the Chats list, turns the ghost off if the selected proposal is from a different chat. The Agent window's own selection works as before.
 - **The banner** (`ProposalBanner`): for a chat proposal, "Previewing proposal #12 from the chat “Forest by the house”", the second line "2 edits · <summary>". Otherwise "Previewing proposal #11 from claude-code 2.1.0".
 - **Badges:** the toolbar's sparkle and the Dock count every waiting proposal, chats' included, as now.
@@ -278,20 +278,22 @@ New actions (in `ScriptRunner.swift` and `CLAUDE.md`):
 
 ```
 righttab inspector|agent          agentwindow open           askclaude   (the Inspector's button)
-setup check|install|signin|cancel|signout|copy|choose <path>
-chat new|list|open <n>|send <text…>|type <text…>|stop|wait
-chatkey tab|return|shift+return|esc
-details on|off   steps expand <n>   answer <n> <option n>   link <text…>  (clicks the link with that text in the last reply)
+setup check|install|signin|open|cancel|signout|copy|choose <path>|wait <state>
+chat new|list|open <n>|send [<text…>]|type <text…>|stop|wait
+chatkey tab|shift+tab|return|shift+return|esc   (a real key event into the input)
+details on|off   steps expand <n>   choose <answer n> [<question n>]   link <text…>  (clicks the link with that text in the last reply)
 chip pin|unpin|remove <target>    savenow
 card approve|reject|ghost|diff [<n>]   (the nth proposal card in the chat, default the last)
 altclick <x> <y> [shift]          selectuses
 activity all|chats|errors
-expect setup missing|installing|signedout|waiting|ready
-expect righttab|chats|chattitle|messages|lastreply|steps|steplabel|question|card|cardstatus|chips|pinned|unsaved|context|placeholder|draft|running|ghostchat|claudeinfo|activityrows|proposalsource|banner <value>
-snapshot agenttab <png>
+expect setup checking|missing|installing|signedout|waiting|ready
+expect righttab|chats|chattitle|messages|steps|steplabel|chatquestion|chosen|cards|cardstatus|chips|pinned|unsaved|placeholder|draft|draftlines|running|claudeinfo|lastnote|loginurl|details|ghostchat|activityrows|proposalsource|banner <value>
+expect lastreply|context|setupmessage|installlog <text>   (contains)
 ```
 
-`chat wait` waits for the running turn to end. `expect context <text>` checks that the block contains the text; `expect lastreply` that the last Claude bubble does.
+(`choose` and `expect chatquestion`, not `answer` and `expect question`: the Agent window's alerts already have those.)
+
+`chat wait` waits for the running turn to end; `setup wait <state>` for a setup state.
 
 Under the script hook, the app finds `claude` with `PIXELLAB_CLAUDE_HOME` (D2): the acceptance pass points it at a temp home holding the fake (or nothing, for the install flow).
 
