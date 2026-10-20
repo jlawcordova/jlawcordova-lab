@@ -11,6 +11,10 @@ enum SettingsKey {
     static let appearance = "appearance"
     static let lastDoc = "lastDoc"
     static let showGrid = "showGrid"
+    /// The claude command the owner chose in the Agent tab's setup (empty: look for it).
+    static let claude = "claudePath"
+    /// The right column's tab: inspector or agent.
+    static let rightTab = "rightTab"
 }
 
 enum AppearanceSetting: String, CaseIterable, Identifiable, Sendable {
