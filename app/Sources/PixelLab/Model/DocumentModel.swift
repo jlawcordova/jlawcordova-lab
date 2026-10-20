@@ -15,6 +15,10 @@ struct StageImage {
     /// An object's anchor, (0, 0) in its own pixels.
     var anchor: CGPoint?
     var time: Double?
+    /// Inside a layer: the render of only its items, drawn over the faded
+    /// rest (docs/intents/2026-10-scene-layers/spec.md, D6), and which layer it's for.
+    var focusImage: PixelImage?
+    var focusLayer: String?
 
     var artSize: CGSize { viewBox.size }
 
@@ -48,24 +52,40 @@ final class DocumentModel {
     /// `scene.items`: every placed item in paint order, and the groups.
     var items: [SceneItemInfo] = []
     var groups: [SceneGroupInfo] = []
-    /// Items and groups in tree order (a group before its items).
-    var treeRows: [TreeRow] = []
+    /// The scene's layers and which items are in them (docs/intents/2026-10-scene-layers/spec.md, D5).
+    var layerTree = LayerTree.empty
     var itemsByPath: [String: SceneItemInfo] = [:]
     var itemsLoaded = false
     @ObservationIgnored var loadingItems = false
     @ObservationIgnored var needsItems = false
-    /// The selected item's path.
-    var selectedPath: String?
+    /// What's selected: layers and items, in the order they were picked.
+    var selection: [LayerTarget] = []
+
+    /// The selected item's path, when the selection is one item.
+    var selectedPath: String? {
+        get {
+            if selection.count == 1, case .item(let p) = selection[0] { return p }
+            return nil
+        }
+        set { selection = newValue.map { [.item($0)] } ?? [] }
+    }
 
     var selectedItem: SceneItemInfo? { selectedPath.flatMap { itemsByPath[$0] } }
+
+    /// The selected layer, when the selection is one layer.
+    var selectedLayer: String? {
+        if selection.count == 1, case .layer(let id) = selection[0] { return id }
+        return nil
+    }
 
     func setItems(_ r: SceneItemsResult) {
         items = r.items
         groups = r.groups
         itemsByPath = Dictionary(r.items.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
-        treeRows = TreeRow.build(items: r.items, groups: r.groups)
+        layerTree = LayerTree(items: r.items, layers: r.layers ?? [])
         itemsLoaded = true
-        if let p = selectedPath, itemsByPath[p] == nil { selectedPath = nil }
+        let kept = selection.filter { layerTree.exists($0) }
+        if kept != selection { selection = kept }
     }
 
     @ObservationIgnored var rendering = false
@@ -79,34 +99,4 @@ final class DocumentModel {
 
     var isDirty: Bool { status?.dirty ?? false }
     var title: String { ref.name }
-}
-
-/// A row of the Items tree: a group or a placed item.
-struct TreeRow: Identifiable, Hashable, Sendable {
-    enum Kind: Hashable, Sendable {
-        case group(SceneGroupInfo)
-        case item(SceneItemInfo)
-    }
-    var path: String
-    var kind: Kind
-    var id: String { path }
-    var components: [Int]
-    var depth: Int { components.count - 1 }
-    /// The paths of the groups that hold it, outermost first.
-    var ancestors: [String] { Self.ancestors(of: components) }
-
-    static func ancestors(of path: String) -> [String] { ancestors(of: components(path)) }
-
-    static func ancestors(of components: [Int]) -> [String] {
-        guard components.count > 1 else { return [] }
-        return (1..<components.count).map { n in components.prefix(n).map(String.init).joined(separator: ".") }
-    }
-
-    static func components(_ path: String) -> [Int] { path.split(separator: ".").compactMap { Int($0) } }
-
-    static func build(items: [SceneItemInfo], groups: [SceneGroupInfo]) -> [TreeRow] {
-        let rows = groups.map { TreeRow(path: $0.path, kind: .group($0), components: components($0.path)) }
-            + items.map { TreeRow(path: $0.path, kind: .item($0), components: components($0.path)) }
-        return rows.sorted { $0.components.lexicographicallyPrecedes($1.components) }
-    }
 }

@@ -26,23 +26,21 @@ struct SelectionInspector: View {
                                 .font(Theme.monoFont(10.5))
                                 .foregroundStyle(Theme.inkMuted)
                                 .lineLimit(1)
-                            if let g = item.group, let group = doc.groups.first(where: { $0.path == g }) {
-                                Text("in group \(g)\(group.attrs["class"].map { " .\($0.replacingOccurrences(of: " ", with: "."))" } ?? "")")
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.inkMuted)
-                                    .lineLimit(1)
-                            }
                         }
                     }
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel("Selected \(item.object), \(item.at.spoken)")
+                    // Its layer (Select <layer>) and its SVG group (docs/intents/2026-10-scene-layers/spec.md, D12).
+                    ItemLayerLines(doc: doc, item: item)
                 } else {
                     Text(doc.items.isEmpty && !doc.itemsLoaded ? "Loading items…" : "Nothing selected")
                         .font(.callout)
                         .foregroundStyle(Theme.inkMuted)
-                    Text("Click an item on the stage or in Items.")
+                    Text("Click the stage to pick a layer, or a row in Layers. Double-click a layer to work inside it.")
                         .font(.caption)
                         .foregroundStyle(Theme.inkMuted.opacity(0.85))
+                        .lineLimit(4)
+                        .layoutPriority(1)
                 }
             }
 
@@ -153,6 +151,11 @@ struct PlaceInspector: View {
                     Text(editor.placeObject ?? "No object chosen")
                         .font(Theme.nameFont(13))
                         .foregroundStyle(editor.placeObject == nil ? Theme.inkMuted : Theme.ink)
+                        .lineLimit(1)
+                    // Where it goes (docs/intents/2026-10-scene-layers/spec.md, D13).
+                    Text(model.layers.placeTarget == nil ? "into the top level" : "into \(model.layers.placeTargetName)")
+                        .font(.caption)
+                        .foregroundStyle(Theme.inkMuted)
                         .lineLimit(1)
                     Text(editor.placeObject == nil ? "Choose one in the Library." : "Click a tile, or Return at the cursor. ⌥ places by pixel.")
                         .font(.caption)

@@ -137,17 +137,16 @@ final class SceneEditor {
     /// An object dragged from the library over the stage.
     var dropObject: String?
     var stageFocused = false
-    /// Collapsed groups in the Items tree (everything starts expanded).
-    var collapsedGroups: Set<String> = []
-    /// The sidebar's lower section: the library or the open scene's items.
-    var sidebarTab: SidebarTab = .library
+    /// The sidebar's lower section: the open scene's Layers (first, and the
+    /// default) or the Library (docs/intents/2026-10-scene-layers/spec.md, D11).
+    var sidebarTab: SidebarTab = .layers
     /// Drafts of the inspector's Class and ID fields.
     var classDraft = ""
     var idDraft = ""
     /// Edits sent and not answered yet (the script hook waits on them).
     @ObservationIgnored var pendingEdits = 0
 
-    enum SidebarTab: String, Hashable { case library, items }
+    enum SidebarTab: String, Hashable { case layers, library }
 
     var effectiveTool: StageTool { spaceHeld || panning ? .pan : tool }
 
@@ -165,7 +164,6 @@ final class SceneEditor {
         hoverPixel = nil
         cursorTile = nil
         dropObject = nil
-        collapsedGroups = []
         syncDrafts()
     }
 
@@ -179,6 +177,7 @@ final class SceneEditor {
             if reveal { self.reveal(path!) }
             announce("\(item.object) selected, \(item.at.spoken)")
         }
+        app?.layers.selectionChanged()
         syncDrafts()
     }
 
@@ -188,8 +187,9 @@ final class SceneEditor {
         select(path)
     }
 
+    /// Expands the layers that hold the item, so its row shows in Layers.
     func reveal(_ path: String) {
-        for a in TreeRow.ancestors(of: path) where collapsedGroups.contains(a) { collapsedGroups.remove(a) }
+        app?.layers.reveal(.item(path))
     }
 
     func syncDrafts() {
@@ -215,18 +215,14 @@ final class SceneEditor {
 
     // MARK: Hit-testing
 
-    /// The topmost item painted at a view point (render bounds, refined by each
-    /// object's own pixels).
-    func hitTest(viewPoint p: CGPoint, geometry: StageGeometry) -> String? {
-        guard let doc, let render = doc.render else { return nil }
-        let px = geometry.scenePixel(fromView: p)
-        return hitTest(scenePixel: px.x, px.y, render: render)
-    }
-
-    func hitTest(scenePixel x: Int, _ y: Int, render: StageImage) -> String? {
+    /// The topmost item painted at a scene pixel (render bounds, refined by
+    /// each object's own pixels); `LayersModel.pick` turns it into what a click picks.
+    /// `allowed` leaves items out of the test (layers: outside the layer you're
+    /// in, or locked; docs/intents/2026-10-scene-layers/spec.md, D6).
+    func hitTest(scenePixel x: Int, _ y: Int, render: StageImage, allowed: ((String) -> Bool)? = nil) -> String? {
         let arts = app?.thumbnails.arts ?? [:]
         let candidates: [HitTester.Candidate] = render.items.compactMap { item in
-            guard let path = item.path, let rect = render.sceneRect(of: item) else { return nil }
+            guard let path = item.path, allowed?(path) ?? true, let rect = render.sceneRect(of: item) else { return nil }
             return HitTester.Candidate(path: path, rect: rect, object: item.pose ?? item.object)
         }
         return HitTester.pick(atPixel: x, y, in: candidates) { c, dx, dy in
@@ -244,6 +240,7 @@ final class SceneEditor {
     func pointerMoved(_ p: CGPoint, geometry: StageGeometry, option: Bool) {
         hoverPixel = geometry.scenePoint(fromView: p)
         placeByPixel = option
+        if effectiveTool == .select, dropObject == nil { app?.layers.stageHover(p, geometry: geometry) }
         guard effectiveTool == .place || dropObject != nil else { return }
         if let t = geometry.tile(atView: p, level: placeLevel) {
             let tile = Tile(col: t.col, row: t.row, level: t.level)
@@ -255,9 +252,10 @@ final class SceneEditor {
     func pointerExited() {
         hoverTile = nil
         hoverPixel = nil
+        app?.layers.hover = nil
     }
 
-    func mouseDown(_ p: CGPoint, geometry: StageGeometry, option: Bool, clickCount: Int) {
+    func mouseDown(_ p: CGPoint, geometry: StageGeometry, option: Bool, shift: Bool = false, clickCount: Int) {
         guard doc != nil else { return }
         switch effectiveTool {
         case .pan:
@@ -266,15 +264,13 @@ final class SceneEditor {
             pointerMoved(p, geometry: geometry, option: option)
             Task { await placeHere(geometry: geometry, at: p, byPixel: option) }
         case .select:
-            let path = hitTest(viewPoint: p, geometry: geometry)
-            if path != doc?.selectedPath { select(path) }
-            if let path {
-                drag = ItemDrag(path: path, startView: p, startScene: geometry.scenePoint(fromView: p), byPixel: option)
-            }
+            // Picks layers, toggles with ⇧, goes inside on a double-click and starts the drag (D6, D7).
+            app?.layers.stageMouseDown(p, geometry: geometry, option: option, shift: shift, clickCount: clickCount)
         }
     }
 
     func mouseDragged(_ p: CGPoint, geometry: StageGeometry, option: Bool) {
+        if app?.layers.stageMouseDragged(p, geometry: geometry) == true { return }
         guard var d = drag, let item = doc?.itemsByPath[d.path] else { return }
         if !d.moved, hypot(p.x - d.startView.x, p.y - d.startView.y) < 3 { return }
         d.moved = true
@@ -295,6 +291,7 @@ final class SceneEditor {
 
     func mouseUp() {
         panning = false
+        if app?.layers.stageMouseUp() == true { return }
         guard let d = drag else { return }
         drag = nil
         guard d.moved, !d.isZero else { return }
@@ -336,15 +333,18 @@ final class SceneEditor {
         await place(object, at: t)
     }
 
+    /// Places into the selected layer, the selected item's, or the one you're inside (D13).
     @discardableResult
     func place(_ object: String, at tile: Tile) async -> EditResult? {
         cursorTile = tile
-        return await edit("scene.place", ["object": .string(object), "at": tile.json])
+        let into = app?.layers.placeParams ?? [:]
+        return await edit("scene.place", ["object": .string(object), "at": tile.json].merging(into) { a, _ in a })
     }
 
     @discardableResult
     func place(_ object: String, px: (Int, Int)) async -> EditResult? {
-        await edit("scene.place", ["object": .string(object), "px": [JSONValue(px.0), JSONValue(px.1)]])
+        let into = app?.layers.placeParams ?? [:]
+        return await edit("scene.place", ["object": .string(object), "px": [JSONValue(px.0), JSONValue(px.1)]].merging(into) { a, _ in a })
     }
 
     /// A library thumbnail dropped on the stage.
@@ -364,6 +364,8 @@ final class SceneEditor {
     @discardableResult
     func move(dc: Int, dr: Int, dl: Int) async -> EditResult? {
         guard let item = selected else {
+            // Layers, or several things: they move together by tiles (D7).
+            if let layers = app?.layers, !layers.selection.isEmpty { return await layers.move(dc: dc, dr: dr, dl: dl) }
             moveCursor(dc: dc, dr: dr, dl: dl)
             return nil
         }
@@ -372,7 +374,13 @@ final class SceneEditor {
 
     @discardableResult
     func nudge(dx: Int, dy: Int) async -> EditResult? {
-        guard let item = selected else { return nil }
+        guard let item = selected else {
+            if app?.layers.selection.isEmpty == false {
+                app?.notice = "Pixel moves are for one item; layers move by tiles."
+                announce("Pixel moves are for one item; layers move by tiles")
+            }
+            return nil
+        }
         return await edit("scene.move", ["item": .string(item.path), "nudge": [JSONValue(dx), JSONValue(dy)]].merging(timeParam) { a, _ in a })
     }
 
@@ -438,6 +446,7 @@ final class SceneEditor {
             if method != "scene.remove", let path = r.path, app.document === doc {
                 doc.selectedPath = path
                 reveal(path)
+                app.layers.selectionChanged()
             }
             if let s = r.summary { announce(s) }
             app.lastEdit = r.summary
@@ -459,7 +468,11 @@ final class SceneEditor {
         if k.command || k.control { return false }
         switch k.key {
         case .escape:
-            if drag != nil { drag = nil } else if doc?.selectedPath != nil { select(nil) } else if tool != .select { setTool(.select) }
+            // A drag, the menu, the selection, then the layer you're inside, then the tool.
+            let layers = app.layers
+            if drag != nil { drag = nil } else if layers.drag != nil { layers.drag = nil } else if layers.menu != nil { layers.closeMenu() }
+            else if !(doc?.selection.isEmpty ?? true) { layers.select([]) } else if layers.inside != nil { layers.done() }
+            else if tool != .select { setTool(.select) }
             return true
         case .space:
             return true

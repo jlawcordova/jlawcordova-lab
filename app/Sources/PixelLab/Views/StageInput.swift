@@ -59,7 +59,7 @@ final class StageInputView: NSView {
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityLabel("Stage")
-        setAccessibilityHelp("Scenes: V select, A place, H pan. Arrows move the selection by a tile, Option-arrows by a pixel, Shift-up and down by a level. Return places the library object at the cursor. Objects: B pencil, E eraser, G fill, I picker; arrows move the pixel cursor, Return paints at it, Delete erases it, [ and ] change layer, Page Up and Page Down change frame.")
+        setAccessibilityHelp("Scenes: V select, A place, H pan. A click picks a layer, a double-click goes inside it, Shift-click adds to the selection; the Layers list selects from the keyboard. Arrows move the selection by a tile, Option-arrows one item by a pixel, Shift-up and down by a level. Command-G groups, Shift-Command-G ungroups. Return places the library object at the cursor. Objects: B pencil, E eraser, G fill, I picker; arrows move the pixel cursor, Return paints at it, Delete erases it, [ and ] change layer, Page Up and Page Down change frame.")
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
@@ -140,7 +140,13 @@ final class StageInputView: NSView {
             return
         }
         guard isScene, let geometry, let editor else { return }
-        editor.mouseDown(point(event), geometry: geometry, option: event.modifierFlags.contains(.option), clickCount: event.clickCount)
+        // ⌃-click is a right-click: the layer menu.
+        if event.modifierFlags.contains(.control) {
+            rightMouseDown(with: event)
+            return
+        }
+        editor.mouseDown(point(event), geometry: geometry, option: event.modifierFlags.contains(.option), shift: event.modifierFlags.contains(.shift),
+                         clickCount: event.clickCount)
         if editor.panning, let clip = enclosingScrollView?.contentView {
             panStart = (event.locationInWindow, clip.bounds.origin)
             NSCursor.closedHand.set()
@@ -166,6 +172,16 @@ final class StageInputView: NSView {
         }
         editor.mouseDragged(point(event), geometry: geometry, option: event.modifierFlags.contains(.option))
     }
+
+    /// The layer menu (docs/intents/2026-10-scene-layers/spec.md, D9), not
+    /// while placing (as in the prototype).
+    override func rightMouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        guard isScene, let geometry, let editor, editor.effectiveTool == .select, let app = editor.app else { return }
+        app.layers.stageRightClick(point(event), geometry: geometry, windowPoint: event.locationInWindow)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? { nil }
 
     override func mouseUp(with event: NSEvent) {
         panStart = nil

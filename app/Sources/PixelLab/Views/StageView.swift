@@ -6,6 +6,7 @@ import SwiftUI
 struct StageView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { proxy in
@@ -26,8 +27,26 @@ struct StageView: View {
                     .padding(.horizontal, 12)
             }
         }
+        // Where you are in the scene's layers, and Done while inside one (docs/intents/2026-10-scene-layers/spec.md, D6).
+        .overlay(alignment: .topLeading) {
+            if model.document?.ref.kind == .scene, model.mode == .scene, !(model.agent.previewing && model.agent.ghostShown) {
+                BreadcrumbPill().padding(12)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if model.document?.ref.kind == .scene, model.mode == .scene, model.editor.tool == .place, !(model.agent.previewing && model.agent.ghostShown) {
+                PlacePill().padding(12)
+            }
+        }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Stage")
+        .accessibilityLabel(stageLabel)
+    }
+
+    /// "hero-island stage, inside Railway. Use the Layers list to select from the keyboard."
+    private var stageLabel: String {
+        guard let doc = model.document, doc.ref.kind == .scene else { return "Stage" }
+        let inside = model.layers.inside.map { ", inside \(doc.layerTree.name(of: $0))" } ?? ""
+        return "\(doc.ref.name) stage\(inside). Use the Layers list to select from the keyboard."
     }
 
     @ViewBuilder
@@ -63,10 +82,21 @@ struct StageView: View {
                                 .accessibilityHidden(true)
                         }
                     }
+                    // Inside a layer, the rest fades and the layer's own render draws over it (D6).
+                    let focus = render.focusLayer != nil && render.focusLayer == model.layers.inside ? render.focusImage : nil
                     render.image.view(pointsPerPixel: geometry.zoom, displayScale: displayScale)
+                        .opacity(focus == nil ? 1 : 0.22)
                         .offset(x: geometry.artOrigin.x, y: geometry.artOrigin.y)
                         .allowsHitTesting(false)
                         .accessibilityLabel("\(doc.ref.name), \(doc.ref.kind.rawValue) at \(zoom)×")
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: focus == nil)
+                    if let focus {
+                        focus.view(pointsPerPixel: geometry.zoom, displayScale: displayScale)
+                            .offset(x: geometry.artOrigin.x, y: geometry.artOrigin.y)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                            .transition(reduceMotion ? .identity : .opacity)
+                    }
                     if let ghost = model.agent.visibleGhost {
                         ProposalGhostLayer(geometry: geometry, ghost: ghost, current: render,
                                            changes: model.agent.changes(current: render, renderCount: doc.renderCount))
@@ -98,6 +128,83 @@ struct StageView: View {
             ContentUnavailableView("No document", systemImage: "square.stack.3d.up", description: Text("Choose a scene or an object in the sidebar."))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+}
+
+/// The breadcrumb at the stage's top left: the scene, then each layer down
+/// to the one you're inside, and Done while inside (D6).
+struct BreadcrumbPill: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let layers = model.layers
+        let crumbs = layers.crumbs
+        HStack(spacing: 4) {
+            Image(systemName: "square.stack.3d.up")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.inkMuted)
+                .padding(.leading, 4)
+                .accessibilityHidden(true)
+            ForEach(Array(crumbs.enumerated()), id: \.offset) { i, crumb in
+                if i > 0 { Text("›").foregroundStyle(Theme.inkMuted).accessibilityHidden(true) }
+                let current = i == crumbs.count - 1
+                Button { layers.goTo(level: crumb.level) } label: {
+                    Text(crumb.label)
+                        .font(Theme.nameFont(12, weight: current ? .semibold : .regular))
+                        .foregroundStyle(Theme.ink)
+                        .lineLimit(1)
+                        .padding(.horizontal, 6)
+                        .frame(height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(crumb.level == nil ? "The whole scene" : "Inside \(crumb.label)")
+                .accessibilityLabel(crumb.level == nil ? "\(crumb.label), the whole scene" : "Inside \(crumb.label)")
+                .accessibilityAddTraits(current ? .isSelected : [])
+            }
+            if layers.inside != nil {
+                Button("Done") { layers.done() }
+                    .buttonStyle(AccentButtonStyle(height: 24))
+                    .padding(.leading, 4)
+                    .help("Leave this layer (Esc)")
+            }
+        }
+        .padding(.horizontal, 3)
+        .frame(height: 30)
+        .background(Theme.halo, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Where you are")
+    }
+}
+
+/// At the top right while placing: what goes where, and Done (D6).
+struct PlacePill: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let editor = model.editor
+        HStack(spacing: 8) {
+            Group {
+                if let object = editor.placeObject {
+                    Text("Placing ") + Text(object).bold() + Text(" into ") + Text(model.layers.placeTargetName).bold() + Text(": click a tile")
+                } else {
+                    Text("Choose an object in the Library to place into ") + Text(model.layers.placeTargetName).bold()
+                }
+            }
+            .font(.system(size: 12))
+            .foregroundStyle(Theme.ink)
+            .lineLimit(1)
+            .padding(.leading, 6)
+            Button("Done") { editor.setTool(.select) }
+                .controlSize(.small)
+                .help("Back to the Select tool (V)")
+        }
+        .padding(.horizontal, 6)
+        .frame(height: 30)
+        .background(Theme.halo, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+        .accessibilityElement(children: .combine)
     }
 }
 

@@ -60,6 +60,8 @@ struct DocumentWindow: View {
             InspectorView()
                 .inspectorColumnWidth(min: 230, ideal: 264, max: 360)
         }
+        // The layer menu, over the whole window (docs/intents/2026-10-scene-layers/spec.md, D9).
+        .overlay { LayerMenuLayer() }
         .navigationTitle(model.windowTitle)
         .navigationSubtitle(model.document == nil ? "" : (model.document?.isDirty == true ? "Edited" : "Saved"))
         .toolbar { DocumentToolbar() }
@@ -259,14 +261,15 @@ struct NoticeBar: View {
 /// The one accent button (Save): accent fill, dark ink, dimmed when disabled
 /// rather than turning gray, so the toolbar keeps board 03's single accent.
 struct AccentButtonStyle: ButtonStyle {
+    var height: CGFloat = 28
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 13, weight: .semibold))
+            .font(.system(size: height < 28 ? 12 : 13, weight: .semibold))
             .foregroundStyle(Theme.onAccent)
-            .padding(.horizontal, 14)
-            .frame(height: 28)
+            .padding(.horizontal, height < 28 ? 10 : 14)
+            .frame(height: height)
             .background(Theme.accent, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             .opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.45)
             .contentShape(Rectangle())

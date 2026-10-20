@@ -24,6 +24,20 @@ import Foundation
 ///     expect scenes|objects|zoom|badge|theme|ghosttime <value>   expect scenepixel <x>,<y> <#RRGGBB|empty>
 ///     expect stale true|false     (the banner shows)   expect mergealert true|false
 ///
+/// Scene layers (docs/intents/2026-10-scene-layers/spec.md, D14; targets are
+/// `layer:<id>` or an item path):
+///
+///     select layer:<id>|<path>|#<id> …   select add <target>   click <x> <y> [shift]   dblclick <x> <y>
+///     pointer <x> <y>  (the Select tool's hover)   rightclick <x> <y>   rightclick row <target>
+///     menu group|ungroup|inside|hide|lock|close   group   ungroup   (also key cmd+g, key shift+cmd+g)
+///     inside <id>|done|top   crumb <n>   hide|show|lock|unlock|expand|collapse <id>   rename <name…>
+///     movedby <col> <row>   layernudge upleft|upright|downleft|downright   placeinto
+///     layerskey <spec> (up, down, shift+down, right, left, return, esc)   sidebar layers|library
+///     (move, drag and the arrow keys act on the whole selection)
+///     expect selection <targets,…|none>   expect inside|layername|itemlayer|hover <id|none>   expect scenelayers|rows <n>
+///     expect hiddenlayers|lockedlayers <ids,…|none>   expect into <name>   expect crumbs <a›b>   expect movedby <c,r|none>
+///     expect menu <enabled items,…|none>   expect tab layers|library   expect inspector layer|item|multi|none   expect faded true|false
+///
 /// Object mode (pixels are object.render pixels at scale 1: a sprite's map
 /// column and row, a block's render pixel):
 ///
@@ -46,7 +60,7 @@ import Foundation
 ///     agent open|close|size <w>x<h>   proposal select <n>|<id>|none   proposal next|prev|open
 ///     approve [force]   reject   ghost on|off   answer proceed|force|reject|cancel (the next question)
 ///     agentkey up|down|esc|cmd+return|delete (a key into the Agent window)
-///     snapshot agent <file.png>   menus (logs the View and Window menus)
+///     snapshot agent <file.png>   menus (logs the Edit, View and Window menus)
 ///     expect proposals|ghost|ghostchanges|base|activity|question|proposal <value>
 ///
 /// Each action waits until renders, checks and edits settle. The app logs
@@ -192,8 +206,17 @@ final class ScriptRunner {
             return nil
         case "select":
             let what = try arg(words, 1)
-            if what == "none" { editor.select(nil) } else if what.hasPrefix("#") { editor.select(id: String(what.dropFirst())) } else { editor.select(what) }
-            return doc?.selectedPath.map { "selected \($0)" } ?? "nothing selected"
+            if what == "add" {
+                guard let t = LayerTarget(spec: try arg(words, 2)) else { throw Failure("select add layer:<id>|<path>") }
+                if !(doc?.selection.contains(t) ?? true) { model.layers.select((doc?.selection ?? []) + [t]) }
+            } else if what == "none" { editor.select(nil) } else if what.hasPrefix("#") { editor.select(id: String(what.dropFirst())) }
+            else if words.count > 2 || what.hasPrefix("layer:") {
+                let targets = words.dropFirst().compactMap { LayerTarget(spec: $0) }
+                guard targets.count == words.count - 1 else { throw Failure("select layer:<id>|<path> …") }
+                model.layers.select(targets)
+            } else { editor.select(what) }
+            let sel = doc?.selection.map(\.description).joined(separator: ",") ?? ""
+            return sel.isEmpty ? "nothing selected" : "selected \(sel)"
         case "click", "clicktile":
             guard let render = doc?.render else { throw Failure("nothing rendered") }
             var x = 0, y = 0
@@ -208,9 +231,10 @@ final class ScriptRunner {
             }
             // Objects the scene uses are prefetched; make sure the candidates' art is in.
             for item in render.items { _ = await model.thumbnails.art(item.pose ?? item.object) }
-            let path = editor.hitTest(scenePixel: x, y, render: render)
-            editor.select(path)
-            return "pixel \(x),\(y) → \(path ?? "nothing")"
+            // The stage's own picking: the outermost layer, the layer you're in, locks (docs/intents/2026-10-scene-layers/spec.md, D6).
+            model.layers.click(scenePixel: x, y, shift: words.dropFirst(3).contains("shift"), clickCount: 1)
+            let sel = doc?.selection.map(\.description).joined(separator: ",") ?? ""
+            return "pixel \(x),\(y) → \(sel.isEmpty ? "nothing" : sel)"
         case "hover":
             let t = Tile(col: try int(words, 1), row: try int(words, 2), level: try int(words, 3))
             if editor.tool != .place { editor.setTool(.place) }
@@ -226,6 +250,17 @@ final class ScriptRunner {
             }
             await editor.placeAtCursor()
             return doc?.selectedPath.map { "selected \($0)" }
+        case "drag" where doc?.selectedItem == nil && !(doc?.selection.isEmpty ?? true):
+            // Layers or several things: by whole tiles (D7).
+            guard let doc else { throw Failure("no doc") }
+            var d = SelectionDrag(targets: doc.selection, paths: doc.layerTree.paths(of: doc.selection), startView: .zero, startScene: .zero)
+            d.moved = true
+            d.dc = try int(words, 1)
+            d.dr = try int(words, 2)
+            model.layers.drag = d
+            if words.count > 3, words[3] == "hold" { return "holding the drag of \(doc.selection.count) target\(doc.selection.count == 1 ? "" : "s"), \(d.paths.count) items" }
+            editor.mouseUp()
+            return nil
         case "drag", "dragpx":
             guard let item = doc?.selectedItem else { throw Failure("nothing selected") }
             var d = ItemDrag(path: item.path, startView: .zero, startScene: .zero, byPixel: words[0] == "dragpx")
@@ -240,6 +275,7 @@ final class ScriptRunner {
             return nil
         case "cancel":
             editor.drag = nil
+            model.layers.drag = nil
             return nil
         case "key":
             guard let k = KeyInput(spec: try arg(words, 1)) else { throw Failure("unknown key \(words[1])") }
@@ -247,6 +283,7 @@ final class ScriptRunner {
                 // Menu shortcuts the script can name.
                 switch k.key {
                 case .char("d"): await editor.duplicate()
+                case .char("g"): if k.shift { await model.layers.ungroup() } else { await model.layers.group() }
                 case .char("z"): if k.shift { await model.redo() } else { await model.undo() }
                 case .char("s"): await model.save()
                 case .char("b"): await model.publish()
@@ -353,7 +390,7 @@ final class ScriptRunner {
         case "sidebar":
             switch try arg(words, 1) {
             case "palette": model.objectEditor.sidebarTab = .palette
-            case "items": editor.sidebarTab = .items
+            case "layers", "items": editor.sidebarTab = .layers
             default:
                 editor.sidebarTab = .library
                 model.objectEditor.sidebarTab = .library
@@ -431,6 +468,9 @@ final class ScriptRunner {
             return out.path
         case "agent", "proposal", "approve", "reject", "ghost", "answer", "menus", "agentkey":
             return try await performAgent(words, model: model)
+        case "dblclick", "pointer", "rightclick", "menu", "group", "ungroup", "inside", "crumb", "hide", "show", "lock", "unlock",
+             "expand", "collapse", "rename", "movedby", "layernudge", "placeinto", "layerskey":
+            return try await performLayers(words, model: model)
         case "expect":
             return try expect(words, model: model)
         default:
@@ -569,6 +609,182 @@ final class ScriptRunner {
         }
     }
 
+    /// Scene layers' actions (docs/intents/2026-10-scene-layers/spec.md, D14).
+    private func performLayers(_ words: [String], model: AppModel) async throws -> String? {
+        let layers = model.layers
+        let doc = model.document
+        func layer(_ i: Int) throws -> String {
+            let ref = try arg(words, i)
+            guard let tree = doc?.layerTree else { throw Failure("no scene open") }
+            if tree.byID[ref] != nil { return ref }
+            if let l = tree.layers.first(where: { $0.name == ref }) { return l.id }
+            throw Failure("no layer \(ref) (\(tree.layers.map(\.id).joined(separator: ", ")))")
+        }
+        func selection() -> String {
+            let s = doc?.selection.map(\.description).joined(separator: ",") ?? ""
+            return s.isEmpty ? "nothing selected" : "selected \(s)"
+        }
+        func sceneEvent(_ type: NSEvent.EventType, _ x: Int, _ y: Int) throws -> (StageInputView, NSEvent, CGPoint) {
+            guard let view = model.editor.stageView as? StageInputView, let geometry = view.geometry, let window = view.window else { throw Failure("no stage") }
+            let viewPoint = geometry.viewPoint(fromScene: CGPoint(x: Double(x) + 0.5, y: Double(y) + 0.5))
+            guard let event = NSEvent.mouseEvent(with: type, location: view.convert(viewPoint, to: nil), modifierFlags: [],
+                                                 timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                                                 eventNumber: 0, clickCount: 1, pressure: 1) else { throw Failure("no event") }
+            return (view, event, viewPoint)
+        }
+        switch words[0] {
+        case "dblclick":
+            let (x, y) = (try int(words, 1), try int(words, 2))
+            if let render = doc?.render { for item in render.items { _ = await model.thumbnails.art(item.pose ?? item.object) } }
+            layers.click(scenePixel: x, y, shift: false, clickCount: 1)
+            layers.click(scenePixel: x, y, shift: false, clickCount: 2)
+            return "inside \(layers.inside ?? "none"), \(selection())"
+        case "pointer":
+            guard let view = model.editor.stageView as? StageInputView, let geometry = view.geometry else { throw Failure("no stage") }
+            if let render = doc?.render { for item in render.items { _ = await model.thumbnails.art(item.pose ?? item.object) } }
+            model.editor.pointerMoved(geometry.viewPoint(fromScene: CGPoint(x: Double(try int(words, 1)) + 0.5, y: Double(try int(words, 2)) + 0.5)),
+                                      geometry: geometry, option: false)
+            return "hover \(layers.hover?.description ?? "none")"
+        case "rightclick":
+            layers.closeMenu()
+            if try arg(words, 1) == "row" {
+                // A real right-click, posted to the app's queue so it's dispatched as the
+                // pointer's would be, through the window's hit-testing onto the row's catcher.
+                guard let t = LayerTarget(spec: try arg(words, 2)) else { throw Failure("rightclick row layer:<id>|<path>") }
+                layers.reveal(t)
+                model.editor.sidebarTab = .layers
+                layers.scrollRequest = t
+                try? await Task.sleep(for: .milliseconds(300))
+                var frame = layers.rowFrames[t.description]
+                let started = Date()
+                while frame == nil, Date().timeIntervalSince(started) < 2 {
+                    try? await Task.sleep(for: .milliseconds(50))
+                    frame = layers.rowFrames[t.description]
+                }
+                guard let frame, let window = Snapshotter.mainWindow(), let content = window.contentView else { throw Failure("row \(t) isn't on screen") }
+                let at = CGPoint(x: frame.minX + 60, y: content.bounds.height - frame.midY)
+                for type in [NSEvent.EventType.rightMouseDown, .rightMouseUp] {
+                    guard let event = NSEvent.mouseEvent(with: type, location: at, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                         windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) else { throw Failure("no event") }
+                    NSApp.postEvent(event, atStart: false)
+                }
+                let posted = Date()
+                while layers.menu == nil, Date().timeIntervalSince(posted) < 2 { try? await Task.sleep(for: .milliseconds(50)) }
+                if layers.menu == nil {
+                    let hit = content.superview?.hitTest(at).map { "\(type(of: $0)) \($0.identifier?.rawValue ?? "")" } ?? "nothing"
+                    throw Failure("no menu opened: row \(t) at \(frame), clicked \(at) in a \(content.bounds.size) window, which hits \(hit)")
+                }
+            } else {
+                let (x, y) = (try int(words, 1), try int(words, 2))
+                if let render = doc?.render { for item in render.items { _ = await model.thumbnails.art(item.pose ?? item.object) } }
+                let (view, event, _) = try sceneEvent(.rightMouseDown, x, y)
+                view.rightMouseDown(with: event)
+            }
+            try? await Task.sleep(for: .milliseconds(100))
+            guard layers.menu != nil else { throw Failure("no menu opened (\(selection()))") }
+            return "menu: \(layers.menuItems.filter(\.enabled).map(\.title).joined(separator: ", ")); \(selection())"
+        case "menu":
+            let which = try arg(words, 1)
+            if which == "close" { layers.closeMenu(); return nil }
+            guard layers.menu != nil else { throw Failure("no menu open (rightclick first)") }
+            guard let action = LayerMenuAction(rawValue: which) else { throw Failure("menu group|ungroup|inside|hide|lock|close") }
+            guard layers.menuItems.first(where: { $0.action == action })?.enabled == true else { throw Failure("\(which) is off in the menu") }
+            await layers.perform(action)
+            return model.lastEdit.map { "\($0); \(selection())" } ?? selection()
+        case "group":
+            guard await layers.group() != nil else { throw Failure(model.notice ?? "nothing grouped") }
+            return model.lastEdit
+        case "ungroup":
+            guard await layers.ungroup() != nil else { throw Failure(model.notice ?? "nothing ungrouped") }
+            return "\(model.lastEdit ?? ""); \(selection())"
+        case "inside":
+            switch try arg(words, 1) {
+            case "done": layers.done()
+            case "top": layers.goTo(level: nil)
+            default: layers.goInside(try layer(1))
+            }
+            return "inside \(layers.inside ?? "none")"
+        case "crumb":
+            let n = try int(words, 1)
+            guard layers.crumbs.indices.contains(n) else { throw Failure("no crumb \(n) (\(layers.crumbs.count))") }
+            layers.goTo(level: layers.crumbs[n].level)
+            return "inside \(layers.inside ?? "none")"
+        case "hide", "show":
+            let id = try layer(1)
+            if layers.hidden.contains(id) != (words[0] == "hide") { layers.toggleHidden(id) }
+            return nil
+        case "lock", "unlock":
+            let id = try layer(1)
+            if layers.locked.contains(id) != (words[0] == "lock") { layers.toggleLocked(id) }
+            return nil
+        case "expand", "collapse":
+            let id = try layer(1)
+            if layers.expanded.contains(id) != (words[0] == "expand") { layers.toggleExpanded(id) }
+            return nil
+        case "rename":
+            guard doc?.selectedLayer != nil else { throw Failure("select a layer first") }
+            layers.nameDraft = words.dropFirst().joined(separator: " ")
+            guard let r = await layers.rename(layers.nameDraft) else { throw Failure(model.notice ?? "not renamed") }
+            return r.summary
+        case "movedby":
+            guard doc?.selectedLayer != nil else { throw Failure("select a layer first") }
+            let r = await layers.setMovedBy(col: try int(words, 1), row: try int(words, 2))
+            return r?.summary ?? "already there"
+        case "layernudge":
+            let by: (Int, Int) = switch try arg(words, 1) {
+            case "upleft": (-1, 0)
+            case "upright": (0, -1)
+            case "downleft": (0, 1)
+            case "downright": (1, 0)
+            default: throw Failure("layernudge upleft|upright|downleft|downright")
+            }
+            guard let r = await layers.move(dc: by.0, dr: by.1, dl: 0) else { throw Failure(model.notice ?? "nothing moved") }
+            return r.summary
+        case "placeinto":
+            guard doc?.selectedLayer != nil else { throw Failure("select a layer first") }
+            layers.placeInto()
+            return "placing into \(layers.placeTargetName)"
+        case "layerskey":
+            guard let k = KeyInput(spec: try arg(words, 1)) else { throw Failure("unknown key \(words[1])") }
+            let query = model.searchText.trimmingCharacters(in: .whitespaces).lowercased()
+            guard layers.treeKey(k, query: query) else { throw Failure("the Layers tree doesn't use \(words[1])") }
+            return "\(selection()), inside \(layers.inside ?? "none")"
+        default:
+            throw Failure("unknown action \(words[0])")
+        }
+    }
+
+    /// The `expect`s for scene layers; nil for anything else.
+    private func expectLayers(_ what: String, model: AppModel) -> String? {
+        let layers = model.layers
+        let doc = model.document
+        let tree = doc?.layerTree ?? .empty
+        func list(_ ids: [String]) -> String { ids.isEmpty ? "none" : ids.joined(separator: ",") }
+        switch what {
+        case "selection": return list(doc?.selection.map(\.description) ?? [])
+        case "inside": return layers.inside ?? "none"
+        case "scenelayers": return String(tree.layers.count)
+        case "layername": return doc?.selectedLayer.map { tree.name(of: $0) } ?? "none"
+        case "itemlayer": return doc?.selectedPath.flatMap { tree.layerOfItem[$0] } ?? "none"
+        case "hiddenlayers": return list(layers.hidden.sorted())
+        case "lockedlayers": return list(layers.locked.sorted())
+        case "into": return layers.placeTargetName
+        case "crumbs": return layers.crumbs.map(\.label).joined(separator: "›")
+        case "rows": return String(layers.visibleRows(query: model.searchText.trimmingCharacters(in: .whitespaces).lowercased()).count)
+        case "movedby": return layers.movedBy.map { "\($0.col),\($0.row)" } ?? "none"
+        case "menu": return layers.menu == nil ? "none" : list(layers.menuItems.filter(\.enabled).map(\.title))
+        case "tab": return model.editor.sidebarTab.rawValue
+        case "inspector":
+            guard let doc else { return "none" }
+            if doc.selectedLayer != nil { return "layer" }
+            if doc.selection.count > 1 { return "multi" }
+            return doc.selectedItem != nil ? "item" : "none"
+        case "faded": return String(doc?.render.map { $0.focusImage != nil && $0.focusLayer == layers.inside && layers.inside != nil } ?? false)
+        case "hover": return layers.hover?.description ?? "none"
+        default: return nil
+        }
+    }
+
     /// The Agent window's actions.
     private func performAgent(_ words: [String], model: AppModel) async throws -> String? {
         let agent = model.agent
@@ -648,7 +864,7 @@ final class ScriptRunner {
             guard used else { throw Failure("the Agent window didn't use \(spec)") }
             return result() ?? agent.selected.map { "selected \($0.doc)" } ?? "none selected"
         case "menus":
-            for title in ["View", "Window"] {
+            for title in ["Edit", "View", "Window"] {
                 guard let menu = NSApp.mainMenu?.items.first(where: { $0.title == title })?.submenu else { continue }
                 let items = menu.items.filter { !$0.isSeparatorItem }.map { item in
                     let mods = item.keyEquivalentModifierMask
@@ -722,6 +938,7 @@ final class ScriptRunner {
         case "publishdir": got = model.build?.result?.publishDir ?? model.sessionInfo?.document?.publishDir ?? "none"
         case "document": got = model.sessionInfo?.document?.name ?? "none"
         case "documentkind": got = model.sessionInfo?.document?.kind ?? "none"
+        case _ where expectLayers(what, model: model) != nil: got = expectLayers(what, model: model) ?? ""
         case "scenepixel":
             // A pixel of the stage's scene render, in scene pixels: "#RRGGBB" or empty.
             let parts = words.dropFirst(2)
@@ -730,7 +947,7 @@ final class ScriptRunner {
             let q = PixelPoint(p.x - Int(render.viewBox.minX), p.y - Int(render.viewBox.minY))
             got = colors?.hex(q) ?? "empty"
             let wantColor = parts.dropFirst().joined(separator: " ").uppercased()
-            guard got == wantColor else { throw Failure("expected scenepixel \(p) \(wantColor), got \(got)") }
+            guard got.uppercased() == wantColor else { throw Failure("expected scenepixel \(p) \(wantColor), got \(got)") }
             return "scene pixel \(p) = \(got)"
         case "pixel":
             let parts = words.dropFirst(2)
