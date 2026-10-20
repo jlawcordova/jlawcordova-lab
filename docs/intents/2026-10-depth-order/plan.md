@@ -9,7 +9,7 @@ These are fixed here so no slice has to choose.
 
 - **Where the order lives.** `cli/lib/engine/depth.mjs` is pure geometry and ordering: boxes, `behind(a, b)`, the banded sort over nodes, and the order at a time. It imports only `iso.mjs`. `engine.mjs` builds the nodes (it can resolve objects and knows their drawn bounds) and calls it, so there's no import cycle. Engine helpers the rest of the CLI uses: `depthOrder(sources, items, origin)` (the sorted order of one list, as indices), `sceneInOrder(sources, scene)` (the scene with every list sorted, a copy), `isInDepthOrder(sources, scene)`, and later (slice 2) `sceneAt(sources, name, time)` and `motionCopies(sources, name)`.
 - **Exact numbers.** Every box coordinate and key is a multiple of 1/32 of a tile, so doubles hold them exactly; no rounding, no epsilon.
-- **The sort.** Greedy topological sort: repeatedly take, of the items whose "behind" predecessors are all placed, the one with the smallest key (c + r + l of the box centre, then list index). With none available (a cycle), take the smallest key of all remaining items. Because availability depends only on the set already placed, sorting a sorted list returns it unchanged (R2); a test proves it on random scenes.
+- **The sort.** Greedy topological sort: repeatedly take, of the items whose "behind" predecessors are all placed, the one that comes first in the list (changed during slice 1 from "the smallest key, then list index": see As built). With none available (a cycle), take the smallest key (c + r + l of the box centre) of all remaining items. Because availability depends only on the set already placed, sorting a sorted list returns it unchanged (R2); a test proves it on random scenes.
 - **Drawn bounds.** An object's drawn bounds are the union of its pixels over every layer and every frame (blocks: their faces and sides), from `renderObject` and `composite`, cached per object in a `WeakMap` keyed by the sources. A tracked item's bounds also cover its poses.
 - **The rest box.** A tracked item rests where the SVG draws it: its placement plus its first key's move (as `placeItems` does today).
 - **Variant runs.** A run's band is its first member's mark; marks on the run's other members don't move it.
@@ -189,3 +189,7 @@ Five slices, not one: slice 1 is the foundation every other part calls; slices 2
 - `npm run docs:site` builds with no broken links.
 - Snapshots in dark and light of the Depth control, Level on a pixel item, the wrapper line's depth menu, FOOTPRINT, the Checks warning with Sort, and the harbor with the pine behind the house, looked at, in `docs/screenshots/` and PR #21.
 - `verify-change`'s comment on PR #21, with its blocking findings fixed and re-checked.
+
+## As built
+
+- **Tie-break (slice 1).** Among the items free to go next, the sort takes the one first in the list, not the one with the smallest depth key; the key only breaks cycles. Breaking ties by the key reordered items that never overlap, which split the compiler's colour runs: on a temp copy of the site's document, preview-only scenes grew (`closeup-water` 94 → 120 KB, `closeup-front-trees` 89 → 108 KB, both over budget). By list order they stay at the old engine's sizes and within budget, and existing art changes only where an overlap forces it. Spec R2 and D2 are updated to match.
