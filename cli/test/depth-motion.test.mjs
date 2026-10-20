@@ -8,8 +8,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { behind, blockBox, keyOf, movingOrder, overlaps, placesIn, placeWindows, sortNodes, spriteBox, spriteHeight } from '../lib/engine/depth.mjs';
-import { loadSources, motionCopies } from '../lib/engine/engine.mjs';
-import { isMoving, moveAtPercent, moveRuns, pctOf } from '../lib/engine/motion.mjs';
+import { loadSources, motionCopies, renderScene, validate } from '../lib/engine/engine.mjs';
+import { isMoving, loopFrame, moveAtPercent, moveRuns, motionCss, pctOf } from '../lib/engine/motion.mjs';
+import { toRectSvg } from '../lib/engine/svg.mjs';
 
 /** Deterministic pseudo-random numbers (mulberry32), so a failure can be replayed from its seed. */
 function rng(seed) {
@@ -81,6 +82,126 @@ function randomList(r, n) {
   return { listed, boxes: randomBoxes(r, n) };
 }
 const randomBoxes = (r, n) => Array.from({ length: n }, () => blockBox(Math.floor(r() * 6), Math.floor(r() * 6), Math.floor(r() * 3) - 1, [1, 1, Math.floor(r() * 3)]));
+
+
+// ------------------------------------------------------- a small CSS evaluator
+
+/**
+ * Reads the CSS a scene's motion writes: its @keyframes (stops with their
+ * declarations) and its class rules. Only the shapes motion.mjs writes.
+ */
+function parseCss(css) {
+  const keyframes = new Map();
+  const rules = new Map();
+  let reduced = null;
+  const decls = (text) => Object.fromEntries(text.split(';').filter(Boolean).map((d) => [d.slice(0, d.indexOf(':')), d.slice(d.indexOf(':') + 1)]));
+  let at = 0;
+  const block = () => {
+    const open = css.indexOf('{', at);
+    let depth = 1;
+    let end = open + 1;
+    while (depth) depth += css[end++] === '{' ? 1 : css[end - 1] === '}' ? -1 : 0;
+    const out = { head: css.slice(at, open), body: css.slice(open + 1, end - 1) };
+    at = end;
+    return out;
+  };
+  while (at < css.length) {
+    const { head, body } = block();
+    if (head.startsWith('@keyframes ')) {
+      const stops = [];
+      for (const m of body.matchAll(/([\d.]+)%\{([^}]*)\}/g)) stops.push({ at: Number(m[1]), decl: decls(m[2]) });
+      keyframes.set(head.slice('@keyframes '.length), stops);
+    } else if (head.startsWith('@media')) reduced = body;
+    else rules.set(head.slice(1), decls(body));
+  }
+  return { keyframes, rules, reduced };
+}
+
+/** The numbers in a `translate(x,y)` value, or null. */
+const translation = (value) => {
+  const m = /^translate\(([-\d.]+)(?:px)?,([-\d.]+)(?:px)?\)$/.exec(value);
+  return m && [Number(m[1]), Number(m[2])];
+};
+
+/** A property's value in a keyframe animation at `p` percent of the loop, with step-end and steps(n,end) timing. */
+function sampleKeyframes(stops, timing, p) {
+  let i = -1;
+  stops.forEach((stop, k) => {
+    if (stop.at <= p) i = k;
+  });
+  if (i < 0) return {};
+  const from = stops[i];
+  const to = stops[i + 1];
+  const fn = from.decl['animation-timing-function'] ?? timing;
+  const out = {};
+  for (const [prop, value] of Object.entries(from.decl)) {
+    if (prop === 'animation-timing-function') continue;
+    const steps = /^steps\((\d+),end\)$/.exec(fn);
+    if (!steps || !to) out[prop] = value;
+    else {
+      const k = Math.floor((Number(steps[1]) * (p - from.at)) / (to.at - from.at));
+      const [a, b] = [translation(value), translation(to.decl[prop])];
+      out[prop] = `translate(${a[0] + ((b[0] - a[0]) * k) / Number(steps[1])},${a[1] + ((b[1] - a[1]) * k) / Number(steps[1])})`;
+    }
+  }
+  return out;
+}
+
+/** A class's opacity and translation at `p` percent of the loop; with `animate: false`, with animations off (reduced motion). */
+function styleOf(css, cls, p, animate) {
+  const rule = css.rules.get(cls);
+  if (!rule) return { opacity: 1, translate: [0, 0] };
+  const style = { opacity: 'opacity' in rule ? Number(rule.opacity) : 1, translate: [0, 0] };
+  if (!animate || !rule.animation) return style;
+  for (const part of rule.animation.split(/,(?![^(]*\))/)) {
+    const [name, , timing] = part.split(' ');
+    const got = sampleKeyframes(css.keyframes.get(name), timing, p);
+    if ('opacity' in got) style.opacity = Number(got.opacity);
+    if ('transform' in got) style.translate = translation(got.transform);
+  }
+  return style;
+}
+
+/**
+ * The pixels the published tree shows at `p` percent of a loop of `duration`
+ * ms, reading only its CSS: mv- groups take the opacity and translation the
+ * rules and keyframes give, frame loops show the frame of that time.
+ */
+function paintCss(scene, p, duration, animate = true) {
+  const css = parseCss(scene.style ?? '');
+  const time = animate ? (p / 100) * duration : 0;
+  const out = new Map();
+  const walk = (group, dx, dy) => {
+    for (const child of group.children) {
+      if ('pixels' in child) {
+        for (const [key, color] of child.pixels) {
+          const [x, y] = key.split(',').map(Number);
+          out.set(`${x + dx},${y + dy}`, color);
+        }
+        continue;
+      }
+      const cls = child.attrs.find(([k]) => k === 'class')?.[1] ?? '';
+      if (child.frame !== undefined && child.frame !== loopFrame(cls.split(' ')[0], child.frames ?? 1, time)) continue;
+      let [ox, oy] = [dx, dy];
+      if (cls.startsWith('mv-') && !cls.includes(' ')) {
+        const style = styleOf(css, cls, p, animate);
+        if (style.opacity === 0) continue;
+        [ox, oy] = [dx + style.translate[0], dy + style.translate[1]];
+      }
+      walk(child, ox, oy);
+    }
+  };
+  walk(scene.root, 0, 0);
+  return out;
+}
+
+/** The classes of `mv-` groups in a tree, in tree order. */
+const mvClasses = (group) =>
+  group.children.flatMap((child) => {
+    if ('pixels' in child) return [];
+    const cls = child.attrs.find(([k]) => k === 'class')?.[1] ?? '';
+    return [...(cls.startsWith('mv-') ? [cls] : []), ...mvClasses(child)];
+  });
 
 describe('the order while moving: still chain, places, windows (R10, D6)', () => {
   const unit = (c, r, l) => blockBox(c, r, l, [1, 1, 1]);
@@ -262,5 +383,160 @@ describe('the copies an item draws (R10, D6)', () => {
     const items = [{ object: 'house', at: { tile: [2, 2, 1] } }, { object: 'walker', id: 'w', at: { px: [0, 0] } }];
     const tracks = [track('w', { t: 0 }, { t: 5000, move: [0, 64] })];
     assert.deepEqual(motionCopies(src({ s: scene(items, tracks) }), 's'), motionCopies(src({ s: scene([...items].reverse(), tracks) }), 's'));
+  });
+});
+
+describe('the SVG draws a copy for each place (R10, D6)', () => {
+  const walkerScene = () => src({ s: scene([{ object: 'house', at: { tile: [2, 2, 1] } }, { object: 'walker', id: 'w', at: { px: [0, 0] } }], [track('w', { t: 0 }, { t: 5000, move: [0, 64] })]) });
+  const svg = (sources, name = 's') => toRectSvg(renderScene(sources, name), (color) => sources.colors.get(color).hex);
+
+  it('R10: each copy is a wrapper holding the whole moving group, in its place in the list, and only the copy holding time 0 shows in the base rule', () => {
+    const sources = walkerScene();
+    const out = renderScene(sources, 's');
+    // The walker is behind the house for part of the loop (its copy z1 sits before the house) and in front of it the rest.
+    assert.deepEqual(mvClasses(out.root), ['mv-w-z1', 'mv-w', 'mv-w-z0', 'mv-w']);
+    assert.match(out.style, /\.mv-w-z0\{animation:mv-w-z0 10000ms step-end infinite\}/);
+    assert.match(out.style, /\.mv-w-z1\{opacity:0;animation:mv-w-z1 10000ms step-end infinite\}/);
+    assert.match(out.style, /@keyframes mv-w-z0\{0%\{opacity:1\}7\.0313%\{opacity:0\}27\.3438%\{opacity:1\}73\.4375%\{opacity:0\}93\.75%\{opacity:1\}\}/);
+    assert.match(out.style, /@keyframes mv-w-z1\{0%\{opacity:0\}7\.0313%\{opacity:1\}27\.3438%\{opacity:0\}73\.4375%\{opacity:1\}93\.75%\{opacity:0\}\}/);
+    // Each copy holds the item's own motion group, whose rules are the item's as before.
+    assert.match(out.style, /@keyframes mv-w\{0%\{transform:translate\(0,0\)/);
+    const mixed = svg(sources);
+    assert.equal(mixed.match(/<g class="mv-w">/g).length, 2);
+  });
+
+  it('R10: exactly one copy shows at every moment of the loop, and the one holding time 0 shows at rest', () => {
+    const sources = walkerScene();
+    const out = renderScene(sources, 's');
+    const css = parseCss(out.style);
+    const copies = ['mv-w-z0', 'mv-w-z1'];
+    for (let p = 0; p < 100; p += 0.0625) {
+      const shown = copies.filter((c) => styleOf(css, c, p, true).opacity === 1);
+      assert.equal(shown.length, 1, `at ${p}%: ${shown}`);
+    }
+    for (const boundary of [7.0313, 27.3438, 73.4375, 93.75]) {
+      const before = copies.filter((c) => styleOf(css, c, boundary - 0.0001, true).opacity === 1);
+      const at = copies.filter((c) => styleOf(css, c, boundary, true).opacity === 1);
+      assert.notDeepEqual(before, at, `a copy switches at ${boundary}%`);
+      assert.equal(at.length, 1);
+    }
+    assert.deepEqual(copies.filter((c) => styleOf(css, c, 0, false).opacity === 1), ['mv-w-z0'], 'reduced motion shows the copy of time 0 only');
+    assert.match(out.style, /@media \(prefers-reduced-motion:reduce\)\{\[class\^="mv-"\],\[class\*=" mv-"\]\{animation:none\}\}$/, 'the reduced-motion rule covers the copies');
+    assert.ok(copies.every((c) => c.startsWith('mv-')));
+  });
+
+  it('R10: the CSS steps a track exactly as moveRuns says, wherever it is asked', () => {
+    // Keys on whole percentages so the steps fall on exact floating-point values.
+    const tracks = [
+      track('w', { t: 0 }, { t: 2500, move: [0, 8] }, { t: 5000, move: [8, 12] }, { t: 7500, move: [2, 1] }),
+      track('x', { t: 0 }, { t: 5000, move: [-4, 4], show: false }, { t: 7500, show: true }),
+    ];
+    const sources = src({ s: scene([{ object: 'walker', id: 'w', at: { px: [0, 0] } }, { object: 'walker', id: 'x', at: { px: [30, 0] } }], tracks) });
+    const out = renderScene(sources, 's');
+    const css = parseCss(out.style);
+    for (const t of tracks) {
+      const runs = moveRuns(t, 'walker', 10000);
+      const rest = runs[0].move;
+      const cuts = [...runs.map((r) => r.at), 100];
+      for (let i = 0; i < runs.length; i++) {
+        for (const p of [cuts[i], (cuts[i] + cuts[i + 1]) / 2, cuts[i + 1] - 0.001]) {
+          const got = styleOf(css, `mv-${t.item}`, p, true).translate;
+          assert.deepEqual(got, [runs[i].move[0] - rest[0], runs[i].move[1] - rest[1]], `${t.item} at ${p}%`);
+        }
+      }
+    }
+  });
+
+  it('R10: an item whose place never changes is drawn once, byte for byte as the list-order engine draws it', () => {
+    const items = [{ object: 'house', at: { tile: [6, 0, 0] } }, { object: 'walker', id: 'w', at: { px: [-60, 0] } }];
+    const sources = src({ s: scene(items, [track('w', { t: 0 }, { t: 5000, move: [0, 40] }, { t: 7000, move: [0, 40], pose: 'walker' })]) });
+    assert.deepEqual(motionCopies(sources, 's'), []);
+    const depth = renderScene(sources, 's');
+    const list = renderScene(sources, 's', { order: 'list' });
+    assert.equal(toRectSvg(depth, (c) => sources.colors.get(c).hex), toRectSvg(list, (c) => sources.colors.get(c).hex));
+    assert.equal(depth.style, motionCss(sources.scenes.get('s').motion, new Map([['w', items[1]]])));
+    assert.ok(!/-z\d/.test(depth.style));
+  });
+
+  it('R10: order list draws no copies: the file\'s order, as engines before the depth order drew it', () => {
+    const sources = walkerScene();
+    const list = renderScene(sources, 's', { order: 'list' });
+    assert.deepEqual(mvClasses(list.root), ['mv-w']);
+    assert.ok(!/-z\d/.test(list.style));
+  });
+
+  it('R10: a copy holds everything the item draws as before: its class wrapper, its poses and its show rule', () => {
+    const objects = { ...OBJECTS, 'walker-b': sprite(['.gg.', 'gggg', 'gggg', 'ii..'], { anchor: [2, 4] }) };
+    const items = [{ object: 'house', at: { tile: [2, 2, 1] } }, { object: 'walker', id: 'w', class: 'cargo', at: { px: [0, 0] } }];
+    const sources = src({ s: scene(items, [track('w', { t: 0 }, { t: 2500, pose: 'walker-b' }, { t: 5000, move: [0, 64], show: false })]) }, objects);
+    const out = renderScene(sources, 's');
+    assert.deepEqual(mvClasses(out.root), ['mv-w-z1', 'mv-w', 'mv-w-0', 'mv-w-1', 'mv-w-z0', 'mv-w', 'mv-w-0', 'mv-w-1']);
+    const copy = out.root.children.find((c) => 'attrs' in c && c.attrs[0][1] === 'mv-w-z0');
+    assert.equal(copy.children.length, 1, 'one moving group in the copy');
+    assert.equal(copy.children[0].children[0].children[0].attrs[0][1], 'cargo', 'the item class wraps its pixels in each pose');
+    for (const rule of ['@keyframes mv-w-s', '@keyframes mv-w-0', '@keyframes mv-w-1', '.mv-w-1{opacity:0;']) assert.ok(out.style.includes(rule), rule);
+  });
+
+  it('R10: a group member\'s copies are inside its group, and the group draws where it rests', () => {
+    const sources = src({
+      s: scene(
+        [
+          { object: 'house', at: { tile: [4, 4, 1] } },
+          { group: { class: 'enter' }, items: [{ object: 'house', at: { tile: [2, 2, 1] } }, { object: 'walker', id: 'w', at: { px: [0, 0] } }] },
+        ],
+        [track('w', { t: 0 }, { t: 5000, move: [0, 64] })],
+      ),
+    });
+    const out = renderScene(sources, 's');
+    const group = out.root.children.find((c) => 'attrs' in c && c.attrs.some(([k, v]) => k === 'class' && v === 'enter'));
+    assert.ok(group, 'the group is a <g> of its own');
+    assert.deepEqual(mvClasses(group), ['mv-w-z1', 'mv-w', 'mv-w-z0', 'mv-w']);
+    assert.deepEqual(mvClasses(out.root), mvClasses(group), 'no copy outside the group');
+    assert.equal(out.root.children.length, 2, 'the outside house and the group');
+  });
+
+  it('R10: windows are written to 4 decimals, and stops that round to one point collapse into the later', () => {
+    const motion = { duration: 10000, tracks: [{ item: 'w', keys: [{ t: 0 }, { t: 5000, move: [0, 4] }] }] };
+    const ids = new Map([['w', { object: 'walker' }]]);
+    const at = (windows) => motionCss(motion, ids, new Map([['w', windows.map((w) => ({ windows: w }))]])).match(/@keyframes mv-w-z\d\{(?:[^{}]*\{[^{}]*\})*\}/g);
+    assert.deepEqual(at([[[0, 25], [75, 100]], [[25, 75]]]).map((k) => k.replace(/^@keyframes /, '')), ['mv-w-z0{0%{opacity:1}25%{opacity:0}75%{opacity:1}}', 'mv-w-z1{0%{opacity:0}25%{opacity:1}75%{opacity:0}}']);
+    assert.deepEqual(at([[[0, 25.000012], [25.000012, 100]], [[25.00004, 25.00004]]]).map((k) => k.replace(/^@keyframes /, '')), ['mv-w-z0{0%{opacity:1}}', 'mv-w-z1{0%{opacity:0}}'], 'a window shorter than 0.0001% is never shown');
+    assert.deepEqual(at([[[0, 12.34567]], [[12.34567, 100]]]).map((k) => k.replace(/^@keyframes /, '')), ['mv-w-z0{0%{opacity:1}12.3457%{opacity:0}}', 'mv-w-z1{0%{opacity:0}12.3457%{opacity:1}}']);
+  });
+
+  it('R10: an id that looks like another track\'s copy is a problem only once that copy exists', () => {
+    const items = (extra) => [{ object: 'house', at: { tile: [2, 2, 1] } }, { object: 'walker', id: 'w', at: { px: [0, 0] } }, { object: 'walker', id: 'w-z1', at: { px: [40, 0] } }, ...extra];
+    const tracks = [track('w', { t: 0 }, { t: 5000, move: [0, 64] }), track('w-z1', { t: 0 }, { t: 5000, show: false })];
+    const problems = validate(src({ s: scene(items([]), tracks) }));
+    assert.equal(problems.filter((p) => /w-z1/.test(p) && /copy 1 of 'w'/.test(p)).length, 1, problems.join('\n'));
+    // With the walker nowhere near the house there are no copies, so no clash.
+    const apart = scene([{ object: 'house', at: { tile: [6, 0, 0] } }, { object: 'walker', id: 'w', at: { px: [-60, 0] } }, { object: 'walker', id: 'w-z1', at: { px: [40, 0] } }], [track('w', { t: 0 }, { t: 5000, move: [0, 40] }), track('w-z1', { t: 0 }, { t: 5000, show: false })]);
+    assert.deepEqual(validate(src({ s: apart })), []);
+  });
+
+  it('R10, R12: a scene of hero-island\'s size (220 items, 39 moving ones with 25 keys) draws in a few seconds', () => {
+    const r = rng(2026);
+    const items = [];
+    for (let c = 0; c < 15; c++) for (let row = 0; row < 15; row++) items.push({ object: r() < 0.5 ? 'house' : 'walker', at: { tile: [c, row, r() < 0.2 ? 1 : 0] } });
+    const tracks = [];
+    for (let i = 0; i < 39; i++) {
+      const id = `m${i}`;
+      items.push({ object: 'walker', id, at: { px: [Math.floor(r() * 200) - 100, Math.floor(r() * 120)] } });
+      const keys = [{ t: 0 }];
+      let [x, y] = [0, 0];
+      for (let k = 1; k < 25; k++) {
+        [x, y] = [x + 2 * (Math.floor(r() * 21) - 10), y + (Math.floor(r() * 21) - 10)];
+        keys.push({ t: k * 1000 + Math.floor(r() * 500), move: [x, y] });
+      }
+      tracks.push(track(id, ...keys));
+    }
+    const sources = src({ s: scene(items, tracks, 28000) });
+    const started = performance.now();
+    const out = renderScene(sources, 's');
+    const took = performance.now() - started;
+    const copies = motionCopies(sources, 's');
+    assert.ok(copies.length > 0, 'items cross others in the order');
+    assert.ok(out.style.includes('-z0'), 'the CSS has copies');
+    assert.ok(took < 10000, `took ${took.toFixed(0)} ms`);
   });
 });

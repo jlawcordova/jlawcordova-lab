@@ -551,7 +551,38 @@ function validateScene(sources, name, outputs, problems) {
   const layers = 'layers' in scene ? validateLayers(scene.layers, add) : new Set();
   if (!Array.isArray(scene.items)) return add('items must be a list');
   validateItems(sources, scene.items, 'items', add, new Set(), layers);
-  if ('motion' in scene) validateMotion(sources, scene, add);
+  if ('motion' in scene) {
+    validateMotion(sources, scene, add);
+    validateCopyClasses(sources, name, scene, add);
+  }
+}
+
+/**
+ * An item that takes several places in the depth order is drawn in copies
+ * whose classes are `mv-<id>-z<k>`; a track for an item whose id is `<id>-z<k>`
+ * has that same class. That is a problem only when the copy exists, so the
+ * places are worked out only for ids that look like a copy of another track's.
+ * @param {Sources} sources
+ * @param {string} name
+ * @param {any} scene
+ * @param {(msg: string) => void} add
+ */
+function validateCopyClasses(sources, name, scene, add) {
+  const tracks = Array.isArray(scene.motion?.tracks) ? scene.motion.tracks : [];
+  const ids = new Set(tracks.map((/** @type {any} */ t) => t?.item));
+  const clashes = [...ids].flatMap((id) => {
+    const m = typeof id === 'string' ? /^(.+)-z(\d+)$/.exec(id) : null;
+    return m && ids.has(m[1]) ? [{ id, base: m[1], k: Number(m[2]) }] : [];
+  });
+  if (clashes.length === 0) return;
+  try {
+    const copies = motionCopies(sources, name);
+    for (const { id, base, k } of clashes) {
+      if ((copies.find((c) => c.item === base)?.copies ?? 0) > k) add(`motion: item ${q(id)} has the class of copy ${k} of ${q(base)} (mv-${id}); give one of them another id`);
+    }
+  } catch {
+    // The sources have other problems, which are reported on their own.
+  }
 }
 
 /**
@@ -951,10 +982,13 @@ function draw(obj, ox, oy, group) {
  * @param {Sources} sources
  * @param {string} name
  * A scene with motion also returns the CSS that plays it, and each tracked
- * item is drawn at its rest frame in its own group (motion.mjs).
+ * item is drawn at its rest frame in its own group (motion.mjs). An item
+ * that moves among others is drawn once for each place it takes in the depth
+ * order as it moves, each copy shown only while it is in that place
+ * (`withCopies`); the rest is drawn once, in the order it has at rest.
  * With `order: 'list'` the items paint in the order the file lists them, as
  * engines before the depth order did (what `scene.sort` compares against, and
- * a preview that has already put its items in order).
+ * a preview that has already put its items in order), with no copies.
  * @param {{ order?: 'depth' | 'list' }} [options]
  * @returns {{ viewBox: number[], root: Group, style?: string }}
  */
@@ -965,10 +999,16 @@ export function renderScene(sources, name, { order = 'depth' } = {}) {
   const root = { attrs: [], children: [] };
   const tracks = tracksOf(scene);
   const origin = scene.origin ?? [0, 0];
-  const items = order === 'list' ? scene.items : arrange(sources, scene.items, origin, tracks).items;
+  /** @type {Map<string, Copy[]>} */
+  const copies = new Map();
+  let items = scene.items;
+  if (order !== 'list') {
+    const arranged = arrange(sources, scene.items, origin, tracks);
+    items = tracks.size ? withCopies(sources, arranged, origin, tracks, scene.motion.duration, copies) : arranged.items;
+  }
   placeItems(sources, items, root, origin, tracks);
   if (!tracks.size) return { viewBox: scene.viewBox, root };
-  return { viewBox: scene.viewBox, root, style: motionCss(scene.motion, itemsById(scene.items)) };
+  return { viewBox: scene.viewBox, root, style: motionCss(scene.motion, itemsById(scene.items), copies) };
 }
 
 // --------------------------------------------------------------------- depth
@@ -1296,6 +1336,14 @@ export const isInDepthOrder = (sources, scene) => arrange(sources, scene.items, 
  */
 function placeItems(sources, items, group, origin, tracks) {
   for (const item of items) {
+    if ('copy' in item) {
+      // One of the copies of an item that takes several places in the depth order (withCopies).
+      /** @type {Group} */
+      const copy = { attrs: [['class', item.copy]], children: [] };
+      group.children.push(copy);
+      placeItems(sources, [item.item], copy, origin, tracks);
+      continue;
+    }
     if ('group' in item) {
       /** @type {Group} */
       const child = { attrs: Object.entries(item.group), children: [] };

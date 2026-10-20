@@ -285,15 +285,45 @@ export function moveAtPercent(runs, p) {
 }
 
 /**
+ * The opacity keyframe stops that show a copy in its windows ([from, to) as
+ * percentages of the loop) and hide it elsewhere, written with 4 decimals.
+ * Stops that round to one percentage collapse into the later one.
+ * @param {[number, number][]} windows
+ * @returns {{ at: number, on: boolean }[]}
+ */
+function copyStops(windows) {
+  const round = (/** @type {number} */ v) => +v.toFixed(4);
+  /** @type {{ at: number, on: boolean }[]} */
+  const stops = [{ at: 0, on: windows[0][0] <= 0 }];
+  /** @type {(at: number, on: boolean) => void} */
+  const stop = (at, on) => {
+    const last = stops[stops.length - 1];
+    if (last.at === at) last.on = on;
+    else if (last.on !== on) stops.push({ at, on });
+    if (stops.length > 1 && stops[stops.length - 1].on === stops[stops.length - 2].on) stops.pop();
+  };
+  for (const [from, to] of windows) {
+    if (round(from) > 0) stop(round(from), true);
+    if (round(to) < 100) stop(round(to), false);
+  }
+  return stops;
+}
+
+/**
  * The CSS that plays a scene's motion: per track, a transform animation that
  * steps between keys (relative to the rest frame, which the art is drawn
  * at), an opacity animation for show, and one per pose. The base rules hold
  * the rest frame, so reduced motion, which turns every animation off, shows
- * time 0.
+ * time 0. An item that takes several places in the depth order is drawn once
+ * per place, each copy in a wrapper whose opacity shows it only in the
+ * windows of the loop (`copies`, from depth.mjs placeWindows) in which the
+ * item is in that place; its stops switch at the same instants the item's
+ * steps do. The copy holding time 0 is visible in the base rule.
  * @param {Motion} motion
  * @param {Map<string, any>} ids  items by id
+ * @param {Map<string, { windows: [number, number][] }[]>} [copies]  each item's copies, where it has several
  */
-export function motionCss(motion, ids) {
+export function motionCss(motion, ids, copies = new Map()) {
   const { duration } = motion;
   const rules = [];
   const run = (/** @type {string} */ name, /** @type {string} */ timing) => `animation:${name} ${duration}ms ${timing} infinite`;
@@ -331,6 +361,12 @@ export function motionCss(motion, ids) {
         rules.push(`.${name}{${keys[0].pose === pose ? '' : 'opacity:0;'}${run(name, 'step-end')}}`);
       });
     }
+    copies.get(track.item)?.forEach((copy, k) => {
+      const name = copyClass(track.item, k);
+      const frames = copyStops(copy.windows).map(({ at, on }) => `${at}%{opacity:${on ? 1 : 0}}`);
+      rules.push(`@keyframes ${name}{${frames.join('')}}`);
+      rules.push(`.${name}{${k === 0 ? '' : 'opacity:0;'}${run(name, 'step-end')}}`);
+    });
   }
   if (rules.length === 0) return '';
   rules.push('@media (prefers-reduced-motion:reduce){[class^="mv-"],[class*=" mv-"]{animation:none}}');
