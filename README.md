@@ -62,7 +62,13 @@ It reopens the last scene or object you had open, else the hero island. The wind
 
 ## A short tour
 
-**Scene mode.** The left sidebar lists every scene and, under it, the **Library** of objects (or the scene's **Items** tree). The stage draws the scene crisply at Fit or 1×–4× on the 32×16 isometric grid; in the night appearance the hero island's drop shadow takes the page color, as the site's dark theme does. Pick an object in the library and click a tile with the Place tool (⌥-click places by pixel, or drag a thumbnail onto the stage). Click an item to select it; drag it, use the arrow keys, or edit Col, Row and Level (X and Y for pixel-placed items) in the inspector. Raise, Lower, Duplicate, Remove and Snap to Tile are in the inspector and the Edit menu. Everything undoes. Scenes with motion get a timeline: Play (⌥⌘P) and scrub.
+**Scene mode.** The left sidebar lists every scene and, under it, the open scene's **Layers** (the first tab) or the **Library** of objects. The stage draws the scene crisply at Fit or 1×–4× on the 32×16 isometric grid; in the night appearance the hero island's drop shadow takes the page color, as the site's dark theme does. Pick an object in the library and click a tile with the Place tool (⌥-click places by pixel, or drag a thumbnail onto the stage). Click an item to select it; drag it, use the arrow keys, or edit Col, Row and Level (X and Y for pixel-placed items) in the inspector. Raise, Lower, Duplicate, Remove and Snap to Tile are in the inspector and the Edit menu. Everything undoes. Scenes with motion get a timeline: Play (⌥⌘P) and scrub.
+
+**Layers.** Name the parts of a scene, and nest them: the Mine, the Railway, the Train inside it. The **Layers** tab shows them as a tree (each layer's layers, then its items, with their tile positions); a scene without layers lists its items at the top level. Select things (⇧-click adds) and Group them (⌘G, or right-click › Group): the new layer, "Group 1", goes under their common parent and is renamed in the inspector. Ungroup (⇧⌘G) moves a layer's contents up a level, where they stay. On the stage a click picks the outermost layer under the pointer (by its pixels, not its box); double-click a layer, or Go Inside, to work inside it: the rest fades, the pill at the top left says where you are (`hero-island › Railway › Train`), clicks pick the next level down, and Done or Esc leaves. Dragging moves everything selected by whole tiles, with the col/row change on its label; the arrow keys and the inspector's nudges do too, and its Moved by fields say how far the layer has gone since you selected it. The eye hides a layer and the lock stops clicks on the stage from picking it (except from inside it); they're kept for each document and scene but never saved in the document or published. Right-click the stage or a row for Group, Ungroup, Go Inside, Hide and Lock. What you place goes into the selected layer, the selected item's layer or the one you're inside (the Library's chip says which), else the top level, and Place into it in a layer's inspector starts placing there. Layers never change paint order or the published SVG: each item still draws back to front by where it stands, and the site's `{ group }` wrappers stay as they are (an item's shows in the inspector as its SVG group).
+
+![Scene layers: the Layers panel and a layer's inspector](docs/screenshots/layers-panel-dark.png)
+
+![Inside a layer, with the layer menu](docs/screenshots/layers-menu-dark.png)
 
 **Object mode.** Open an object (double-click it in the library, or switch the Scene/Object control with an item selected). Paint with the Pencil, Eraser, Fill and Picker from the palette (the color cap is shown and enforced), switch layers and frames, turn a layer into a frame loop, toggle the onion skin, and watch the preview at 1× and 2× on a tile. File › New Scene… and New Object… make new docs from the engine's starters.
 
@@ -89,12 +95,16 @@ It reopens the last scene or object you had open, else the hero island. The wind
 | Space (hold) | Pan with any tool |
 | 1 – 4, 0 (or ⌘1 – ⌘4, ⌘0) | Zoom 1×–4× (objects 4×–16×), Fit |
 | ⌘' | Show or hide the grid (the pixel grid in object mode) |
-| Arrows | Move the selection a tile (scene) or the pixel cursor (object; ⇧ moves 4) |
-| ⌥ + arrows | Nudge the selection a pixel |
+| Arrows | Move the selection a tile, layers too (scene), or the pixel cursor (object; ⇧ moves 4) |
+| ⌥ + arrows | Nudge one selected item a pixel |
 | ⇧↑ / ⇧↓, Page Up / Page Down | Selection up or down a level (scene); previous or next frame (object) |
 | Return | Place at the stage cursor (scene); paint at the pixel cursor (object) |
 | ⌫ | Remove the selection (scene); erase at the pixel cursor (object) |
-| Esc | Select none |
+| Esc | Select none; then leave the layer you're inside |
+| ⌘G / ⇧⌘G | Group the selection into a new layer / ungroup the selected layer |
+| Double-click (stage or Layers) | Go inside a layer |
+| ⇧-click | Add to (or take from) the selection |
+| ↑ ↓, ⇧↑ ⇧↓, → ←, Return, Esc | Layers (focused): select the previous / next row, add it, expand / collapse, go inside, leave |
 | ] / [ (or ⌘] / ⌘[) | Raise / lower the selection (scene); next / previous layer (object) |
 | . / , | Next / previous frame (object) |
 | ⌘D | Duplicate |
@@ -118,6 +128,8 @@ pixellab document new ~/Art/meadow.pixellab          # an empty document with th
 pixellab scene list
 pixellab scene render hero-island --scale 2 --out /tmp/hero.png
 pixellab scene place hero-island pine --at 14,6,1 --dry-run   # the diff it would write
+pixellab scene layer new hero-island --layer-name Railway --items 140.0,141.0   # a layer from items
+pixellab scene layer move hero-island railway --by 1,0      # every item in it, by a tile
 pixellab object paint house 20,30 21,30 --color water-1
 pixellab check hero-island
 pixellab art preview pine --scale 4 --out /tmp/pine.png       # the review PNG, on the card color

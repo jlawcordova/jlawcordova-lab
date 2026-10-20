@@ -67,6 +67,14 @@ main ── feat/scene-layers ─ (intent, spec, plan) ────────�
 
 12. Merge `main` in if the animation pane (#17) has landed; the full Proof; the final PR into `main`; `verify-change` on it; fix its blocking findings.
 
+**As built.**
+- PR 1 (#18) merged with a merge commit; the repository doesn't allow squash merges.
+- "Group n" counts `group-n` ids as well as names, so after Group 1 is renamed the next group is Group 2 (`group-2`), not a second Group 1 (`group-1-2`); the spec says so (D4).
+- The hook's expect for the layer count is `expect scenelayers <n>`: `expect layers` already counts an object's layers. It also gained `pointer <x> <y>` (the hover outline), `menus` now logs the Edit menu too, and `expect scenepixel x,y empty` now matches (it compared against an upper-cased `EMPTY` and never could).
+- `StageTests`' test of the old Items tree's rows (`TreeRow`, which is gone) is replaced by `LayerTests`' rows, wrapper and paint-order tests.
+- Found while building: a timeline frame cached before a scene's hidden layers were known kept showing them, so `LayersModel.itemsChanged` clears the cache when the render's `hide`/`focus` change; inspector notes use line limits and layout priority, not `fixedSize`, which inflated the window's minimum height; the sidebar takes a scroll request so the hook can bring a row into view before its real right-click; `layers.txt` closes the Publish sheet (`done`) after each publish, since a sheet keeps real events from the window.
+- The Place inspector also says where the item goes ("into Railway"), as D13 asks.
+
 ## Workflow and reviews
 
 | Step | Who | Where | Then |
@@ -77,7 +85,7 @@ main ── feat/scene-layers ─ (intent, spec, plan) ────────�
 | 12 | main session | `feat/scene-layers` → PR 3 into `main` | `verify-change` subagent, then fixes, then hand over |
 
 - **One runner.** The main session runs every slice in order. The app slice is built on the CLI's commands and the same few files (`ScriptRunner`, `AppModel`, `SceneEditor`), so subagents in parallel would only collide. Two slices instead of one because the format change (what's written to scenes) is merged and checked before anything builds on it.
-- **Merging.** The main session merges PR 1 and PR 2 into `feat/scene-layers` (`gh pr merge --squash --delete-branch`) once each one's checks, pasted in its PR, pass. If `main` moves, it's merged into `feat/scene-layers` before the next slice. Only the owner merges PR 3.
+- **Merging.** The main session merges PR 1 and PR 2 into `feat/scene-layers` (`gh pr merge --merge --delete-branch`: the repository allows merge commits, not squashes) once each one's checks, pasted in its PR, pass. If `main` moves, it's merged into `feat/scene-layers` before the next slice. Only the owner merges PR 3.
 - **Owner reviews:** none until PR 3 (the owner asked for that). The snapshots in PR 3 are for the owner's look at the panel, the stage inside a layer, the menu and the layer inspector in dark and light.
 - **Independent review:** a `verify-change` run on PR 3, because the change alters what's written to scene files and the MCP surface. A fresh subagent (Opus) is given only "Use the `verify-change` skill on PR #<n>." Its blocking findings are fixed on `feat/scene-layers` before handing over; a re-check covers them.
 
