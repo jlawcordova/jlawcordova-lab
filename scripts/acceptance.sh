@@ -5,9 +5,11 @@
 # proposals (mcp-agent.mjs, through the app bundle's CLI) and the Agent window
 # ghosts, approves and rejects them (agent.txt); a doc with unsaved edits changes on
 # disk and is merged, reloaded and kept, and another agent's proposal is approved into an
-# unsaved copy (stale-agent.mjs, stale.txt); and the document is saved as a
-# copy, reopened and published into a folder (document.txt). The real checkout is only
-# read (copied). Exits 0 if every step passed.
+# unsaved copy (stale-agent.mjs, stale.txt); the document is saved as a
+# copy, reopened and published into a folder (document.txt); and scene layers are
+# made, picked, gone inside, hidden, locked, moved, placed into and ungrouped, with
+# the hero island's SVG byte-identical before and after they're saved (layers.txt).
+# The real checkout is only read (copied). Exits 0 if every step passed.
 #
 #   scripts/acceptance.sh [out-dir]      (default: a new temp dir)
 #
@@ -53,6 +55,14 @@ run document.txt document.log
 copied=$(ls "$shots"/copy-out/*.svg | wc -l | tr -d ' ')
 [[ $copied == 6 ]] || { echo "expected 6 SVGs published from the copy, found $copied" >&2; exit 1; }
 [[ -f "$shots/copy.pixellab/manifest.json" ]] || { echo "the copy has no manifest.json" >&2; exit 1; }
+echo "==> scene layers: the panel, the stage, the menu, the inspector; the same SVG with layers"
+run layers.txt layers.log
+cmp "$shots/layers-before/hero-island.svg" "$shots/layers-after/hero-island.svg" || { echo "hero-island.svg changed when its layers were saved" >&2; exit 1; }
+scene="$site/src/assets/pixel-art/jlawcordova.pixellab/scenes/hero-island.mjs"
+grep -q '^  layers: \[$' "$scene" || { echo "the saved hero island has no layers" >&2; exit 1; }
+if grep -qE 'hidden|locked' "$scene"; then echo "hidden or locked state went into the scene file" >&2; exit 1; fi
+grep -q '"group-3"' "$state/layer-view.json" || { echo "the hidden Sky layer isn't in the app's view state" >&2; exit 1; }
+echo "hero-island.svg identical with layers; the scene holds $(grep -c "layer: '" "$scene") items in layers and no view state"
 echo "==> the temp site after the run"
 git -C "$site" diff --stat HEAD~1 HEAD
 git -C "$site" diff --stat
