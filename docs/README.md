@@ -15,6 +15,7 @@ These docs are Markdown in the repo, next to what they describe, and are also pu
 - [The CLI and servers](../cli/README.md) (`cli/`): the module map, a command's anatomy, adding a command, sessions and undo, errors.
 - [The Mac app](../app/README.md) (`app/`): the model, the server connection, the views, the rules the code keeps, adding a feature.
 - [Scripts](../scripts/README.md) (`scripts/`): building, installing, snapshots, the acceptance pass, the docs.
+- [Example documents](../examples/README.md) (`examples/`): two documents with scene layers to try the app on and to test with.
 
 ## Reference
 

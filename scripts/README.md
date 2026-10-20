@@ -9,6 +9,8 @@ Everything that builds, installs, checks or documents Pixel Lab, run from the re
 | [`test-app.sh`](#test-appsh) | Runs the app's unit tests |
 | [`snapshot.sh`](#snapshotsh) | Snapshots the app's main window to a PNG, read-only |
 | [`acceptance.sh`](#acceptancesh) | The end-to-end acceptance pass, on a temp copy of the site |
+| [`try-example.sh`](#try-examplesh) | Opens the app on a temp copy of an example document |
+| [`make-examples.mjs`](#make-examplesmjs) | Writes the example documents in `examples/` |
 | [`docs-cli.mjs`](#docs-climjs) | Regenerates `docs/cli.md` from the command registry |
 | [`docs-site/`](#docs-site) | Builds the developer docs site |
 | [`make-icon.mjs`](#make-iconmjs) | Renders the app icon with the engine |
@@ -54,9 +56,18 @@ Starts the app with `PIXELLAB_SNAPSHOT`, which opens the doc, waits until it's r
 scripts/acceptance.sh [out-dir]
 ```
 
-The acceptance pass, end to end on a temp copy of the site (the real checkout is only copied): scene edits, save and publish (six SVGs into the temp site), then object painting and save (`acceptance/scene-object.txt`); an agent over MCP saving two proposals through the bundled CLI (`acceptance/mcp-agent.mjs`); the Agent window ghosting, approving and rejecting them (`acceptance/agent.txt`); a doc with unsaved edits changed on disk by the CLI and merged, reloaded and kept, then another agent's proposal (`acceptance/stale-agent.mjs`) approved into an unsaved copy (`acceptance/stale.txt`); and Save As to a copy, reopening it and publishing from it into a folder (`acceptance/document.txt`). It needs `build/Pixel Lab.app`. Exits 0 only if every step passed, and leaves logs, snapshots and the temp site in `out-dir`.
+The acceptance pass, end to end on a temp copy of the site (the real checkout is only copied): scene edits, save and publish (six SVGs into the temp site), then object painting and save (`acceptance/scene-object.txt`); an agent over MCP saving two proposals through the bundled CLI (`acceptance/mcp-agent.mjs`); the Agent window ghosting, approving and rejecting them (`acceptance/agent.txt`); a doc with unsaved edits changed on disk by the CLI and merged, reloaded and kept, then another agent's proposal (`acceptance/stale-agent.mjs`) approved into an unsaved copy (`acceptance/stale.txt`); Save As to a copy, reopening it and publishing from it into a folder (`acceptance/document.txt`); scene layers, with the hero island's SVG byte-identical before and after they're saved (`acceptance/layers.txt`); and the example documents' layers, on temp copies of `examples/` (`acceptance/examples-harbor.txt`, `examples-town.txt`). It needs `build/Pixel Lab.app`. Exits 0 only if every step passed, and leaves logs, snapshots and the temp site in `out-dir`.
 
 Its `expect` lines pin the site's art as it was on 2026-10-20 (15 scenes, 164 objects, the house at px -59,59). When the art changes, a failing `expect` means updating the scripts, not the app.
+
+## try-example.sh
+
+```sh
+scripts/try-example.sh            # the harbor
+scripts/try-example.sh town
+```
+
+Copies `examples/<name>.pixellab` into a new temp folder and opens `build/Pixel Lab.app` on the copy (`PIXELLAB_DOC`), with a state folder of its own (`PIXELLAB_STATE`), so saves, publishing and proposals stay in the temp folder. It prints the copy's path and returns when Pixel Lab quits. [examples/README.md](../examples/README.md) has what to try.
 
 ## docs-cli.mjs
 
@@ -76,6 +87,15 @@ open build/docs-site/index.html
 ```
 
 Builds the developer docs site from the README files and the docs under `docs/` (Node built-ins only): `build.mjs` holds the page list, the navigation and the link check; `markdown.mjs` the Markdown renderer; `style.css` and `site.js` the look and the theme toggle, search and copy buttons. The build fails on a broken link, anchor or image. How pages are added and how the site is deployed is in [Contributing](../docs/contributing.md#the-docs-site).
+
+## make-examples.mjs
+
+```sh
+npm run examples                              # node scripts/make-examples.mjs
+node scripts/make-examples.mjs --out <dir>    # somewhere else
+```
+
+Writes the example documents (`harbor.pixellab`, `town.pixellab`) from scratch, objects and all, with the starter palette, so the output is the same on every run; it fails if one doesn't check clean. `npm test` (`examples.test.mjs`) checks the committed `examples/` match it, so commit the generator and the examples together. [examples/README.md](../examples/README.md) describes them.
 
 ## make-icon.mjs
 

@@ -1,0 +1,36 @@
+// Pixel-art object. How to edit it: .claude/skills/pixel-art/SKILL.md
+export default {
+  kind: 'sprite',
+  anchor: [5, 17],
+  keys: {
+    a: 'grass-2',
+    b: 'grass-3',
+    c: 'grass-4',
+    t: 'wood-3',
+    u: 'wood-4',
+  },
+  layers: [
+    {
+      map: [
+        '.....b.....',
+        '....bbc....',
+        '....abc....',
+        '...abbcc...',
+        '....bbc....',
+        '...abbcc...',
+        '..abbbbcc..',
+        '...abbcc...',
+        '..abbbbcc..',
+        '.abbbbbccc.',
+        '..abbbccc..',
+        '.abbbbbbcc.',
+        'abbbbbbbccc',
+        '.ccccccccc.',
+        '.....tu....',
+        '.....tu....',
+        '.....tu....',
+        '....ttuu...',
+      ],
+    },
+  ],
+};

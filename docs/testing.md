@@ -40,6 +40,8 @@ Other helpers: `runCli()` and `spawnCli()` run the real binary, `startServer()` 
 | `sync.test.mjs` | settling proposals, `doc.reload`, edits since disk, the app's open docs, `doc.merge` and the merge in `proposal.apply` |
 | `merge.test.mjs` | the three-way line merge |
 | `groups.test.mjs` | group attributes following moves, `scene.group.set`, placing into groups |
+| `layers.test.mjs` | scene layers: the format and its checks, the layer commands, placing into a layer, renders that hide or focus, the art staying byte-identical, merging |
+| `examples.test.mjs` | the documents in `examples/`: they match `scripts/make-examples.mjs`, check clean, nest and move as described, and the harbor builds the same SVG with and without layers |
 | `motion-commands.test.mjs` | tracks and keys, `check`'s off-grid warnings, `scene.motion.path` |
 | `map-set.test.mjs` | `object.map.set` |
 | `activity-and-proposals.test.mjs` | activity summaries, proposal order |
@@ -53,7 +55,7 @@ Name new tests after the requirement they prove, from the change's `spec.md`: `t
 scripts/test-app.sh
 ```
 
-Swift Testing (`import Testing`, `@Test`, `#expect`) in `app/Tests/PixelLabTests/`, for the pure logic: stage geometry and hit-testing, keys, strokes and pixel colors, the proposal ghost's matching and diffs. They don't start a server. Anything that needs one is checked with the script hook.
+Swift Testing (`import Testing`, `@Test`, `#expect`) in `app/Tests/PixelLabTests/`, for the pure logic: stage geometry and hit-testing, keys, strokes and pixel colors, the proposal ghost's matching and diffs, the scene layers' tree and picking rules. They don't start a server. Anything that needs one is checked with the script hook.
 
 ## The script hook
 
@@ -90,7 +92,7 @@ appearance light
 snapshot /tmp/shots/placed-light.png
 ```
 
-There are actions for scene mode (`select`, `click`, `hover`, `place`, `drag`, `key`, `move`, `nudge`, `set`, `raise`, `undo`, `save`, `build`, `time`, …), object mode (`mode object`, `color`, `stroke`, `mousepath`, `erase`, `px`, `fill`, `pick`, `layer`, `frame`, `animate`, `onion`, `new object`, …), the Agent window (`agent open`, `proposal select`, `approve`, `reject`, `answer`, `ghost`, `agentkey`, …) and files changing on disk (`cli <args…>` runs the bundled CLI on the script's document, as an outside editor; `stale merge|reload|keep` presses the changed-on-disk bar's buttons), and `expect`s for each (`expect pixel 7,7 roof-1`, `expect scenepixel x,y #RRGGBB`, `expect proposals 2`, `expect stale true`, …). The full list is the comment at the top of `app/Sources/PixelLab/Support/ScriptRunner.swift`; add to it when a feature needs a new action.
+There are actions for scene mode (`select`, `click`, `hover`, `place`, `drag`, `key`, `move`, `nudge`, `set`, `raise`, `undo`, `save`, `build`, `time`, …), object mode (`mode object`, `color`, `stroke`, `mousepath`, `erase`, `px`, `fill`, `pick`, `layer`, `frame`, `animate`, `onion`, `new object`, …), the Agent window (`agent open`, `proposal select`, `approve`, `reject`, `answer`, `ghost`, `agentkey`, …), scene layers (`select layer:<id>`, `click <x> <y> shift`, `dblclick`, `rightclick <x> <y>` and `rightclick row <target>` (a real right-click through the window), `menu group`, `group`, `ungroup`, `inside`, `hide`, `lock`, `rename`, `movedby`, `layernudge`, `placeinto`, `layerskey`, …) and files changing on disk (`cli <args…>` runs the bundled CLI on the script's document, as an outside editor; `stale merge|reload|keep` presses the changed-on-disk bar's buttons), and `expect`s for each (`expect pixel 7,7 roof-1`, `expect scenepixel x,y #RRGGBB`, `expect proposals 2`, `expect stale true`, `expect selection layer:group-1`, `expect inside group-2`, `expect menu Group,Ungroup`, …). The full list is the comment at the top of `app/Sources/PixelLab/Support/ScriptRunner.swift`; add to it when a feature needs a new action.
 
 ## Snapshots
 
@@ -107,7 +109,7 @@ Snapshots draw the window with `cacheDisplay`, so pixel art stays nearest-neighb
 scripts/build-app.sh && scripts/acceptance.sh
 ```
 
-End to end on a temp copy of the site: scene edits, save and publish (six SVGs into the temp site); object painting and save; an agent saving two proposals over MCP through the bundled CLI; the Agent window ghosting, approving and rejecting them; a doc with unsaved edits changed on disk and merged, reloaded and kept, and another proposal approved into an unsaved copy (`stale.txt`); Save As to a copy, reopening it and publishing from it into a folder. Run it whenever `app/`, `cli/` or `scripts/acceptance/` changed. Its `expect` lines pin the art as it was on 2026-10-20: after the site's art changes, update the scripts in `scripts/acceptance/`.
+End to end on a temp copy of the site: scene edits, save and publish (six SVGs into the temp site); object painting and save; an agent saving two proposals over MCP through the bundled CLI; the Agent window ghosting, approving and rejecting them; a doc with unsaved edits changed on disk and merged, reloaded and kept, and another proposal approved into an unsaved copy (`stale.txt`); Save As to a copy, reopening it and publishing from it into a folder; and scene layers (`layers.txt`): grouping, renaming, picking, going inside, the layer menu on the stage and on a row, hiding, locking, dragging and nudging, placing into a layer and ungrouping, with the runner checking that the hero island's SVG is byte-identical before and after its layers were saved and that the saved scene holds no hidden or locked state; then the example documents (`examples-harbor.txt`, `examples-town.txt`, each on a temp copy of an `examples/` document), with layers read from a file three and four levels deep. Run it whenever `app/`, `cli/` or `scripts/acceptance/` changed. Its `expect` lines pin the art as it was on 2026-10-20: after the site's art changes, update the scripts in `scripts/acceptance/`.
 
 ## CI
 

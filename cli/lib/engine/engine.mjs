@@ -456,7 +456,61 @@ function extendsChain(sources, name) {
   return { names, cycle: false };
 }
 
-const SCENE_PROPS = ['output', 'viewBox', 'origin', 'items', 'motion'];
+const SCENE_PROPS = ['output', 'viewBox', 'origin', 'layers', 'items', 'motion'];
+const LAYER_PROPS = ['id', 'name', 'parent'];
+/** A layer's name: 1–64 characters on one line, no spaces at either end. */
+const LAYER_NAME = /^\S(?:[^\n\r\t]{0,62}\S)?$/;
+
+/**
+ * A scene's layers (docs/intents/2026-10-scene-layers/spec.md, D1): named,
+ * optionally nested parts of the scene that its items can belong to. They
+ * never change what renders. Returns the ids of the valid layers.
+ * @param {any} layers
+ * @param {(msg: string) => void} add
+ * @returns {Set<string>}
+ */
+function validateLayers(layers, add) {
+  /** @type {Set<string>} */
+  const ids = new Set();
+  if (!Array.isArray(layers)) {
+    add('layers must be a list of { id, name, parent }');
+    return ids;
+  }
+  /** @type {Map<string, unknown>} */
+  const parents = new Map();
+  layers.forEach((layer, i) => {
+    const where = `layers[${i}]`;
+    if (!isRecord(layer)) return add(`${where}: must be { id, name, parent }`);
+    for (const key of Object.keys(layer)) if (!LAYER_PROPS.includes(key)) add(`${where}: unknown property ${q(key)}`);
+    if (typeof layer.id !== 'string' || !NAME.test(layer.id)) add(`${where}: id must be lowercase kebab-case`);
+    else if (ids.has(layer.id)) add(`${where}: id ${q(layer.id)} is already used by another layer`);
+    else {
+      ids.add(layer.id);
+      if ('parent' in layer) parents.set(layer.id, layer.parent);
+    }
+    if (typeof layer.name !== 'string' || !LAYER_NAME.test(layer.name)) {
+      add(`${where}: name must be 1 to 64 characters on one line, without spaces at either end`);
+    }
+  });
+  layers.forEach((layer, i) => {
+    if (!isRecord(layer) || !('parent' in layer)) return;
+    if (typeof layer.parent !== 'string' || !ids.has(layer.parent)) add(`layers[${i}]: parent ${q(layer.parent)} is no layer's id`);
+  });
+  for (const id of parents.keys()) {
+    /** @type {Set<unknown>} */
+    const seen = new Set([id]);
+    let next = parents.get(id);
+    while (typeof next === 'string' && parents.has(next) && !seen.has(next)) {
+      seen.add(next);
+      next = parents.get(next);
+    }
+    if (next === id) {
+      add(`layers: layer ${q(id)} is inside itself (a layer's parents can't come back to it)`);
+      break;
+    }
+  }
+  return ids;
+}
 
 /**
  * @param {Sources} sources
@@ -480,8 +534,9 @@ function validateScene(sources, name, outputs, problems) {
     add('viewBox must be four whole numbers: x, y, width, height (width and height above 0)');
   }
   if ('origin' in scene && !isWhole(scene.origin, 2)) add('origin must be two whole numbers');
+  const layers = 'layers' in scene ? validateLayers(scene.layers, add) : new Set();
   if (!Array.isArray(scene.items)) return add('items must be a list');
-  validateItems(sources, scene.items, 'items', add, new Set());
+  validateItems(sources, scene.items, 'items', add, new Set(), layers);
   if ('motion' in scene) validateMotion(sources, scene, add);
 }
 
@@ -491,8 +546,9 @@ function validateScene(sources, name, outputs, problems) {
  * @param {string} path
  * @param {(msg: string) => void} add
  * @param {Set<string>} ids  the item ids seen so far in the scene
+ * @param {Set<string>} layers  the scene's layer ids
  */
-function validateItems(sources, items, path, add, ids) {
+function validateItems(sources, items, path, add, ids, layers) {
   items.forEach((item, i) => {
     const where = `${path}[${i}]`;
     if (!isRecord(item)) return add(`${where}: must be { object, at } or { group, items }`);
@@ -509,9 +565,10 @@ function validateItems(sources, items, path, add, ids) {
         }
       }
       if (!Array.isArray(item.items)) return add(`${where}: items must be a list`);
-      return validateItems(sources, item.items, `${where}.items`, add, ids);
+      return validateItems(sources, item.items, `${where}.items`, add, ids, layers);
     }
-    for (const key of Object.keys(item)) if (!['object', 'id', 'class', 'at'].includes(key)) add(`${where}: unknown property ${q(key)}`);
+    for (const key of Object.keys(item)) if (!['object', 'id', 'class', 'layer', 'at'].includes(key)) add(`${where}: unknown property ${q(key)}`);
+    if ('layer' in item && (typeof item.layer !== 'string' || !layers.has(item.layer))) add(`${where}: layer ${q(item.layer)} is no layer of this scene`);
     if ('id' in item) {
       if (typeof item.id !== 'string' || !NAME.test(item.id)) add(`${where}: id must be lowercase kebab-case`);
       else if (ids.has(item.id)) add(`${where}: id ${q(item.id)} is already used in this scene`);

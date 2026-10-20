@@ -1,0 +1,38 @@
+# The town example (examples/town.pixellab, a temp copy): 379 items, 59 layers four deep
+# (district › street › house › walls and roof). 0,-16 is the roof of North-west, Street 1, House 1.
+appearance light
+open scene:town
+expect scenelayers 59
+# Land, four districts, and eight lamps in no layer
+expect rows 13
+click 0 -16
+expect selection layer:nw
+dblclick 0 -16
+expect selection layer:nw-street-1
+dblclick 0 -16
+expect selection layer:nw-street-1-house-1
+dblclick 0 -16
+expect inside nw-street-1-house-1
+expect object roof-red
+expect crumbs town›North-west›Street 1›House 1
+snapshot @OUT@/example-town-inside-light.png
+inside top
+# the tree from the keyboard: down a level at a time (→ opens a layer, then goes into it)
+collapse nw-street-1-house-1
+collapse nw-street-1
+collapse nw
+select layer:nw
+layerskey right
+layerskey right
+expect selection layer:nw-street-1
+layerskey right
+layerskey right
+expect selection layer:nw-street-1-house-1
+layerskey left
+expect selection layer:nw-street-1
+# a district moves as one: its streets, houses and trees
+select layer:nw
+move 0 -1
+expect movedby 0,-1
+undo
+expect dirty false

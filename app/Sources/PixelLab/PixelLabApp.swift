@@ -88,8 +88,16 @@ struct PixelLabCommands: Commands {
                 .disabled(!hasSelection)
             Button("Snap to Tile") { Task { await model.editor.snap() } }
                 .disabled(model.document?.selectedItem?.at.isTile ?? true)
-            Button("Select None") { model.editor.select(nil) }
-                .disabled(!hasSelection)
+            Button("Select None") { model.layers.select([]) }
+                .disabled(!(model.mode == .scene && !(model.document?.selection.isEmpty ?? true)))
+            Divider()
+            // Scene layers (docs/intents/2026-10-scene-layers/spec.md, D9, D10).
+            Button("Group") { Task { await model.layers.group() } }
+                .keyboardShortcut("g")
+                .disabled(!(model.mode == .scene && !(model.document?.selection.isEmpty ?? true)))
+            Button("Ungroup") { Task { await model.layers.ungroup() } }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+                .disabled(!(model.mode == .scene && model.document?.selectedLayer != nil))
         }
         CommandGroup(replacing: .undoRedo) {
             Button("Undo") { undoOrText(Selector(("undo:"))) { await model.undo() } }

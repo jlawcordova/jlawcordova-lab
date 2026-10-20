@@ -192,21 +192,6 @@ import Testing
         #expect((KeyInput(spec: "hyper+x")) == nil)
     }
 
-    @Test func testTreeRowsPutGroupsBeforeTheirItems() {
-        let rows = TreeRow.build(
-            items: [
-                SceneItemInfo(path: "10", object: "c", at: ItemAt(tile: [0, 0, 0])),
-                SceneItemInfo(path: "2.1", object: "b", at: ItemAt(tile: [0, 0, 0]), group: "2"),
-                SceneItemInfo(path: "2.0.0", object: "a", at: ItemAt(tile: [0, 0, 0]), group: "2.0"),
-            ],
-            groups: [SceneGroupInfo(path: "2", attrs: [:], items: 2), SceneGroupInfo(path: "2.0", attrs: [:], items: 1, group: "2")]
-        )
-        #expect(rows.map(\.path) == ["2", "2.0", "2.0.0", "2.1", "10"])
-        #expect(rows[2].ancestors == ["2", "2.0"])
-        #expect(rows[2].depth == 2)
-        #expect(TreeRow.ancestors(of: "7") == [])
-    }
-
     @Test func testDragOffsets() {
         var d = ItemDrag(path: "1", startView: .zero, startScene: .zero, byPixel: false)
         d.dc = 1

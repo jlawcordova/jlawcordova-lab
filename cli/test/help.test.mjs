@@ -31,8 +31,8 @@ describe('help', () => {
   test('group help: pixellab scene --help, pixellab help scene', async () => {
     const r = await spawnCli(['scene', '--help']);
     assert.equal(r.code, 0);
-    assert.match(r.stdout, /^pixellab scene: 21 commands$/m);
-    assert.match(r.stdout, /^ {2}pixellab scene render <name> \[--scale <n>\] \[--time <n>\] \[--theme <light\|dark>\] \[--show <text>\] \[--out <file\.png>\]$/m);
+    assert.match(r.stdout, /^pixellab scene: 26 commands$/m);
+    assert.match(r.stdout, /^ {2}pixellab scene render <name> \[--scale <n>\] \[--time <n>\] \[--theme <light\|dark>\] \[--show <text>\] \[--hide <text,…>\] \[--focus <text>\] \[--out <file\.png>\]$/m);
     assert.match(r.stdout, /^ {2}pixellab scene list$/m);
     assert.equal((await spawnCli(['help', 'scene'])).stdout, r.stdout);
     const bare = await spawnCli(['scene']);

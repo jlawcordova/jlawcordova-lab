@@ -1,0 +1,212 @@
+# Scene layers end to end on a temp copy of the site (docs/intents/2026-10-scene-layers/spec.md,
+# R4–R20). The hero island has no layers yet; this makes Train (the locomotive and the flatcar),
+# then Railway (Train and a track tile), and Sky (a cloud). Pixels are scene pixels at time 0:
+# 180,43 the locomotive, 160,40 the flatcar, 60,-10 a track tile, 140,21 the crane mast,
+# -130,-28 a cloud. The runner checks that layers-before/ and layers-after/ hold the same
+# hero-island.svg, and that the saved scene has layers but no hidden or locked state.
+appearance dark
+open scene:hero-island
+# R6, R4: Layers is the first tab and the default; no layers yet, so new items go in at the top level
+expect tab layers
+expect scenelayers 0
+expect into Top level
+expect inspector none
+publish @OUT@/layers-before
+expect build ok
+done
+# R8: a click picks an item that's in no layer (by its pixels); ⇧-click adds another
+click 180 43
+expect object locomotive
+expect itemlayer none
+click 160 40 shift
+expect inspector multi
+# R13: ⌘G groups them as Group 1, under their common parent (the top level), and selects it
+key cmd+g
+expect scenelayers 1
+expect selection layer:group-1
+expect layername Group 1
+expect inspector layer
+# R14: renamed in the inspector
+rename Train
+expect layername Train
+# R8: a click now picks the layer; the crane mast in front of the boxcar is still itself
+select none
+click 180 43
+expect selection layer:group-1
+click 140 21
+expect object crane-mast
+# R12: right-clicking something outside the selection selects it first
+rightclick 180 43
+expect selection layer:group-1
+expect menu Group,Ungroup,Go Inside,Hide,Lock
+menu close
+# ⇧-click a track tile; right-clicking something already selected keeps the selection
+click 60 -10 shift
+expect inspector multi
+rightclick 60 -10
+expect inspector multi
+expect menu Group
+menu group
+expect layername Group 2
+expect selection layer:group-2
+rename Railway
+expect scenelayers 2
+expect crumbs hero-island
+# R8: what a click would pick is outlined under the pointer: the outermost layer
+select none
+pointer 180 43
+expect hover layer:group-2
+select layer:group-2
+# R7: the tree, and its search
+expand Railway
+expand Train
+search Railway
+expect rows 1
+search
+snapshot @OUT@/layers-panel-dark.png
+appearance light
+snapshot @OUT@/layers-panel-light.png
+appearance dark
+# R18, R2: saved with its layers, the published SVG is byte-identical (the runner compares)
+save
+expect dirty false
+publish @OUT@/layers-after
+expect build ok
+done
+# R9: a double-click goes inside: the rest fades, the crumbs say where, clicks pick the next level
+dblclick 180 43
+expect inside group-2
+expect selection layer:group-1
+expect faded true
+expect crumbs hero-island›Railway
+snapshot @OUT@/layers-inside-dark.png
+appearance light
+snapshot @OUT@/layers-inside-light.png
+appearance dark
+rightclick 180 43
+expect menu Group,Ungroup,Go Inside,Hide,Lock
+snapshot @OUT@/layers-menu-dark.png
+appearance light
+snapshot @OUT@/layers-menu-light.png
+appearance dark
+menu close
+# a double-click inside Railway goes inside Train; a crumb goes back up
+dblclick 180 43
+expect inside group-1
+expect crumbs hero-island›Railway›Train
+crumb 1
+expect inside group-2
+click 60 -10
+expect object track
+expect itemlayer group-2
+click 140 21
+expect selection none
+inside done
+expect inside none
+expect selection layer:group-2
+expect faded false
+# R10: dragging the selection moves it by whole tiles, one undo step; so do the keys and nudges.
+# First a real drag (mouse events into the stage), then the hook's.
+mouse down 180 43
+mouse drag 196 51
+mouse drag 212 59
+mouse up 212 59
+expect movedby 2,0
+undo
+expect movedby 0,0
+drag 1 0
+expect movedby 1,0
+undo
+expect movedby 0,0
+key right
+expect movedby 1,0
+undo
+expect movedby 0,0
+layernudge downright
+expect movedby 1,0
+movedby 0 0
+expect movedby 0,0
+expect dirty false
+# R11: a hidden layer doesn't draw and can't be picked, and stays hidden for this document and scene
+click -130 -28
+expect object cloud-a
+key cmd+g
+rename Sky
+expect selection layer:group-3
+expect scenepixel -130,-28 #F4EDE0
+hide Sky
+expect hiddenlayers group-3
+expect selection none
+expect scenepixel -130,-28 empty
+click -130 -28
+expect selection none
+open scene:footer-grass
+expect hiddenlayers none
+expect lockedlayers none
+open scene:hero-island
+expect hiddenlayers group-3
+expect scenepixel -130,-28 empty
+show Sky
+expect scenepixel -130,-28 #F4EDE0
+# R11: a locked layer can't be picked on the stage, except from inside it
+lock Railway
+click 180 43
+expect inspector item
+expect itemlayer none
+inside Railway
+click 180 43
+expect selection layer:group-1
+inside done
+unlock Railway
+# R12: a right-click on a Layers row (a real event through the window)
+select none
+rightclick row layer:group-1
+expect selection layer:group-1
+expect menu Group,Ungroup,Go Inside,Hide,Lock
+menu lock
+expect lockedlayers group-1
+unlock Train
+# R16: placing goes into the selected layer, the selected item's, the one you're inside, or the top level
+select layer:group-2
+expect into Railway
+library pine
+place 6 -3 1
+expect itemlayer group-2
+expect into Railway
+select none
+expect into Top level
+place 7 -1 1
+expect itemlayer none
+inside Railway
+expect into Railway
+inside done
+# R14: Place into it
+tool select
+select layer:group-1
+placeinto
+expect tab library
+expect tool place
+expect into Train
+tool select
+sidebar layers
+# R13: Ungroup moves Train's contents up into Railway, where they stay
+select layer:group-1
+ungroup
+expect scenelayers 2
+expect inspector multi
+# R20: the tree is the keyboard way to select
+select layer:group-2
+layerskey right
+layerskey right
+expect inspector item
+layerskey left
+expect selection layer:group-2
+layerskey return
+expect inside group-2
+layerskey esc
+expect inside none
+# R11: hidden and locked never go in the document
+hide Sky
+lock Railway
+save
+expect dirty false

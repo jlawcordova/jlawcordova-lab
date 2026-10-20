@@ -316,14 +316,15 @@ export function removeItem(doc, path) {
 }
 
 /**
- * Rebuilds an item's keys in the canonical order: object, id, class, at.
+ * Rebuilds an item's keys in the canonical order: object, id, class, layer,
+ * at (a layer stays as it was: docs/intents/2026-10-scene-layers/spec.md, D1).
  * @param {any} item
  * @param {{ id?: string, class?: string }} parts
  */
 function reorderKeys(item, { id, class: cls }) {
-  const { object, at } = item;
+  const { object, at, layer } = item;
   for (const key of Object.keys(item)) delete item[key];
-  Object.assign(item, { object, ...(id === undefined ? {} : { id }), ...(cls === undefined ? {} : { class: cls }), at });
+  Object.assign(item, { object, ...(id === undefined ? {} : { id }), ...(cls === undefined ? {} : { class: cls }), ...(layer === undefined ? {} : { layer }), at });
 }
 
 /**

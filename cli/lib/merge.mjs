@@ -109,6 +109,60 @@ export function merge3(base, ours, theirs, { union = false } = {}) {
   return { text: out.join('\n'), conflicts };
 }
 
+/**
+ * After a scene's union merge: when both sides made a scene's first layers,
+ * both `layers: [ … ]` blocks went in, and importing would keep only the
+ * last. Folds them into one list, ours first (docs/intents/2026-10-scene-layers/spec.md,
+ * D1). Returns what can't be folded: a layer id both sides made, and any other
+ * top-level key both sides added (two `motion:` blocks), for the caller to refuse.
+ * Works on canonical source text: top-level keys are the lines indented two spaces.
+ * @param {string} text
+ * @returns {{ text: string, clashes: string[] }}
+ */
+export function foldScene(text) {
+  const lines = text.split('\n');
+  const isKey = (/** @type {string} */ l) => /^ {2}[A-Za-z_$][\w$]*: /.test(l);
+  /** @type {{ start: number, end: number }[]} */
+  const blocks = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i] !== '  layers: [') continue;
+    let end = i + 1;
+    while (end < lines.length && lines[end] !== '  ],') end++;
+    blocks.push({ start: i, end });
+    i = end;
+  }
+  /** @type {string[]} */
+  const clashes = [];
+  let out = lines;
+  if (blocks.length > 1) {
+    const entries = blocks.map((b) => lines.slice(b.start + 1, b.end));
+    const idOf = (/** @type {string} */ l) => /\bid: '([^']*)'/.exec(l)?.[1];
+    /** @type {Set<string>} */
+    const seen = new Set();
+    /** @type {string[]} */
+    const kept = [];
+    for (const list of entries) {
+      for (const l of list) {
+        const id = idOf(l);
+        if (id !== undefined && seen.has(id)) clashes.push(`layer ${id}`);
+        if (id !== undefined) seen.add(id);
+        kept.push(l);
+      }
+    }
+    const drop = new Set(blocks.slice(1).flatMap((b) => Array.from({ length: b.end - b.start + 1 }, (_, k) => b.start + k)));
+    out = lines.flatMap((l, i) => {
+      if (i === blocks[0].start) return [l, ...kept];
+      if (i > blocks[0].start && i < blocks[0].end) return [];
+      return drop.has(i) ? [] : [l];
+    });
+  }
+  /** @type {Map<string, number>} */
+  const counts = new Map();
+  for (const l of out) if (isKey(l)) counts.set(l.slice(2, l.indexOf(':')), (counts.get(l.slice(2, l.indexOf(':'))) ?? 0) + 1);
+  for (const [key, n] of counts) if (n > 1) clashes.push(key);
+  return { text: out.join('\n'), clashes };
+}
+
 /** One side's text for base lines [from, to): its hunks there over the base. */
 function side(/** @type {string[]} */ base, /** @type {Hunk[]} */ list, /** @type {number} */ from, /** @type {number} */ to) {
   /** @type {string[]} */
