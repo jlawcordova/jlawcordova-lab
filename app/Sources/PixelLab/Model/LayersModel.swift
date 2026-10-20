@@ -68,6 +68,8 @@ final class LayersModel {
     var nameDraft = ""
     /// Where the selected layer stood when it was selected (Moved by).
     var baseline: MovedBaseline?
+    /// Moved by as last measured on a current list, shown while a newer one is on its way.
+    @ObservationIgnored private var settledMove: (col: Int, row: Int)?
     /// A row the sidebar should scroll into view (the script hook, before a real right-click on it).
     var scrollRequest: LayerTarget?
     /// Each tree row's frame in window points (top-left origin), for the script hook's real right-clicks.
@@ -91,6 +93,7 @@ final class LayersModel {
         menu = nil
         drag = nil
         baseline = nil
+        settledMove = nil
         nameDraft = ""
         draftSource = nil
         loadViewState()
@@ -110,6 +113,7 @@ final class LayersModel {
         }
         if let h = hover, !tree.exists(h) { hover = nil }
         if doc?.selectedLayer == nil { baseline = nil } else if baseline == nil { selectionChanged() }
+        if itemsCurrent { settledMove = measured }
         syncDraft()
     }
 
@@ -140,19 +144,25 @@ final class LayersModel {
     /// baseline, the name field, the item fields and the place level follow.
     func selectionChanged() {
         if let id = doc?.selectedLayer, let doc {
-            if baseline?.layer != id { baseline = MovedBaseline(layer: id, tree: tree, items: doc.itemsByPath) }
+            // Only from a list that's as of the last edit's result: its paths are the ones `followSort` keeps
+            // the baseline on. Otherwise `itemsChanged` makes it when the list from after the edit comes.
+            if baseline?.layer != id { baseline = itemsCurrent ? MovedBaseline(layer: id, tree: tree, items: doc.itemsByPath) : nil }
         } else {
             baseline = nil
         }
+        settledMove = itemsCurrent ? measured : nil
         syncDraft()
         app?.editor.syncDrafts()
         if let l = doc?.selectedItem?.at.standingLevel { app?.editor.placeLevel = l }
     }
 
-    /// A scene edit put the items in depth order and moved some (`reordered`,
-    /// old path → new): the selection, the Moved by baseline and the hover
-    /// follow their items.
+    /// A scene edit's result came back, having put the items in depth order and
+    /// moved some (`reordered`, old path → new): the selection, the Moved by
+    /// baseline and the hover follow their items. The items list is from before
+    /// the edit until the one asked for now comes back (`itemsCurrent`).
     func followSort(_ reordered: [String: String]?) {
+        doc?.editReturned()
+        app?.requestItems()
         guard let reordered, !reordered.isEmpty else { return }
         doc?.follow(reordered)
         baseline = baseline?.following(reordered)
@@ -559,15 +569,35 @@ final class LayersModel {
         return r?.edit
     }
 
-    /// Moved by: how far the selected layer has moved since it was selected.
-    var movedBy: (col: Int, row: Int)? {
-        guard let doc, let b = baseline, b.layer == doc.selectedLayer else { return nil }
+    /// Whether the items list is as of the last edit's result, and no edit is on its
+    /// way: then its paths name the items the baseline and the selection hold.
+    var itemsCurrent: Bool {
+        guard let doc, let app, app.editor.pendingEdits == 0, let asOf = doc.itemsAsOf else { return false }
+        return asOf == doc.edits
+    }
+
+    /// The baseline's item now, from a current list.
+    private var measured: (col: Int, row: Int)? {
+        guard let doc, let b = baseline, b.layer == doc.selectedLayer, itemsCurrent else { return nil }
         return b.moved(items: doc.itemsByPath)
     }
 
-    /// Typing in Moved by: move the layer by the difference.
+    /// Moved by: how far the selected layer has moved since it was selected.
+    /// While the list is from before an edit, what it last read on a current one.
+    var movedBy: (col: Int, row: Int)? {
+        guard let doc, let b = baseline, b.layer == doc.selectedLayer else { return nil }
+        return itemsCurrent ? b.moved(items: doc.itemsByPath) : settledMove
+    }
+
+    /// Typing in Moved by: move the layer by the difference, from where its
+    /// item stands now (a list from before the last edit would say otherwise).
     @discardableResult
     func setMovedBy(col: Int? = nil, row: Int? = nil) async -> EditResult? {
+        if !itemsCurrent { await app?.reloadItems() }
+        guard itemsCurrent else {
+            app?.notice = "Still moving the layer: try Moved by again in a moment."
+            return nil
+        }
         let now = movedBy ?? (0, 0)
         let dc = (col ?? now.col) - now.col, dr = (row ?? now.row) - now.row
         guard dc != 0 || dr != 0 else { return nil }

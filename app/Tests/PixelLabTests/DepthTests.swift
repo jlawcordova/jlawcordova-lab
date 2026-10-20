@@ -159,6 +159,77 @@ import Testing
         #expect(followed?.moved(items: after)?.row == 0)
     }
 
+    /// A train layer holding one track tile, beside another track out of the layer. Moving the
+    /// layer two columns puts its tile behind the other one, so the sort swaps their paths.
+    @MainActor private struct TwoTracks {
+        let app = AppModel()
+        let doc = DocumentModel(ref: DocRef(.scene, "harbor"))
+        let reordered = ["3": "4", "4": "3"]
+        let before = SceneItemsResult(scene: "harbor", items: [
+            SceneItemInfo(path: "3", object: "track", at: ItemAt(tile: [4, 1, 0]), layer: "train"),
+            SceneItemInfo(path: "4", object: "track", at: ItemAt(tile: [5, 1, 0])),
+        ], groups: [], layers: [SceneLayerInfo(id: "train", name: "Train", items: 1)])
+        let after = SceneItemsResult(scene: "harbor", items: [
+            SceneItemInfo(path: "3", object: "track", at: ItemAt(tile: [5, 1, 0])),
+            SceneItemInfo(path: "4", object: "track", at: ItemAt(tile: [6, 1, 0]), layer: "train"),
+        ], groups: [], layers: [SceneLayerInfo(id: "train", name: "Train", items: 1)])
+
+        init() {
+            app.document = doc
+            list(before)
+        }
+
+        var layers: LayersModel { app.layers }
+        var moved: String { layers.movedBy.map { "\($0.col),\($0.row)" } ?? "none" }
+
+        /// `scene.items` came back with this list.
+        func list(_ r: SceneItemsResult) {
+            doc.setItems(r)
+            layers.itemsChanged()
+        }
+    }
+
+    // Moved by (docs/intents/2026-10-scene-layers/spec.md, D12) reads the item it measures from
+    // the latest `scene.items`, which comes back on its own schedule: before the edit's result
+    // (and its `reordered`) or after it. Either way it measures the tile it was given, never the
+    // other track that has its old path, so typing 0 in it never moves the layer the wrong way.
+    @MainActor @Test func testR4MovedByMeasuresTheSameItemWhenTheEditReturnsBeforeItsItems() {
+        let t = TwoTracks()
+        t.layers.select([.layer("train")], announce: false)
+        #expect(t.moved == "0,0")
+        t.app.editor.pendingEdits += 1
+        t.layers.followSort(t.reordered)
+        t.app.editor.pendingEdits -= 1
+        #expect(t.moved == "0,0", "the list is from before the move: path 4 is still the other track")
+        t.list(t.after)
+        #expect(t.moved == "2,0")
+    }
+
+    @MainActor @Test func testR4MovedByMeasuresTheSameItemWhenTheItemsReturnBeforeTheEdit() {
+        let t = TwoTracks()
+        t.layers.select([.layer("train")], announce: false)
+        t.app.editor.pendingEdits += 1
+        // The items the edit's doc.changed asked for land while its result is on its way.
+        t.list(t.after)
+        #expect(t.moved == "0,0", "path 3 is now the other track; the result saying so hasn't come")
+        t.layers.followSort(t.reordered)
+        t.app.editor.pendingEdits -= 1
+        t.list(t.after)
+        #expect(t.moved == "2,0")
+    }
+
+    @MainActor @Test func testR4MovedByCountsFromWhereTheItemStoodWhenSelectedAfterAnEdit() {
+        let t = TwoTracks()
+        t.app.editor.pendingEdits += 1
+        t.layers.followSort(t.reordered)
+        t.app.editor.pendingEdits -= 1
+        // Selected before the items from after the move are in.
+        t.layers.select([.layer("train")], announce: false)
+        t.list(t.after)
+        #expect(t.moved == "0,0", "it stands where it was when selected")
+        #expect(t.layers.baseline?.path == "4")
+    }
+
     @MainActor @Test func testR14AWarningNamesAnOutOfOrderSceneOnlyForThatScene() {
         let doc = DocumentModel(ref: DocRef(.scene, "harbor"))
         let there = CheckWarning(file: "scenes/harbor.mjs", message: "m", text: "t", code: "out_of_order", scene: "harbor", moves: 2)

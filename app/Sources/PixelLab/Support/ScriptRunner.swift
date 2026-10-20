@@ -1061,6 +1061,8 @@ final class ScriptRunner {
                 if model.newDoc?.creating == true { return true }
                 if model.agent.busy { return true }
                 guard let doc = model.document else { return false }
+                // A scene's items as of the last edit's result, so Moved by and the inspector read them.
+                if doc.ref.kind == .scene, doc.itemsLoaded, !model.layers.itemsCurrent { return true }
                 return doc.rendering || doc.checking || doc.loadingItems || doc.render == nil || !model.thumbnails.isIdle
             }()
             if busy { steadySince = nil } else {
@@ -1070,6 +1072,6 @@ final class ScriptRunner {
             try? await Task.sleep(for: .milliseconds(50))
         }
         let d = model.document
-        log("(still busy after 30 s: edits \(model.editor.pendingEdits), build \(model.build?.running == true), rendering \(d?.rendering ?? false), checking \(d?.checking ?? false), items \(d?.loadingItems ?? false), thumbnails idle \(model.thumbnails.isIdle))")
+        log("(still busy after 30 s: edits \(model.editor.pendingEdits), build \(model.build?.running == true), rendering \(d?.rendering ?? false), checking \(d?.checking ?? false), items \(d?.loadingItems ?? false), items current \(model.layers.itemsCurrent), thumbnails idle \(model.thumbnails.isIdle))")
     }
 }

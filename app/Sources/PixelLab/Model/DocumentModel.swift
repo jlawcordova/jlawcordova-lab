@@ -93,7 +93,27 @@ final class DocumentModel {
         return nil
     }
 
-    func setItems(_ r: SceneItemsResult) {
+    /// Scene edits whose results have come back (each may have given items
+    /// other paths, `reordered`), and how many of them the items list was
+    /// asked for after: nil when it was asked for while an edit was on its way.
+    /// `scene.items` comes back on its own schedule, before an edit's result or
+    /// after it, so a path in the list and a path the app holds mean the same
+    /// item only when the two match (`LayersModel.itemsCurrent`).
+    @ObservationIgnored private(set) var edits = 0
+    @ObservationIgnored private(set) var itemsAsOf: Int?
+
+    /// An edit's result came back: lists asked for before now are from before it.
+    func editReturned() { edits += 1 }
+
+    /// The list a `scene.items` sent now will be: `edits`, or nil while an edit is on its way.
+    func itemsStamp(editsPending: Int) -> Int? { editsPending == 0 ? edits : nil }
+
+    /// `scene.items` came back, as of now.
+    func setItems(_ r: SceneItemsResult) { setItems(r, asOf: edits) }
+
+    /// `scene.items` came back; `asOf` is its `itemsStamp` from when it was asked for.
+    func setItems(_ r: SceneItemsResult, asOf: Int?) {
+        itemsAsOf = asOf
         items = r.items
         groups = r.groups
         itemsByPath = Dictionary(r.items.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
