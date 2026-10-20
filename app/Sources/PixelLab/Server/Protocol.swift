@@ -144,6 +144,9 @@ struct RenderResult: Codable, Sendable {
     var frame: Int?
     var anchor: [Double]?
     var items: [RenderItem]
+    /// `scene.render --focus <layer>`: the same render with only that layer's
+    /// items (docs/intents/2026-10-scene-layers/spec.md, D6's fade).
+    var focusPng: Data?
 }
 
 struct CheckProblem: Codable, Sendable, Hashable {
@@ -233,10 +236,46 @@ struct SceneItemInfo: Codable, Sendable, Hashable, Identifiable {
     var at: ItemAt
     var `class`: String?
     var id: String?
+    /// The scene layer it belongs to (docs/intents/2026-10-scene-layers/spec.md, D1).
+    var layer: String?
     /// The enclosing group's path.
     var group: String?
     /// The placement point in scene pixels.
     var point: [Double]?
+}
+
+/// A layer of `scene.items`: a named, nestable part of the scene, in the
+/// order the Layers panel shows it. `items` counts what's in it and in the
+/// layers inside it.
+struct SceneLayerInfo: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var name: String
+    var parent: String?
+    var items: Int
+}
+
+/// What a `scene.layer.*` edit returns: the layer it made or renamed, what
+/// an ungroup released, how many items a move moved.
+struct LayerEditResult: Codable, Sendable {
+    struct Layer: Codable, Sendable, Hashable {
+        var id: String
+        var name: String
+        var parent: String?
+    }
+    var doc: String
+    var changed: Bool?
+    var summary: String?
+    var layer: Layer?
+    /// Ungroup: the layer it was in (nil: the top level).
+    var parent: String?
+    /// New and assign: the layers that joined; ungroup: the layers it held.
+    var layers: [String]?
+    /// New and assign: how many items joined; ungroup: the paths it held.
+    var items: JSONValue?
+    var moved: Int?
+
+    var itemPaths: [String] { items?.arrayValue?.compactMap(\.stringValue) ?? [] }
+    var edit: EditResult { EditResult(doc: doc, changed: changed, summary: summary) }
 }
 
 /// A group of `scene.items` (its attributes are `class` and `data-*`).
@@ -251,6 +290,7 @@ struct SceneItemsResult: Codable, Sendable {
     var scene: String
     var items: [SceneItemInfo]
     var groups: [SceneGroupInfo]
+    var layers: [SceneLayerInfo]?
 }
 
 /// One motion track: the item id it moves and its key times (ms).

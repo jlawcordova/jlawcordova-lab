@@ -238,8 +238,8 @@ describe('commands (R5)', () => {
     const b = await call(s, 'scene.layer.new', { items: ['1.0'] });
     assert.deepEqual([a.layer, b.layer], [{ id: 'group-1', name: 'Group 1' }, { id: 'group-2', name: 'Group 2' }]);
     assert.equal(a.summary, 'Grouped 1 item as Group 1');
-    await call(s, 'scene.layer.rename', { layer: 'group-1', to: 'Ground' });
-    assert.equal((await call(s, 'scene.layer.new', {})).layer.name, 'Group 3', 'one more than the highest Group n');
+    await call(s, 'scene.layer.rename', { layer: 'group-2', to: 'Ground' });
+    assert.equal((await call(s, 'scene.layer.new', {})).layer.name, 'Group 3', 'one more than the highest Group n, renamed ones (group-2) counted');
     assert.equal((await call(s, 'scene.layer.new', { layerName: 'Ground' })).layer.id, 'ground');
     assert.equal((await call(s, 'scene.layer.new', { layerName: 'Ground' })).layer.id, 'ground-2');
     assert.equal((await call(s, 'scene.layer.new', { layerName: '3 Trees' })).layer.id, 'layer-3-trees');

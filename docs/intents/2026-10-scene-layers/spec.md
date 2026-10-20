@@ -89,7 +89,7 @@ New file `cli/lib/commands/scene-layers.mjs`, logic in `cli/lib/layer-ops.mjs`.
 
 | command | params | does |
 | --- | --- | --- |
-| `scene.layer.new` | `name`, `layerName?`, `id?`, `items?`, `layers?`, `parent?` | Makes a layer and moves the given items (paths or ids) and layers (ids or names) into it. Without `layerName` it's "Group n", one more than the highest "Group n" in the scene. Its parent is `parent` (`''` for the top level), else the deepest layer holding every member, else the top level. A member already inside another member stays where it is. It goes into `layers` before the first member layer, else before the first layer with the same parent, else last. Returns `layer: { id, name, parent? }`, `items` (how many joined) and `layers` (the ids that joined). |
+| `scene.layer.new` | `name`, `layerName?`, `id?`, `items?`, `layers?`, `parent?` | Makes a layer and moves the given items (paths or ids) and layers (ids or names) into it. Without `layerName` it's "Group n", one more than the highest n among the scene's "Group n" names and `group-n` ids (so renaming Group 1 doesn't bring back a second Group 1). Its parent is `parent` (`''` for the top level), else the deepest layer holding every member, else the top level. A member already inside another member stays where it is. It goes into `layers` before the first member layer, else before the first layer with the same parent, else last. Returns `layer: { id, name, parent? }`, `items` (how many joined) and `layers` (the ids that joined). |
 | `scene.layer.rename` | `name`, `layer`, `to` | Renames it (D1's name rules). |
 | `scene.layer.ungroup` | `name`, `layer` | Removes the layer. Its layers and items move to its parent; nothing moves on the stage. Returns `parent`, and the `layers` and `items` (paths) it held. |
 | `scene.layer.assign` | `name`, `to`, `items?`, `layers?` | Moves items and layers into `to` (`''` for the top level). Refuses to put a layer inside itself or a layer inside it (`layer_cycle`). |
@@ -148,7 +148,7 @@ Errors use the existing codes (`not_found`, `usage`, `exists`) plus `layer_cycle
 
 - Drawn in the window: a board 03 card with a border and shadow, 210 pt wide, at the pointer (kept inside the window), over everything, with a click-catcher behind it. Items: **Group** ⌘G, **Ungroup** ⇧⌘G, a separator, **Go Inside**, **Hide** (Show when hidden), **Lock** (Unlock when locked). Group is off with nothing selected; the others are off unless exactly one layer is selected. The hovered or keyboard-focused item takes the accent.
 - **Opening:** right-click or ⌃-click on the stage (`StageInputView.rightMouseDown`) or on a Layers row (a small AppKit view over each row that only takes right-clicks). The target under the pointer, if it isn't in the selection, becomes the selection first; one in the selection keeps it; on the stage, right-clicking nothing keeps the selection.
-- **Keyboard and VoiceOver:** the menu takes focus; ↑↓ move, Return chooses, Esc or a click outside closes. It's a menu to VoiceOver, its items menu items labelled with their shortcuts.
+- **Keyboard and VoiceOver:** the menu takes focus; ↑↓ move, Return chooses, Esc or a click outside closes. VoiceOver reads it as "Layer actions", each item a button labelled with its shortcut ("Ungroup, Shift Command G"); SwiftUI can't give a drawn view the menu role.
 - **Why in the window and not an `NSMenu`:** the prototype draws it in the window, and an `NSMenu` runs its own tracking loop that the script hook can't drive and window snapshots can't capture. The same actions are in the Edit menu (Group ⌘G, Ungroup ⇧⌘G, under Select None) and the inspector (Go inside, Hide, Lock). No toolbar buttons.
 
 ### D10. Group and Ungroup (R13)
@@ -187,10 +187,10 @@ Errors use the existing codes (`not_found`, `usage`, `exists`) plus `layer_cycle
 
 `ScriptRunner.swift` (and `CLAUDE.md`'s list):
 
-- `select layer:<id>|<path>|#<id> …` selects one or more targets; `select add <target>` adds one; `click <x> <y> [shift]` and `dblclick <x> <y>` click the stage in scene pixels through the stage's picking; `rightclick <x> <y>` and `rightclick row <target>` open the menu; `menu group|ungroup|inside|hide|lock|close` chooses from it.
+- `select layer:<id>|<path>|#<id> …` selects one or more targets; `select add <target>` adds one; `click <x> <y> [shift]` and `dblclick <x> <y>` click the stage in scene pixels through the stage's picking; `pointer <x> <y>` moves the pointer there (the hover outline); `rightclick <x> <y>` and `rightclick row <target>` open the menu; `menu group|ungroup|inside|hide|lock|close` chooses from it.
 - `group`, `ungroup`, `inside <layer>|done|top`, `crumb <n>`, `hide <layer>`, `show <layer>`, `lock <layer>`, `unlock <layer>`, `expand <layer>`, `collapse <layer>`, `rename <name…>`, `movedby <col> <row>`, `layernudge upleft|upright|downleft|downright`, `placeinto`, `layerskey <spec>` (a key into the tree: up, down, shift+down, right, left, return, esc), `sidebar layers|library` (`items` stays an alias of `layers`).
 - `move`, `drag` and the arrow keys act on the whole selection.
-- `expect selection <targets,…|none>`, `inside <id|none>`, `layers <n>`, `layername <name>`, `itemlayer <id|none>`, `hiddenlayers <ids|none>`, `lockedlayers <ids|none>`, `into <name>`, `crumbs <a›b›c>`, `rows <n>`, `movedby <+c,−r>`, `menu <enabled items|none>`, `tab layers|library`, `inspector layer|item|multi|none`, `faded true|false`, `hover <target|none>`.
+- `expect selection <targets,…|none>`, `inside <id|none>`, `scenelayers <n>` (`layers` is object mode's), `layername <name>`, `itemlayer <id|none>`, `hiddenlayers <ids|none>`, `lockedlayers <ids|none>`, `into <name>`, `crumbs <a›b›c>`, `rows <n>`, `movedby <+c,−r>`, `menu <enabled items|none>`, `tab layers|library`, `inspector layer|item|multi|none`, `faded true|false`, `hover <target|none>`.
 
 ### D15. Docs (R19)
 

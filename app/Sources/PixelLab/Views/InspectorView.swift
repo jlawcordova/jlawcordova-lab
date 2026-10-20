@@ -15,7 +15,18 @@ struct InspectorView: View {
             if let doc = model.document {
                 documentCard(doc)
                 if doc.ref.kind == .scene {
-                    SelectionInspector(doc: doc)
+                    // A layer, several things, or an item (docs/intents/2026-10-scene-layers/spec.md, D12).
+                    // Ahead of the Checks list, so its notes get their lines.
+                    Group {
+                        if let layer = doc.selectedLayer {
+                            LayerInspector(doc: doc, layer: layer)
+                        } else if doc.selection.count > 1 {
+                            MultiInspector(doc: doc)
+                        } else {
+                            SelectionInspector(doc: doc)
+                        }
+                    }
+                    .layoutPriority(1)
                     if model.editor.tool == .place || model.editor.placeObject != nil {
                         PlaceInspector()
                     }
@@ -61,7 +72,8 @@ struct InspectorView: View {
                     .truncationMode(.middle)
             }
             if doc.ref.kind == .scene, doc.itemsLoaded {
-                Text("\(doc.items.count) items\(model.timeline.hasMotion ? " · motion \(TimelineModel.label(model.timeline.duration ?? 0))" : "")")
+                let layerCount = doc.layerTree.layers.count
+                Text("\(doc.items.count) items\(layerCount > 0 ? " · \(layerCount) layer\(layerCount == 1 ? "" : "s")" : "")\(model.timeline.hasMotion ? " · motion \(TimelineModel.label(model.timeline.duration ?? 0))" : "")")
                     .font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(1)
             } else if doc.ref.kind == .object, let summary = model.objectEditor.info?.description ?? doc.summary {
                 Text(summary).font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(2)

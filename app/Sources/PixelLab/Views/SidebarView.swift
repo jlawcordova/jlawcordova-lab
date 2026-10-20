@@ -1,11 +1,14 @@
 import SwiftUI
 
-/// The left sidebar: a search field, the SCENES list, and below it the
-/// LIBRARY grid of object thumbnails or (scene mode) the open scene's ITEMS
-/// tree. In scene mode a library click picks the object to place (drag it onto
-/// the stage, or double-click to open it in object mode).
+/// The left sidebar: a search field, the SCENES list, and below it, in scene
+/// mode, the open scene's LAYERS (first, and the default) or the LIBRARY grid
+/// of object thumbnails (docs/intents/2026-10-scene-layers/spec.md, D11). In
+/// scene mode a library click picks the object to place (drag it onto the
+/// stage, or double-click to open it in object mode); what's placed goes
+/// into the layer the chip names.
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         @Bindable var model = model
@@ -17,7 +20,7 @@ struct SidebarView: View {
             ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) {
-                    sectionHeader("Scenes", count: filteredScenes.count)
+                    sectionHeader("Scenes", count: nil)
                     VStack(spacing: 1) {
                         ForEach(filteredScenes) { scene in
                             SceneRow(scene: scene, selected: model.document?.ref == DocRef(.scene, scene.name)) {
@@ -29,8 +32,8 @@ struct SidebarView: View {
 
                     if showItemsTab {
                         Picker("Show", selection: Binding(get: { model.editor.sidebarTab }, set: { model.editor.sidebarTab = $0 })) {
+                            Text("Layers").tag(SceneEditor.SidebarTab.layers)
                             Text("Library").tag(SceneEditor.SidebarTab.library)
-                            Text("Items").tag(SceneEditor.SidebarTab.items)
                         }
                         .pickerStyle(.segmented)
                         .labelsHidden()
@@ -46,8 +49,8 @@ struct SidebarView: View {
                         .padding(.top, 12)
                         .padding(.horizontal, 4)
                     }
-                    if showItemsTab, model.editor.sidebarTab == .items, let doc = model.document {
-                        ItemsTree(doc: doc, query: query)
+                    if showItemsTab, model.editor.sidebarTab == .layers, let doc = model.document {
+                        LayersPanel(doc: doc, query: query)
                     } else if showPaletteTab, model.objectEditor.sidebarTab == .palette {
                         PalettePanel()
                     } else {
@@ -63,12 +66,21 @@ struct SidebarView: View {
                 withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(name, anchor: .center) }
             }
             .onChange(of: model.editor.sidebarTab) { _, tab in
-                guard tab == .items, let path = model.document?.selectedPath else { return }
-                Task { @MainActor in proxy.scrollTo(path, anchor: .center) }
+                guard tab == .layers, let t = model.document?.selection.last else { return }
+                Task { @MainActor in proxy.scrollTo(t.description, anchor: .center) }
             }
-            .onChange(of: model.document?.selectedPath) { _, path in
-                guard let path, model.editor.sidebarTab == .items else { return }
-                withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(path, anchor: .center) }
+            .onChange(of: model.layers.scrollRequest) { _, t in
+                guard let t else { return }
+                proxy.scrollTo(t.description, anchor: .center)
+                model.layers.scrollRequest = nil
+            }
+            .onChange(of: model.document?.selection) { _, selection in
+                guard let t = selection?.last, model.editor.sidebarTab == .layers else { return }
+                Task { @MainActor in
+                    if reduceMotion { proxy.scrollTo(t.description, anchor: .center) } else {
+                        withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(t.description, anchor: .center) }
+                    }
+                }
             }
             }
         }
@@ -82,6 +94,7 @@ struct SidebarView: View {
     private var library: some View {
         sectionHeader("Library", count: filteredObjects.count)
             .padding(.top, showItemsTab || showPaletteTab ? 4 : 14)
+        if showItemsTab { PlaceIntoChip() }
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
             ForEach(filteredObjects) { object in
                 LibraryCell(
@@ -105,6 +118,14 @@ struct SidebarView: View {
             }
         }
         if filteredObjects.isEmpty { emptyLine("No objects match") }
+        if showItemsTab {
+            Text("Select a layer, or go inside one, and what you place joins it. With neither, it goes in at the top level.")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.inkMuted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 2)
+                .padding(.top, 10)
+        }
     }
 
     private var query: String { model.searchText.trimmingCharacters(in: .whitespaces).lowercased() }
@@ -115,11 +136,12 @@ struct SidebarView: View {
         query.isEmpty ? model.objects : model.objects.filter { $0.name.lowercased().contains(query) }
     }
 
-    private func sectionHeader(_ title: String, count: Int) -> some View {
+    /// A section heading; SCENES has no count (D11).
+    private func sectionHeader(_ title: String, count: Int?) -> some View {
         HStack(alignment: .firstTextBaseline) {
             SectionLabel(title: title)
             Spacer()
-            Text("\(count)").font(Theme.monoFont(10)).foregroundStyle(Theme.inkMuted.opacity(0.8))
+            if let count { Text("\(count)").font(Theme.monoFont(10)).foregroundStyle(Theme.inkMuted.opacity(0.8)) }
         }
         .padding(.horizontal, 6)
         .padding(.top, 6)
@@ -128,6 +150,33 @@ struct SidebarView: View {
 
     private func emptyLine(_ text: String) -> some View {
         Text(text).font(.callout).foregroundStyle(Theme.inkMuted).padding(.horizontal, 6).padding(.vertical, 4)
+    }
+}
+
+/// "New items go into" and the layer they'll join, or the top level
+/// (docs/intents/2026-10-scene-layers/spec.md, D13).
+struct PlaceIntoChip: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let layers = model.layers
+        let target = layers.placeTarget
+        HStack(spacing: 6) {
+            Text("New items go into").font(.system(size: 11)).foregroundStyle(Theme.inkMuted)
+            HStack(spacing: 5) {
+                Image(systemName: target == nil ? "square.stack.3d.up" : "square.dashed").font(.system(size: 10.5, weight: .semibold))
+                Text(layers.placeTargetName).font(Theme.nameFont(11)).lineLimit(1)
+            }
+            .foregroundStyle(Theme.accent)
+            .padding(.horizontal, 8)
+            .frame(height: 22)
+            .background(Theme.selection, in: Capsule())
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 6)
+        .padding(.bottom, 6)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("New items go into \(target == nil ? "the top level" : layers.placeTargetName)")
     }
 }
 
@@ -181,9 +230,6 @@ struct SceneRow: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 4)
-                Text("\(scene.items)")
-                    .font(Theme.monoFont(10))
-                    .foregroundStyle(Theme.inkMuted.opacity(0.8))
             }
             .padding(.horizontal, 8)
             .frame(height: 28)

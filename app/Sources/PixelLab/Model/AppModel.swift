@@ -58,6 +58,8 @@ final class AppModel {
 
     let thumbnails = ThumbnailStore()
     let editor = SceneEditor()
+    /// Scene layers: inside, hidden, locked, the menu (docs/intents/2026-10-scene-layers/spec.md).
+    let layers = LayersModel()
     let objectEditor = ObjectEditor()
     let timeline = TimelineModel()
     /// The Agent window: proposals, activity and the ghost preview.
@@ -89,6 +91,7 @@ final class AppModel {
 
     init() {
         editor.app = self
+        layers.app = self
         objectEditor.app = self
         timeline.app = self
         agent.app = self
@@ -355,6 +358,7 @@ final class AppModel {
         document = doc
         if snapshot == nil, script == nil { UserDefaults.standard.set(ref.id, forKey: SettingsKey.lastDoc) }
         editor.reset()
+        layers.reset()
         objectEditor.reset()
         timeline.reset()
         do {
@@ -399,6 +403,10 @@ final class AppModel {
                 doc.needsRender = false
                 let isScene = doc.ref.kind == .scene
                 let animated = isScene && timeline.hasMotion
+                // Hidden layers and the layer you're inside (scene.render --hide, --focus).
+                let layerParams = isScene ? layers.renderParams : [:]
+                if isScene { layers.renderedParams = layerParams }
+                let focus = layerParams["focus"]?.stringValue
                 let t = timeline.renderTime
                 let generation = timeline.generation
                 let objects = objectEditor
@@ -413,7 +421,7 @@ final class AppModel {
                     doc.renderCount += 1
                     continue
                 }
-                if animated, let frame = timeline.cached(t), let image = PixelImage(png: frame.png, renderScale: frame.scale) {
+                if animated, focus == nil, let frame = timeline.cached(t), let image = PixelImage(png: frame.png, renderScale: frame.scale) {
                     doc.render = StageImage(image: image, viewBox: frame.viewBox, scale: frame.scale, items: frame.items, anchor: nil, time: Double(t))
                     doc.renderCount += 1
                     continue
@@ -423,10 +431,11 @@ final class AppModel {
                     var params: [String: JSONValue] = ["name": .string(doc.ref.name), "scale": 1]
                     if animated { params["time"] = JSONValue(t) }
                     if isScene { params["theme"] = stageTheme }
+                    params.merge(layerParams) { _, b in b }
                     if !isScene { params.merge(objects.renderParams(frame: objectFrame)) { _, b in b } }
                     let r: RenderResult = try await connection.call(method, params)
                     let viewBox = CGRect(x: r.viewBox[0], y: r.viewBox[1], width: r.viewBox[2], height: r.viewBox[3])
-                    if animated {
+                    if animated, focus == nil {
                         timeline.store(t, .init(png: r.png, scale: r.scale, viewBox: viewBox, items: r.items), generation: generation)
                     }
                     if let image = PixelImage(png: r.png, renderScale: r.scale) {
@@ -436,7 +445,9 @@ final class AppModel {
                             scale: r.scale,
                             items: r.items,
                             anchor: r.anchor.map { CGPoint(x: $0[0], y: $0[1]) },
-                            time: r.time
+                            time: r.time,
+                            focusImage: r.focusPng.flatMap { PixelImage(png: $0, renderScale: r.scale) },
+                            focusLayer: r.focusPng == nil ? nil : focus
                         )
                         doc.render = stage
                         doc.error = nil
@@ -472,6 +483,7 @@ final class AppModel {
                 do {
                     let r: SceneItemsResult = try await connection.call("scene.items", ["name": .string(doc.ref.name)])
                     doc.setItems(r)
+                    if document === doc { layers.itemsChanged() }
                     thumbnails.prefetch(r.items.map(\.object))
                 } catch {
                     notice = "Couldn't list the items of \(doc.ref.name): \(error.localizedDescription)"
@@ -480,6 +492,16 @@ final class AppModel {
             } while doc.needsItems && document === doc
             doc.loadingItems = false
             if document === doc { editor.syncDrafts() }
+        }
+    }
+
+    /// Lists the open scene's items now, after a layer edit, so what the edit
+    /// made can be selected at once (an earlier `requestItems` may still be in flight).
+    func reloadItems() async {
+        guard let doc = document, doc.ref.kind == .scene, let connection else { return }
+        if let r: SceneItemsResult = try? await connection.call("scene.items", ["name": .string(doc.ref.name)]), document === doc {
+            doc.setItems(r)
+            layers.itemsChanged()
         }
     }
 
