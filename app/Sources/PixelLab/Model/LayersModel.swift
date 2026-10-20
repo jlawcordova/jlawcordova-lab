@@ -623,7 +623,8 @@ final class LayersModel {
             if let id = doc?.selectedLayer { goInside(id) }
             return true
         case .escape:
-            if menu != nil { closeMenu() } else if inside != nil { done() } else if !selection.isEmpty { select([]) }
+            // As the stage (R9): the menu, then the selection, then the layer you're inside.
+            if menu != nil { closeMenu() } else if !selection.isEmpty { select([]) } else if inside != nil { done() }
             return true
         default:
             return false

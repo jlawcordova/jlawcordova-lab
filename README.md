@@ -104,7 +104,7 @@ It reopens the last scene or object you had open, else the hero island. The wind
 | ⌘G / ⇧⌘G | Group the selection into a new layer / ungroup the selected layer |
 | Double-click (stage or Layers) | Go inside a layer |
 | ⇧-click | Add to (or take from) the selection |
-| ↑ ↓, ⇧↑ ⇧↓, → ←, Return, Esc | Layers (focused): select the previous / next row, add it, expand / collapse, go inside, leave |
+| ↑ ↓, ⇧↑ ⇧↓, → ←, Return, Esc | Layers (focused): select the previous / next row, add it, expand / collapse, go inside, clear the selection and then leave |
 | ] / [ (or ⌘] / ⌘[) | Raise / lower the selection (scene); next / previous layer (object) |
 | . / , | Next / previous frame (object) |
 | ⌘D | Duplicate |

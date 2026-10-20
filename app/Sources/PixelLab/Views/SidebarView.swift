@@ -12,89 +12,139 @@ struct SidebarView: View {
 
     var body: some View {
         @Bindable var model = model
-        VStack(spacing: 0) {
-            SearchField(text: $model.searchText)
-                .padding(.horizontal, 12)
-                .padding(.top, 10)
-                .padding(.bottom, 8)
-            ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 6) {
-                    sectionHeader("Scenes", count: nil)
-                    VStack(spacing: 1) {
-                        ForEach(filteredScenes) { scene in
-                            SceneRow(scene: scene, selected: model.document?.ref == DocRef(.scene, scene.name)) {
-                                Task { await model.open(DocRef(.scene, scene.name)) }
+        GeometryReader { geo in
+            VStack(spacing: 0) {
+                SearchField(text: $model.searchText)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 10)
+                    .padding(.bottom, 8)
+                // SCENES: a list of its own, at most about a third of the sidebar, so the
+                // Layers tree and the Library below keep their own scroll (D11).
+                sectionHeader("Scenes", count: nil)
+                    .padding(.horizontal, 10)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 1) {
+                            ForEach(filteredScenes) { scene in
+                                SceneRow(scene: scene, selected: model.document?.ref == DocRef(.scene, scene.name)) {
+                                    Task { await model.open(DocRef(.scene, scene.name)) }
+                                }
+                                .id(scene.name)
+                            }
+                            if filteredScenes.isEmpty { emptyLine("No scenes match") }
+                        }
+                        .padding(.horizontal, 10)
+                    }
+                    .scrollIndicators(.automatic)
+                    .frame(height: scenesHeight(sidebar: geo.size.height))
+                    // The open scene in view, once the list has laid out (on appear, and on each new scene).
+                    .task(id: "\(model.document?.ref.id ?? "")|\(model.scenes.count)") {
+                        guard let ref = model.document?.ref, ref.kind == .scene else { return }
+                        try? await Task.sleep(for: .milliseconds(80))
+                        proxy.scrollTo(ref.name, anchor: .center)
+                    }
+                }
+                tabs
+                lowerHeader
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 6) {
+                            if showItemsTab, model.editor.sidebarTab == .layers, let doc = model.document {
+                                LayersPanel(doc: doc, query: query)
+                            } else if showPaletteTab, model.objectEditor.sidebarTab == .palette {
+                                PalettePanel()
+                            } else {
+                                libraryGrid
                             }
                         }
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 16)
                     }
-                    if filteredScenes.isEmpty { emptyLine("No scenes match") }
-
-                    if showItemsTab {
-                        Picker("Show", selection: Binding(get: { model.editor.sidebarTab }, set: { model.editor.sidebarTab = $0 })) {
-                            Text("Layers").tag(SceneEditor.SidebarTab.layers)
-                            Text("Library").tag(SceneEditor.SidebarTab.library)
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
-                        .padding(.top, 12)
-                        .padding(.horizontal, 4)
-                    } else if showPaletteTab {
-                        Picker("Show", selection: Binding(get: { model.objectEditor.sidebarTab }, set: { model.objectEditor.sidebarTab = $0 })) {
-                            Text("Palette").tag(ObjectEditor.SidebarTab.palette)
-                            Text("Library").tag(ObjectEditor.SidebarTab.library)
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
-                        .padding(.top, 12)
-                        .padding(.horizontal, 4)
+                    .scrollIndicators(.automatic)
+                    .onChange(of: model.editor.placeObject) { _, name in
+                        guard let name, model.editor.sidebarTab == .library || !showItemsTab else { return }
+                        scroll(proxy, to: name)
                     }
-                    if showItemsTab, model.editor.sidebarTab == .layers, let doc = model.document {
-                        LayersPanel(doc: doc, query: query)
-                    } else if showPaletteTab, model.objectEditor.sidebarTab == .palette {
-                        PalettePanel()
-                    } else {
-                        library
+                    .onChange(of: model.editor.sidebarTab) { _, tab in
+                        guard tab == .layers, let t = model.document?.selection.last else { return }
+                        Task { @MainActor in proxy.scrollTo(t.description, anchor: .center) }
+                    }
+                    .onChange(of: model.layers.scrollRequest) { _, t in
+                        guard let t else { return }
+                        proxy.scrollTo(t.description, anchor: .center)
+                        model.layers.scrollRequest = nil
+                    }
+                    .onChange(of: model.document?.selection) { _, selection in
+                        guard let t = selection?.last, model.editor.sidebarTab == .layers else { return }
+                        Task { @MainActor in scroll(proxy, to: t.description) }
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.bottom, 16)
-            }
-            .scrollIndicators(.automatic)
-            .onChange(of: model.editor.placeObject) { _, name in
-                guard let name, model.editor.sidebarTab == .library || !showItemsTab else { return }
-                withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(name, anchor: .center) }
-            }
-            .onChange(of: model.editor.sidebarTab) { _, tab in
-                guard tab == .layers, let t = model.document?.selection.last else { return }
-                Task { @MainActor in proxy.scrollTo(t.description, anchor: .center) }
-            }
-            .onChange(of: model.layers.scrollRequest) { _, t in
-                guard let t else { return }
-                proxy.scrollTo(t.description, anchor: .center)
-                model.layers.scrollRequest = nil
-            }
-            .onChange(of: model.document?.selection) { _, selection in
-                guard let t = selection?.last, model.editor.sidebarTab == .layers else { return }
-                Task { @MainActor in
-                    if reduceMotion { proxy.scrollTo(t.description, anchor: .center) } else {
-                        withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(t.description, anchor: .center) }
-                    }
-                }
-            }
             }
         }
         .background(Theme.sidebar)
     }
 
-    private var showItemsTab: Bool { model.document?.ref.kind == .scene && model.mode == .scene }
-    private var showPaletteTab: Bool { model.document?.ref.kind == .object && model.mode == .object }
+    /// The scene list's height: its rows, but at most about a third of the
+    /// sidebar (and at least three rows).
+    private func scenesHeight(sidebar: CGFloat) -> CGFloat {
+        let rows = CGFloat(max(filteredScenes.count, 1)) * 29
+        return min(rows, max(sidebar * 0.32, 3 * 29))
+    }
+
+    private func scroll(_ proxy: ScrollViewProxy, to id: String) {
+        if reduceMotion { proxy.scrollTo(id, anchor: .center) } else {
+            withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id, anchor: .center) }
+        }
+    }
+
+    /// Layers | Library in scene mode, Palette | Library in object mode.
+    @ViewBuilder
+    private var tabs: some View {
+        if showItemsTab {
+            Picker("Show", selection: Binding(get: { model.editor.sidebarTab }, set: { model.editor.sidebarTab = $0 })) {
+                Text("Layers").tag(SceneEditor.SidebarTab.layers)
+                Text("Library").tag(SceneEditor.SidebarTab.library)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.top, 10)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 4)
+        } else if showPaletteTab {
+            Picker("Show", selection: Binding(get: { model.objectEditor.sidebarTab }, set: { model.objectEditor.sidebarTab = $0 })) {
+                Text("Palette").tag(ObjectEditor.SidebarTab.palette)
+                Text("Library").tag(ObjectEditor.SidebarTab.library)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.top, 10)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 4)
+        }
+    }
+
+    /// Above the lower scroll, so it stays put: LAYERS, or LIBRARY with the
+    /// "New items go into" chip in scene mode.
+    @ViewBuilder
+    private var lowerHeader: some View {
+        if showItemsTab, model.editor.sidebarTab == .layers, model.document != nil {
+            SectionLabel(title: "Layers")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+        } else if !(showPaletteTab && model.objectEditor.sidebarTab == .palette) {
+            VStack(alignment: .leading, spacing: 0) {
+                sectionHeader("Library", count: filteredObjects.count)
+                    .padding(.top, showItemsTab || showPaletteTab ? 4 : 12)
+                if showItemsTab { PlaceIntoChip() }
+            }
+            .padding(.horizontal, 10)
+        }
+    }
 
     @ViewBuilder
-    private var library: some View {
-        sectionHeader("Library", count: filteredObjects.count)
-            .padding(.top, showItemsTab || showPaletteTab ? 4 : 14)
-        if showItemsTab { PlaceIntoChip() }
+    private var libraryGrid: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
             ForEach(filteredObjects) { object in
                 LibraryCell(
@@ -113,10 +163,12 @@ struct SidebarView: View {
                 } open: {
                     Task { await model.open(DocRef(.object, object.name)) }
                 }
+                .id(object.name)
                 .onAppear { model.thumbnails.appeared(object.name) }
                 .onDisappear { model.thumbnails.disappeared(object.name) }
             }
         }
+        .padding(.top, 4)
         if filteredObjects.isEmpty { emptyLine("No objects match") }
         if showItemsTab {
             Text("Select a layer, or go inside one, and what you place joins it. With neither, it goes in at the top level.")
@@ -127,6 +179,9 @@ struct SidebarView: View {
                 .padding(.top, 10)
         }
     }
+
+    private var showItemsTab: Bool { model.document?.ref.kind == .scene && model.mode == .scene }
+    private var showPaletteTab: Bool { model.document?.ref.kind == .object && model.mode == .object }
 
     private var query: String { model.searchText.trimmingCharacters(in: .whitespaces).lowercased() }
     private var filteredScenes: [SceneSummary] {

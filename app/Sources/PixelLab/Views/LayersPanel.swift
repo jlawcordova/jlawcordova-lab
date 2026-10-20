@@ -6,7 +6,8 @@ import SwiftUI
 /// `{ group }` wrappers aren't in it. Clicking a row selects it (⇧ adds),
 /// double-clicking a layer goes inside it, right-clicking opens the layer
 /// menu. With the tree focused, the keys select (↑ ↓, ⇧ to add), expand and
-/// collapse (→ ←), go inside (Return) and leave (Esc). The search field
+/// collapse (→ ←), go inside (Return), and clear the selection and then
+/// leave (Esc). The tree scrolls on its own, under the sidebar's LAYERS. The search field
 /// filters it to a flat list.
 struct LayersPanel: View {
     var doc: DocumentModel
@@ -17,10 +18,7 @@ struct LayersPanel: View {
     var body: some View {
         let layers = model.layers
         let rows = layers.visibleRows(query: query)
-        SectionLabel(title: "Layers")
-            .padding(.horizontal, 6)
-            .padding(.top, 4)
-            .padding(.bottom, 2)
+        // The LAYERS heading is the sidebar's, above this scroll.
         if !doc.itemsLoaded {
             HStack(spacing: 6) {
                 ProgressView().controlSize(.mini)
@@ -53,7 +51,7 @@ struct LayersPanel: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Layers of \(doc.ref.name)")
-        .accessibilityHint("Arrow keys select, Shift adds, Right and Left expand and collapse, Return goes inside a layer, Escape leaves it")
+        .accessibilityHint("Arrow keys select, Shift adds, Right and Left expand and collapse, Return goes inside a layer, Escape clears the selection and then leaves the layer")
     }
 
     static func keyInput(_ press: KeyPress) -> KeyInput? {
