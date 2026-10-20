@@ -159,8 +159,8 @@ describe('registry', () => {
       'proposal.apply', 'proposal.reject',
       'scene.duplicate', 'scene.group.set', 'scene.key.delete', 'scene.key.move', 'scene.key.set',
       'scene.layer.assign', 'scene.layer.move', 'scene.layer.new', 'scene.layer.rename', 'scene.layer.ungroup',
-      'scene.lower', 'scene.motion.path', 'scene.motion.set', 'scene.move',
-      'scene.new', 'scene.place', 'scene.raise', 'scene.remove', 'scene.set', 'scene.snap', 'scene.track.add', 'scene.track.remove',
+      'scene.motion.path', 'scene.motion.set', 'scene.move',
+      'scene.new', 'scene.place', 'scene.remove', 'scene.set', 'scene.snap', 'scene.sort', 'scene.track.add', 'scene.track.remove',
     ];
     assert.deepEqual(names, [...readOnly, ...mutating, 'art.build'].sort());
     for (const name of readOnly) assert.equal(registry.get(name)?.mutates, false, name);

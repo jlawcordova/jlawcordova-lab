@@ -25,6 +25,14 @@
 // session's proposals once the owner applies or rejects them, and reloads
 // clean docs whose files changed, before each tool call. merge() (D4) brings
 // a change on disk into a dirty working copy, three ways.
+//
+// Depth order (docs/intents/2026-10-depth-order/spec.md, R4): an edit of a
+// scene ends by putting every list of its items in depth order, inside the
+// same undo step, so the file always reads back to front. The result's paths
+// are rewritten to where the sort put the items, and `reordered` says which
+// paths moved. A merge sorts what it makes; a reload that finds a file out of
+// order (a hand edit) sorts it as a step of its own, so one undo gives the
+// file back.
 
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -36,6 +44,7 @@ import { CommandError, NotFoundError } from './errors.mjs';
 import { layersOf, placedItems } from './layer-ops.mjs';
 import { foldScene, merge3 } from './merge.mjs';
 import { unsavedInApp } from './open-docs.mjs';
+import { sortScene } from './scene-ops.mjs';
 import { createState, newProposalId, stateDir, writeAtomic } from './state.mjs';
 
 export const UNDO_LIMIT = 200;
@@ -111,6 +120,27 @@ export async function problemsIn(ctx, file) {
  *   action: 'clean' | 'reloaded' | 'rebased' | 'kept' | 'discarded',
  * }} Settled
  */
+
+/** The paths a result names: path, paths, group.path and groups[].path. */
+const PATH = /^\d+(\.\d+)*$/;
+
+/**
+ * A result with its item and group paths moved to where a sort put them
+ * (`remap`: old path → new path). Only the fields that hold paths change.
+ * @param {any} result
+ * @param {Map<string, string>} remap
+ */
+function followSort(result, remap) {
+  const to = (/** @type {any} */ path) => (typeof path === 'string' ? remap.get(path) ?? path : path);
+  const out = { ...result };
+  if ('path' in out) out.path = to(out.path);
+  if (Array.isArray(out.paths)) out.paths = out.paths.map(to);
+  if (out.group && typeof out.group === 'object' && 'path' in out.group) out.group = { ...out.group, path: to(out.group.path) };
+  if (Array.isArray(out.groups)) out.groups = out.groups.map((/** @type {any} */ g) => (g && typeof g === 'object' && 'path' in g ? { ...g, path: to(g.path) } : g));
+  // scene.layer.ungroup lists the items its layer held by path.
+  if (Array.isArray(out.items) && out.items.every((/** @type {any} */ p) => typeof p === 'string' && PATH.test(p))) out.items = out.items.map(to);
+  return out;
+}
 
 export class Session {
   /**
@@ -240,6 +270,17 @@ export class Session {
   }
 
   /**
+   * Puts a scene's lists of items in depth order, in place (scene-ops
+   * sortScene), judging objects as `ctx` has them.
+   * @param {any} ctx
+   * @param {any} doc
+   */
+  async sortDoc(ctx, doc) {
+    const { sources } = await ctx.sources();
+    return sortScene(this.site, sources, doc);
+  }
+
+  /**
    * @param {any} ctx
    * @param {{ kind: 'object' | 'scene', name: string }} target
    * @param {(doc: any) => any} fn
@@ -257,6 +298,14 @@ export class Session {
       throw err;
     }
     ctx.invalidate();
+    // Sorting is part of the edit: the same undo step holds both.
+    if (kind === 'scene') {
+      const { remap } = await this.sortDoc(ctx, entry.doc);
+      if (remap.size) {
+        ctx.invalidate();
+        result = { ...followSort(result, remap), reordered: Object.fromEntries(remap) };
+      }
+    }
     const after = JSON.stringify(entry.doc);
     const changed = after !== before;
     const message = result.message ?? 'changed';
@@ -365,7 +414,8 @@ export class Session {
   }
 
   /**
-   * Replaces the working copy with the file, clearing its history.
+   * Replaces the working copy with the file, clearing its history, then
+   * sorts it if the file is out of depth order (sortLoaded).
    * @param {Entry} entry
    * @param {{ exists: boolean, hash: string | null, text: string }} disk
    */
@@ -375,6 +425,24 @@ export class Session {
     entry.undo = [];
     entry.redo = [];
     this.matchDisk(entry, disk, this.serialize(data) ?? '');
+    return this.sortLoaded(entry);
+  }
+
+  /**
+   * A scene just adopted from its file is put in depth order if it isn't (a
+   * hand edit, a merge by git), as a step of its own: the doc shows as unsaved
+   * and one undo gives back exactly the file. Files Pixel Lab writes are
+   * sorted, so this rarely finds anything. Returns what moved, or null.
+   * @param {Entry} entry
+   */
+  async sortLoaded(entry) {
+    if (entry.kind !== 'scene') return null;
+    const before = JSON.stringify(entry.doc);
+    const sorted = await this.sortDoc(this.context(), entry.doc);
+    if (!sorted.moved.length) return null;
+    entry.undo.push({ before, labels: [`Sorted ${entry.name} by depth`], seq: ++this.seq });
+    this.changed(entry);
+    return sorted;
   }
 
   /**
@@ -518,16 +586,11 @@ export class Session {
     const disk = await readSource(this.site, entry.kind, entry.name);
     if (!disk.exists || disk.hash === entry.base.hash) return false;
     if (this.status(entry).dirty) return false;
-    let data;
     try {
-      data = await importSource(disk.text);
+      await this.loadFromDisk(entry, disk);
     } catch {
       return false;
     }
-    entry.doc = data;
-    entry.undo = [];
-    entry.redo = [];
-    this.matchDisk(entry, disk, this.serialize(data) ?? '');
     this.changed(entry);
     return true;
   }
@@ -633,12 +696,19 @@ export class Session {
       return { doc: ref, reloaded: false, changed: false, summary: `${ref} already matches ${entry.file}`, ...this.status(entry) };
     }
     const before = JSON.stringify(entry.doc);
-    await this.loadFromDisk(entry, disk);
+    const sorted = await this.loadFromDisk(entry, disk);
     delete entry.proposal;
     delete entry.proposed;
     ctx.invalidate();
     this.changed(entry);
-    return { doc: ref, reloaded: true, changed: JSON.stringify(entry.doc) !== before, summary: `Reloaded ${ref} from ${entry.file}`, ...this.status(entry) };
+    return {
+      doc: ref,
+      reloaded: true,
+      changed: JSON.stringify(entry.doc) !== before,
+      summary: `Reloaded ${ref} from ${entry.file}${sorted ? `; it wasn't in depth order, so ${entry.name} was sorted (one undo gives back the file)` : ''}`,
+      ...(sorted ? { sorted: sorted.moved.length } : {}),
+      ...this.status(entry),
+    };
   }
 
   /**
@@ -679,10 +749,17 @@ export class Session {
     const ours = this.serialize(entry.doc);
     if (ours === null) throw new CommandError(`${ref} can't be serialized; fix its shape first (pixellab check ${entry.name})`, { code: 'invalid' });
     if (ours === entry.clean) {
-      await this.loadFromDisk(entry, disk);
+      const sorted = await this.loadFromDisk(entry, disk);
       ctx.invalidate();
       this.changed(entry);
-      return { doc: ref, merged: true, changed: true, summary: `Reloaded ${ref}: it had no unsaved edits`, ...this.status(entry) };
+      return {
+        doc: ref,
+        merged: true,
+        changed: true,
+        summary: `Reloaded ${ref}: it had no unsaved edits${sorted ? `; it wasn't in depth order, so ${entry.name} was sorted (one undo gives back the file)` : ''}`,
+        ...(sorted ? { sorted: sorted.moved.length } : {}),
+        ...this.status(entry),
+      };
     }
     const base = entry.base.exists ? (await this.canonical(entry.base.text)) ?? entry.base.text : '';
     const merged = merge3(base, ours, theirs, { union: entry.kind === 'scene' });
@@ -739,6 +816,8 @@ export class Session {
       throw new CommandError(`the merge of ${entry.file} would add ${added.length} problem${added.length === 1 ? '' : 's'} (${added[0]}); nothing merged`, { code: 'merge_invalid', details: added });
     }
     const before = JSON.stringify(entry.doc);
+    // The merge keeps the list in depth order: both sides' lines come together, and a line merge can't judge overlaps.
+    const sorted = entry.kind === 'scene' ? await this.sortDoc(ctx, data) : null;
     entry.doc = data;
     // The base is the file now. The edits since the old base stay unsaved;
     // the merge itself isn't one (its step sits at the base, so undoing it is).
@@ -751,7 +830,14 @@ export class Session {
     entry.undone = undone;
     ctx.invalidate();
     this.changed(entry);
-    return { doc: ref, merged: true, changed: JSON.stringify(data) !== before, summary: `Merged the changes to ${entry.file} into ${ref}`, ...this.status(entry) };
+    return {
+      doc: ref,
+      merged: true,
+      changed: JSON.stringify(data) !== before,
+      summary: `Merged the changes to ${entry.file} into ${ref}${sorted?.moved.length ? '; the result was sorted by depth' : ''}`,
+      ...(sorted?.moved.length ? { sorted: sorted.moved.length } : {}),
+      ...this.status(entry),
+    };
   }
 
   /** @param {string} ref @param {{ force?: boolean }} [options] */
