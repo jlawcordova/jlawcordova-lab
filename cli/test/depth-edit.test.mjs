@@ -392,7 +392,7 @@ describe('R8: sprites can have a footprint', () => {
     const cleared = await oc('object.footprint', { name: 'pebble', clear: true });
     assert.equal(cleared.footprint, null);
     assert.deepEqual((await oc('object.show', { name: 'pebble' })).footprint, [1, 1]);
-    await assert.rejects(oc('object.footprint', { name: 'block', to: [2, 2] }), { code: 'not_editable', message: /its size is its footprint/ });
+    await assert.rejects(oc('object.footprint', { name: 'block', to: [2, 2] }), { code: 'usage', message: /its size is its footprint/ });
     await assert.rejects(oc('object.footprint', { name: 'pebble' }), /give --to or --clear/);
     await assert.rejects(oc('object.footprint', { name: 'pebble', to: [0, 1] }), { code: 'usage' });
     await assert.rejects(oc('object.footprint', { name: 'pebble', to: [17, 1] }), { code: 'usage' });
