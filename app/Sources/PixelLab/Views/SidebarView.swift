@@ -22,6 +22,7 @@ struct SidebarView: View {
                 // Layers tree and the Library below keep their own scroll (D11).
                 sectionHeader("Scenes", count: nil)
                     .padding(.horizontal, 10)
+                    .padding(.bottom, 3)
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(spacing: 1) {

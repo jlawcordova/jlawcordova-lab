@@ -33,6 +33,7 @@ import { join } from 'node:path';
 import { createContext, docFile } from './context.mjs';
 import { unifiedDiff } from './diff.mjs';
 import { CommandError, NotFoundError } from './errors.mjs';
+import { layersOf, placedItems } from './layer-ops.mjs';
 import { foldScene, merge3 } from './merge.mjs';
 import { unsavedInApp } from './open-docs.mjs';
 import { createState, newProposalId, stateDir, writeAtomic } from './state.mjs';
@@ -703,6 +704,28 @@ export class Session {
       });
     }
     const text = folded.text;
+    // A layer both sides made under the same id (two ⌘Gs both named Group 1) writes the same
+    // line on both sides, so the line merge takes it once: unless both put the same items in it,
+    // that would make two layers one. It clashes; the same change made twice still merges.
+    const theirsData = await importSource(theirs);
+    if (entry.kind === 'scene') {
+      const baseIds = new Set(base ? layersOf(await importSource(base)).map((/** @type {any} */ l) => l.id) : []);
+      const theirIds = new Set(layersOf(theirsData).map((/** @type {any} */ l) => l.id));
+      const members = (/** @type {any} */ doc, /** @type {string} */ id) =>
+        placedItems(doc)
+          .filter(({ item }) => item.layer === id)
+          .map(({ item }) => JSON.stringify(item))
+          .sort()
+          .join('\n');
+      const both = layersOf(entry.doc).map((/** @type {any} */ l) => l.id).filter((/** @type {string} */ id) => theirIds.has(id) && !baseIds.has(id));
+      const differ = both.filter((/** @type {string} */ id) => members(entry.doc, id) !== members(theirsData, id));
+      if (differ.length) {
+        throw new CommandError(
+          `Both the open copy and ${entry.file} made layer ${differ.join(', ')}, holding different items; nothing merged. Reload the file (dropping the unsaved edits), or keep the open copy and save over the file.`,
+          { code: 'merge_conflict', details: differ.map((id) => `layer ${id}`) },
+        );
+      }
+    }
     let data;
     try {
       data = await importSource(text);
@@ -711,7 +734,7 @@ export class Session {
     }
     // A merge that loads but breaks the doc (an item naming a layer neither side kept, two layers
     // with one id) is refused: only problems the open copy or the file already had may stay.
-    const added = await this.newProblems(ctx, entry, data, [entry.doc, await importSource(theirs)]);
+    const added = await this.newProblems(ctx, entry, data, [entry.doc, theirsData]);
     if (added.length) {
       throw new CommandError(`the merge of ${entry.file} would add ${added.length} problem${added.length === 1 ? '' : 's'} (${added[0]}); nothing merged`, { code: 'merge_invalid', details: added });
     }

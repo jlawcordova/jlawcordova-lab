@@ -169,6 +169,30 @@ describe('merging a scene with layers (R1, D1)', () => {
     assert.equal(JSON.stringify(await working(mine, 'merging')), before);
   });
 
+  test('R1: two different layers both sides made under the same default name clash, and nothing merges', async () => {
+    for (const start of [MERGING, LAYERED.replace("  output: 'yard.svg',\n", '')]) {
+      await writeFile(file(), start);
+      const mine = session();
+      await call(mine, 'scene.layer.new', { items: ['0.0'] }, 'merging');
+      await onDisk('scene.layer.new', { items: ['4'] });
+      const before = JSON.stringify(await working(mine, 'merging'));
+      await assert.rejects(merge(mine), (/** @type {any} */ err) => err.code === 'merge_conflict' && /made layer group-1, holding different items/.test(err.message));
+      assert.equal(JSON.stringify(await working(mine, 'merging')), before);
+    }
+  });
+
+  test('R1: the same layer made on both sides (the same change twice) still merges', async () => {
+    await writeFile(file(), MERGING);
+    const mine = session();
+    await call(mine, 'scene.layer.new', { items: ['0.0'] }, 'merging');
+    await call(mine, 'scene.move', { item: '2', by: [1, 0] }, 'merging');
+    await onDisk('scene.layer.new', { items: ['0.0'] });
+    assert.equal((await merge(mine)).merged, true);
+    const scene = await working(mine, 'merging');
+    assert.deepEqual(scene.layers, [{ id: 'group-1', name: 'Group 1' }]);
+    assert.deepEqual([scene.items[0].items[0].layer, scene.items[2].at], ['group-1', { tile: [1, 0, 1] }]);
+  });
+
   test('R1: a merge that would leave an item in a layer neither side kept is refused', async () => {
     const layered = LAYERED.replace("  output: 'yard.svg',\n", '');
     await writeFile(file(), layered);

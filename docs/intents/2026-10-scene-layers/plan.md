@@ -79,6 +79,7 @@ main ── feat/scene-layers ─ (intent, spec, plan) ────────�
 - The Place inspector also says where the item goes ("into Railway"), as D13 asks.
 - `scene.place --layer` sets the layer in `scene-edit.mjs` (with `layer-ops.mjs`'s `setItemLayer`) after `scene-ops.mjs` places the item, rather than inside `place` and `placeInGroup`.
 - After the `verify-change` run on #20: a three-way merge where both sides made a scene's first layers kept only one list, so `foldScene` folds them and `Session.merge` refuses a clash or a merge that adds problems (D1, with tests); the sidebar now gives the scene list, and the Layers tree or the Library grid, scroll areas of their own (D11), with LAYERS, LIBRARY and the chip pinned; `layers.txt` checks what a locked layer's click picks (`expect inspector item`), that another scene has no hidden or locked layers, and a real mouse drag; `expect menu` says `closed` when no menu is open; the tree's Esc clears the selection before leaving, as the stage does (R9; the spec's D11 said otherwise).
+- After its re-check: a layer both sides made under the same default name wrote the same line on both sides, so the line merge took it once and two groups became one; `Session.merge` now refuses a layer id new on both sides unless both put the same items in it (D1, with a test each way). The scene list's heading got a little room above the list.
 
 ## Workflow and reviews
 
