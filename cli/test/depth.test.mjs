@@ -186,14 +186,14 @@ describe('the sort (R1, R2, D2)', () => {
     assert.equal(behind(groundFront, pillar) || behind(pillar, groundFront), false);
   });
 
-  it('R1: items whose pixels cannot meet are not ordered by their boxes, only by the fixed key', () => {
+  it('R1: items whose pixels cannot meet are not ordered by their boxes: they keep the order they are listed in', () => {
     // b is behind a by the box test (column), but they draw in different places.
     const a = { box: blockBox(5, 0, 0, [1, 1, 1]), bounds: { minX: 0, minY: 0, maxX: 10, maxY: 10 } };
     const b = { box: blockBox(0, 0, 0, [1, 1, 1]), bounds: { minX: 100, minY: 0, maxX: 110, maxY: 10 } };
-    assert.deepEqual(sortNodes([a, b]), [1, 0], 'smaller key first');
+    assert.deepEqual(sortNodes([a, b]), [0, 1], 'listed order, though b is behind a by their boxes');
     const c = { box: blockBox(0, 0, 0, [1, 1, 1]), bounds: null };
     const d = { box: null, bounds: null };
-    assert.deepEqual(sortNodes([a, c, d]), [2, 1, 0], 'a node with no box first, then by key');
+    assert.deepEqual(sortNodes([a, c, d]), [0, 1, 2], 'nodes with no box or no pixels are never ordered against anything');
   });
 
   it('R5, D2: back items draw before the others and front items after, each band sorted by position', () => {
@@ -225,18 +225,25 @@ describe('the sort (R1, R2, D2)', () => {
     }
   });
 
-  it('R2: with distinct keys the answer does not depend on the list order', () => {
+  it('R1, R2: the order is a valid depth order: every overlapping pair that is ordered by its boxes is respected unless the pair sits in a cycle', () => {
     for (const seed of SEEDS) {
       const r = rng(seed);
-      const boxes = randomBoxes(r, 40);
-      const keys = new Set(boxes.map(keyOf));
-      if (keys.size !== boxes.length) continue;
-      const labels = boxes.map((_, i) => i);
-      const want = sortNodes(boxes.map((b) => node(b))).map((i) => labels[i]);
-      for (let round = 0; round < 3; round++) {
-        const shuffled = labels.slice().sort(() => r() - 0.5);
-        const got = sortNodes(shuffled.map((i) => node(boxes[i]))).map((i) => shuffled[i]);
-        assert.deepEqual(got, want, `seed ${seed}, round ${round}`);
+      for (let round = 0; round < 10; round++) {
+        const n = 10 + Math.floor(r() * 25);
+        const nodes = randomBoxes(r, n, 6).map((box, i) => ({ box, bounds: r() < 0.7 ? EVERYWHERE : { minX: i * 3, minY: 0, maxX: i * 3 + 2 + Math.floor(r() * 8), maxY: 5 } }));
+        const order = sortNodes(nodes);
+        assert.deepEqual(sortNodes(nodes), order, 'the same input gives the same order');
+        const position = new Map(order.map((index, at) => [index, at]));
+        assert.equal(position.size, n);
+        const edge = (i, j) => i !== j && overlaps(nodes[i].bounds, nodes[j].bounds) && behind(nodes[i].box, nodes[j].box);
+        // reach[i][j]: following "is behind" edges leads from i to j.
+        const reach = nodes.map((_, i) => nodes.map((__, j) => edge(i, j)));
+        for (let k = 0; k < n; k++) for (let i = 0; i < n; i++) if (reach[i][k]) for (let j = 0; j < n; j++) if (reach[k][j]) reach[i][j] = true;
+        for (let i = 0; i < n; i++) {
+          for (let j = 0; j < n; j++) {
+            if (edge(i, j) && position.get(j) < position.get(i)) assert.ok(reach[j][i], `seed ${seed}, round ${round}: ${i} is behind ${j} but draws after it, outside any cycle`);
+          }
+        }
       }
     }
   });
@@ -564,7 +571,7 @@ describe('the engine draws in depth order (R3, R5, R9, D2)', () => {
     const items = [{ object: 'tree', id: 'walker', at: { tile: [0, 1, 0] } }, redHouse];
     const motion = (move) => ({ duration: 1000, tracks: [{ item: 'walker', keys: [{ t: 0, move }, { t: 500, move: [0, 0] }] }] });
     const behindHouse = src(OBJECTS, { s: scene(items, { motion: motion([0, 0]) }) }).scenes.get('s');
-    const sources = src(OBJECTS, { a: behindHouse, b: scene(items, { motion: motion([64, 32]) }) });
+    const sources = src(OBJECTS, { a: behindHouse, b: scene(items, { motion: motion([32, 16]) }) });
     const tracks = (s) => new Map(s.motion.tracks.map((t) => [t.item, t]));
     assert.deepEqual(depthOrder(sources, sources.scenes.get('a').items, [0, 0], tracks(sources.scenes.get('a'))), [0, 1], 'at rest behind the house');
     assert.deepEqual(depthOrder(sources, sources.scenes.get('b').items, [0, 0], tracks(sources.scenes.get('b'))), [1, 0], 'its first key moves it in front');
@@ -627,8 +634,9 @@ describe('the engine draws in depth order (R3, R5, R9, D2)', () => {
 
   it('R9, R2: variant groups that sorting brings side by side form a run, and then stay put', () => {
     const variant = (n, item) => ({ group: { 'data-class': String(n) }, items: [item] });
+    // The tree behind the first variant is listed between the two, so it goes first and they end up together.
     const sources = src(OBJECTS, {
-      s: scene([variant(0, { object: 'house', at: { tile: [3, 3, 1] } }), { object: 'tree', at: { tile: [0, 0, 0] } }, variant(1, { object: 'house', at: { tile: [4, 3, 1] } })]),
+      s: scene([variant(0, { object: 'house', at: { tile: [3, 3, 1] } }), { object: 'tree', at: { tile: [2, 3, 0] } }, variant(1, { object: 'house', at: { tile: [4, 3, 1] } })]),
     });
     const once = sceneInOrder(sources, sources.scenes.get('s'));
     assert.deepEqual(once.items.map((i) => i.group?.['data-class'] ?? i.object), ['tree', '0', '1']);
@@ -738,7 +746,7 @@ describe("the harbor example: a pine moved behind the red house (R3, intent)", (
     const where = (i) => order.indexOf(i);
     // trees[1] (3,4,0) is one row behind the hall's far half: it draws before the walls and the roof.
     assert.ok(where(1) < where(2) && where(1) < where(3), `${order}`);
-    // trees[0] (3,6,0) is one row in front of it: it draws after both.
-    assert.ok(where(0) > where(2) && where(0) > where(3), `${order}`);
+    // trees[0] (3,6,0) is one row in front of it: it draws after the walls (it stands under the roof's level, so the roof is not ordered against it).
+    assert.ok(where(0) > where(2), `${order}`);
   });
 });

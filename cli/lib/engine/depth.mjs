@@ -102,7 +102,8 @@ export const overlaps = (a, b) => a !== null && b !== null && a.minX <= b.maxX &
 
 /**
  * The sort key: twice the sum of the box centre's column, row and height, so
- * it stays a multiple of 1/32 and a smaller key is further back. A box with
+ * it stays a multiple of 1/32 and a smaller key is further back. It decides
+ * interpenetrating boxes and breaks cycles; free items keep their list order. A box with
  * none (an empty group) sorts before every other.
  * @param {Box | null} b
  */
@@ -128,11 +129,12 @@ export function behind(a, b) {
 /**
  * The order the nodes draw in, as indices into `nodes`. Back-marked nodes
  * draw first, then unmarked ones, then front-marked ones; each band is sorted
- * on its own. In a band, repeatedly take, of the nodes that nothing unplaced
- * is behind (and whose pixels can meet), the one with the smallest key, then
- * the smallest index. If every remaining node has something behind it (a
- * cycle), take the smallest key of them all. Whether a node is available
- * depends only on the set already placed, so sorting a sorted list returns it.
+ * on its own. In a band, repeatedly take the first listed node that nothing
+ * unplaced is behind (where their pixels can meet), so items keep the order
+ * the file lists them in unless an overlap forces a change. If every
+ * remaining node has something behind it (a cycle), take the one with the
+ * smallest key, then the smallest index. Whether a node is available depends
+ * only on the set already placed, so sorting a sorted list returns it.
  * @param {Node[]} nodes
  * @returns {number[]}
  */
@@ -175,12 +177,13 @@ function sortBand(nodes, members) {
   /** @type {number[]} */
   const order = [];
   for (let step = 0; step < n; step++) {
+    // The first listed node that is free; failing that (a cycle), the smallest key.
     let free = -1;
     let any = -1;
     for (let k = 0; k < n; k++) {
       if (placed[k]) continue;
       if (any < 0 || keys[k] < keys[any]) any = k;
-      if (waiting[k] === 0 && (free < 0 || keys[k] < keys[free])) free = k;
+      if (waiting[k] === 0 && free < 0) free = k;
     }
     const next = free >= 0 ? free : any;
     placed[next] = true;

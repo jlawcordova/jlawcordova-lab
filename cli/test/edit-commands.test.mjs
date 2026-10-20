@@ -543,8 +543,8 @@ describe('round trip', needsSite, () => {
 
 describe('art.build (spec R7)', needsSite, () => {
   // The engine draws items in depth order now (docs/intents/2026-10-depth-order/spec.md, R3), so the site's
-  // hero island and range sprite differ from the SVGs committed under the old order, and two of its preview-only
-  // close-ups pass the engine's 100 KB budget, which makes `art build` exit 1 until the site migrates.
+  // hero island and range sprite differ from the SVGs committed under the old order (the same elements, drawn
+  // in another order), and everything stays within its budget.
   const tags = (/** @type {Buffer} */ svg) => svg.toString('utf8').split(/(?=<)/).sort();
   /** Whether a published file is the committed one, or the same elements drawn in another order. */
   const sameButReordered = (/** @type {Buffer} */ built, /** @type {Buffer} */ committed) => {
@@ -556,9 +556,9 @@ describe('art.build (spec R7)', needsSite, () => {
     const site = await makeSite();
     try {
       const r = await runCli(['art', 'build', '--site', site.root, '--json'], { env: site.env() });
+      assert.equal(r.code, 0, r.stderr);
       const out = JSON.parse(r.stdout);
-      assert.equal(r.code, out.ok ? 0 : 1, r.stderr);
-      assert.equal(out.ok, out.outputs.every((/** @type {any} */ o) => !o.over) && out.previewOnly.every((/** @type {any} */ o) => !o.over), 'ok says whether anything is over budget');
+      assert.equal(out.ok, true);
       assert.equal(out.publishDir, join(site.root, 'src/assets/pixel-art'));
       assert.deepEqual(out.problems, []);
       assert.deepEqual(out.unsaved, []);
@@ -581,9 +581,8 @@ describe('art.build (spec R7)', needsSite, () => {
     const out = await tempDir();
     try {
       const r = await runCli(['art', 'build', '--site', site.root, '--dir', out, '--json'], { env: site.env() });
-      const first = JSON.parse(r.stdout);
-      assert.equal(r.code, first.ok ? 0 : 1, r.stderr);
-      assert.equal(first.publishDir, out);
+      assert.equal(r.code, 0, r.stderr);
+      assert.equal(JSON.parse(r.stdout).publishDir, out);
       assert.ok((await stat(join(out, 'footer-dirt.svg'))).size > 0);
       // The same sources as a document whose manifest names no publish folder.
       const doc = join(out, 'bare.pixellab');
@@ -601,12 +600,9 @@ describe('art.build (spec R7)', needsSite, () => {
       assert.ok((await stat(join(out, 'bare-out', 'hero-island.svg'))).size > 0);
       const budgets = { 'hero-island.svg': { raw: 768000, gzip: 153600 }, 'range-sprite.svg': { raw: 204800, gzip: 51200 } };
       await writeFile(join(doc, 'manifest.json'), `${JSON.stringify({ format: 1, publish: { budgets } })}\n`);
-      const given = await runCli(['art', 'build', '--document', doc, '--dir', join(out, 'bare-out'), '--json'], { env: site.env() });
-      // Every output is within its budget; the exit code is 1 only for a preview-only scene over the engine's.
-      const givenRes = JSON.parse(given.stdout);
-      assert.ok(givenRes.outputs.every((/** @type {any} */ o) => !o.over), givenRes.outputs.map((/** @type {any} */ o) => o.report).join('\n'));
-      assert.equal(given.code, givenRes.ok ? 0 : 1, given.stderr);
-      assert.equal(givenRes.outputs.length, 6, 'six files published');
+      const given = await runCli(['art', 'build', '--document', doc, '--dir', join(out, 'bare-out')], { env: site.env() });
+      assert.equal(given.code, 0, given.stderr);
+      assert.match(given.stdout, /published 6 files to .*bare-out/);
     } finally {
       await rm(out, { recursive: true, force: true });
       await site.cleanup();

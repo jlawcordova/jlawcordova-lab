@@ -1061,7 +1061,8 @@ const isVariantGroup = (item) => 'group' in item && isRecord(item.group) && 'dat
  * Puts one list in depth order: groups sort as one object (their box is the
  * union of their members' boxes at rest) with their members sorted inside,
  * and a run of consecutive variant groups sorts as one unit and keeps its own
- * order. Back-marked items come first, front-marked last. Returns copies of
+ * order. Items keep the order the file lists them in unless an overlap forces
+ * a change. Back-marked items come first, front-marked last. Returns copies of
  * the groups, the same item objects, the new order, and whether the list and
  * every list inside it already were in order.
  * @param {Sources} sources

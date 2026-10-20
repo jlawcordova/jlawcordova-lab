@@ -346,8 +346,7 @@ describe('scenes (R3)', () => {
     assert.deepEqual(tileToPx([2, 1, 1], [5, 32]), [21, 40]);
     const items = [{ object: 'dot', at: { tile: [1, 0, 1] } }, { object: 'ink', at: { px: [3, 4] } }];
     const sources = src({ dot, ink }, { s: scene(items, { origin: [2, 30] }) });
-    // The scene draws in depth order: the pixel item stands far up the screen, well behind the tile item, so it paints first.
-    assert.deepEqual([...composite(renderScene(sources, 's').root)], [['3,4', 'ink'], ['18,22', 'grass-2']]);
+    assert.deepEqual([...composite(renderScene(sources, 's').root)], [['18,22', 'grass-2'], ['3,4', 'ink']]);
   });
 
   it('R16: pxToTile finds the tile under every pixel, at any level and origin', () => {
