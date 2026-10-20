@@ -253,6 +253,12 @@ function sortBand(nodes, members) {
  * is behind. A cycle is broken by the smallest key among the nodes that the
  * still chain doesn't hold back. With nothing moved from rest, the order is
  * the rest order, so time 0 draws what the rest sort draws.
+ *
+ * It is made to be called for many instants: the pairs of still nodes are
+ * worked out once, and a moving node's pairs with the still ones are worked
+ * out once for each node object it is given (so give the same object while
+ * its box and bounds stay the same, and don't change a node after giving
+ * it). Only the pairs among moving nodes are tested again at each instant.
  * @param {(Node & { moving?: boolean })[]} nodes
  * @returns {(current: Map<number, Node>) => number[]}
  */
@@ -261,77 +267,126 @@ export function movingOrder(nodes) {
     const members = nodes.flatMap((node, i) => (node.depth === band ? [i] : []));
     const stills = members.filter((i) => !nodes[i].moving);
     const movers = members.filter((i) => nodes[i].moving);
+    /** Where each still node stands in the chain, by node index. */
+    const position = new Int32Array(nodes.length).fill(-1);
+    stills.forEach((i, at) => (position[i] = at));
     /** The unplaced "behind" pairs among still nodes never change, so they're counted once. */
-    const waiting = new Map(members.map((i) => [i, 0]));
-    /** @type {Map<number, number[]>} */
-    const after = new Map(members.map((i) => [i, []]));
+    const waiting = new Int32Array(nodes.length);
+    /** The still nodes that come after each still one, by node index. @type {number[][]} */
+    const after = [];
+    for (const i of stills) after[i] = [];
     for (let a = 0; a < stills.length; a++) {
       for (let b = a + 1; b < stills.length; b++) {
         const [i, j] = [stills[a], stills[b]];
         if (!overlaps(nodes[i].bounds, nodes[j].bounds)) continue;
-        if (behind(nodes[i].box, nodes[j].box)) link(after, waiting, i, j);
-        else if (behind(nodes[j].box, nodes[i].box)) link(after, waiting, j, i);
+        if (behind(nodes[i].box, nodes[j].box)) {
+          after[i].push(j);
+          waiting[j]++;
+        } else if (behind(nodes[j].box, nodes[i].box)) {
+          after[j].push(i);
+          waiting[i]++;
+        }
       }
     }
     // The chain: each still node comes after the one before it.
-    for (let a = 1; a < stills.length; a++) link(after, waiting, stills[a - 1], stills[a]);
-    return { stills, movers, others: [...stills, ...movers], waiting, after };
+    for (let a = 1; a < stills.length; a++) {
+      after[stills[a - 1]].push(stills[a]);
+      waiting[stills[a]]++;
+    }
+    const keyOfStill = new Map(stills.map((i) => [i, keyOf(nodes[i].box)]));
+    /**
+     * What a moving node standing as `node` has to do with the still ones, kept
+     * for as long as the node object is. `holds`: the still nodes that wait for
+     * it (it is behind them). `needs`: how many of the chain must be placed
+     * before it is (the position after the last still node behind it).
+     * @type {WeakMap<Node, { holds: number[], needs: number, key: number }>}
+     */
+    const known = new WeakMap();
+    const relate = (/** @type {Node} */ node) => {
+      let found = known.get(node);
+      if (!found) {
+        const holds = [];
+        let needs = 0;
+        for (const o of stills) {
+          const other = nodes[o];
+          if (!overlaps(node.bounds, other.bounds)) continue;
+          if (behind(node.box, other.box)) holds.push(o);
+          else if (behind(other.box, node.box)) needs = position[o] + 1;
+        }
+        known.set(node, (found = { holds, needs, key: keyOf(node.box) }));
+      }
+      return found;
+    };
+    return { stills, movers, waiting, after, keyOfStill, relate };
   });
   return (current) => {
     /** @type {number[]} */
     const order = [];
-    for (const { stills, movers, others, waiting: still, after: stillAfter } of bands) {
-      const waiting = new Map(still);
-      /** @type {Map<number, number[]>} */
-      const dynamic = new Map(movers.map((i) => [i, []]));
+    for (const { stills, movers, waiting: base, after: stillAfter, keyOfStill, relate } of bands) {
+      const waiting = base.slice();
       const at = (/** @type {number} */ i) => current.get(i) ?? nodes[i];
-      const keys = new Map(movers.map((i) => [i, keyOf(at(i).box)]));
-      for (const m of movers) {
-        const a = at(m);
-        for (const o of others) {
-          if (o === m || (nodes[o].moving && o < m)) continue;
-          const b = at(o);
-          if (!overlaps(a.bounds, b.bounds)) continue;
-          if (behind(a.box, b.box)) hold(dynamic, waiting, m, o);
-          else if (behind(b.box, a.box)) hold(dynamic, waiting, o, m);
+      const now = movers.map((m) => at(m));
+      const relations = now.map(relate);
+      /** For each moving node (by its place in `movers`): the nodes that wait for it, the count of moving nodes it waits for, and how many of the chain it needs placed. @type {number[][]} */
+      const holdsMovers = movers.map(() => []);
+      const waits = new Int32Array(movers.length);
+      for (let a = 0; a < movers.length; a++) {
+        for (const o of relations[a].holds) waiting[o]++;
+        for (let b = a + 1; b < movers.length; b++) {
+          if (!overlaps(now[a].bounds, now[b].bounds)) continue;
+          if (behind(now[a].box, now[b].box)) {
+            holdsMovers[a].push(b);
+            waits[b]++;
+          } else if (behind(now[b].box, now[a].box)) {
+            holdsMovers[b].push(a);
+            waits[a]++;
+          }
         }
       }
-      /** @type {Set<number>} */
-      const unplaced = new Set(movers);
+      /** The moving nodes not yet placed, by place in `movers`, ascending. */
+      const unplaced = movers.map((_, k) => k);
       let head = 0;
       for (let step = stills.length + movers.length; step > 0; step--) {
         // The candidates: every unplaced moving node, and the next still one.
-        const candidates = [...movers.filter((m) => unplaced.has(m)), ...(head < stills.length ? [stills[head]] : [])];
+        const still = head < stills.length ? stills[head] : -1;
+        // The first listed one that is free: a moving node waits for the moving ones behind it and for the chain up to the still ones behind it.
         let free = -1;
-        let any = candidates[0];
-        for (const c of candidates) {
-          if ((waiting.get(c) ?? 0) === 0 && (free < 0 || c < free)) free = c;
-          const [kc, ka] = [nodes[c].moving ? /** @type {number} */ (keys.get(c)) : keyOf(nodes[c].box), nodes[any].moving ? /** @type {number} */ (keys.get(any)) : keyOf(nodes[any].box)];
-          if (kc < ka || (kc === ka && c < any)) any = c;
+        let freeAt = -1;
+        for (let u = 0; u < unplaced.length; u++) {
+          const k = unplaced[u];
+          if (waits[k] === 0 && head >= relations[k].needs) {
+            [free, freeAt] = [movers[k], u];
+            break;
+          }
         }
-        const next = free >= 0 ? free : any;
+        if (still >= 0 && waiting[still] === 0 && (free < 0 || still < free)) [free, freeAt] = [still, -1];
+        let next = free;
+        if (free < 0) {
+          // A cycle: the smallest key, then the first listed.
+          let best = Infinity;
+          for (let u = 0; u < unplaced.length; u++) {
+            const k = unplaced[u];
+            if (next < 0 || relations[k].key < best || (relations[k].key === best && movers[k] < next)) [next, best, freeAt] = [movers[k], relations[k].key, u];
+          }
+          if (still >= 0) {
+            const key = /** @type {number} */ (keyOfStill.get(still));
+            if (next < 0 || key < best || (key === best && still < next)) [next, freeAt] = [still, -1];
+          }
+        }
         order.push(next);
-        if (nodes[next].moving) unplaced.delete(next);
-        else head++;
-        for (const k of stillAfter.get(next) ?? []) waiting.set(k, /** @type {number} */ (waiting.get(k)) - 1);
-        for (const k of dynamic.get(next) ?? []) waiting.set(k, /** @type {number} */ (waiting.get(k)) - 1);
+        if (freeAt >= 0) {
+          const k = unplaced[freeAt];
+          unplaced.splice(freeAt, 1);
+          for (const o of relations[k].holds) waiting[o]--;
+          for (const b of holdsMovers[k]) waits[b]--;
+        } else {
+          head++;
+          for (const k of stillAfter[next]) waiting[k]--;
+        }
       }
     }
     return order;
   };
-}
-
-/** `a` goes before `b`. @param {Map<number, number[]>} after @param {Map<number, number>} waiting */
-function link(after, waiting, a, b) {
-  /** @type {number[]} */ (after.get(a)).push(b);
-  waiting.set(b, /** @type {number} */ (waiting.get(b)) + 1);
-}
-
-/** Like link, for an edge that lasts one instant. @param {Map<number, number[]>} dynamic @param {Map<number, number>} waiting */
-function hold(dynamic, waiting, a, b) {
-  if (!dynamic.has(a)) dynamic.set(a, []);
-  /** @type {number[]} */ (dynamic.get(a)).push(b);
-  waiting.set(b, /** @type {number} */ (waiting.get(b)) + 1);
 }
 
 /**

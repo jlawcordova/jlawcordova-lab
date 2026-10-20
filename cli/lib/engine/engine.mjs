@@ -1236,7 +1236,22 @@ function withCopies(sources, arranged, origin, tracks, duration, copies) {
   if (moving.length === 0) return units.flat().map(entry);
   const nodes = nodesOf(units, movers);
   const orderAt = movingOrder(nodes);
-  const makers = new Map(moving.map((i) => [i, nodeMaker(sources, units[i][0].item, origin, movers[i])]));
+  // A moving item's node depends only on its move, which holds for a whole run: make it once per run, and hand the sort the same object while it holds.
+  const makers = new Map(
+    moving.map((i) => {
+      const make = nodeMaker(sources, units[i][0].item, origin, movers[i]);
+      /** @type {Map<number[], ReturnType<typeof make>>} */
+      const made = new Map();
+      return [
+        i,
+        (/** @type {number[]} */ move) => {
+          let node = made.get(move);
+          if (!node) made.set(move, (node = make(move)));
+          return node;
+        },
+      ];
+    }),
+  );
   const runs = new Map(moving.map((i) => [i, moveRuns(movers[i], units[i][0].item.object, duration)]));
   // The cuts: wherever any moving item takes a step (those within rounding of each other count as one).
   const cuts = [0];
@@ -1244,7 +1259,7 @@ function withCopies(sources, arranged, origin, tracks, duration, copies) {
   cuts.push(100);
   const windows = placeWindows(cuts, (span) => {
     const middle = (cuts[span] + cuts[span + 1]) / 2;
-    const current = new Map(moving.map((i) => [i, /** @type {(move?: number[]) => any} */ (makers.get(i))(moveAtPercent(/** @type {any} */ (runs.get(i)), middle))]));
+    const current = new Map(moving.map((i) => [i, /** @type {(move: number[]) => any} */ (makers.get(i))(moveAtPercent(/** @type {any} */ (runs.get(i)), middle))]));
     return placesIn(orderAt(current), nodes);
   });
   /** The entries after each still run (by its index; -1 for the start), in order. @type {Map<number, { rank: number, unit: number, k: number, copy: string | null }[]>} */

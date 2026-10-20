@@ -277,6 +277,28 @@ describe('the order while moving: still chain, places, windows (R10, D6)', () =>
     }
   });
 
+  it('R10: the same node objects handed over again at many instants (as the SVG does) still agree with a plain re-sort, on lists up to 120 nodes', () => {
+    // movingOrder remembers a moving node's pairs with the still ones for as long as it is given the same object, so reuse them across instants.
+    for (const seed of SEEDS) {
+      const r = rng(seed * 5 + 2);
+      for (let round = 0; round < 6; round++) {
+        const n = 20 + Math.floor(r() * 100);
+        const { listed, boxes } = randomList(r, n);
+        const places = listed.map((nd) =>
+          nd.moving ? Array.from({ length: 4 }, () => ({ box: boxes[Math.floor(r() * n)], bounds: r() < 0.8 ? EVERYWHERE : { minX: 500, minY: 0, maxX: 510, maxY: 5 } })) : [],
+        );
+        const orderAt = movingOrder(listed);
+        for (let instant = 0; instant < 12; instant++) {
+          // Each moving node is in one of its places, or at rest (not in the map) now and then.
+          const current = new Map(listed.flatMap((nd, i) => (nd.moving && r() < 0.9 ? [[i, places[i][Math.floor(r() * places[i].length)]]] : [])));
+          const real = orderAt(current);
+          assert.deepEqual(real, naiveOrder(listed, current), `seed ${seed}, round ${round}, instant ${instant}`);
+          assert.deepEqual(orderAt(current), real, `seed ${seed}, round ${round}, instant ${instant}: asking again gives the same order`);
+        }
+      }
+    }
+  });
+
   it('R10: a place is the still node a moving one follows and its rank among the moving ones after it', () => {
     const nodes = [{ moving: true }, { moving: false }, { moving: true }, { moving: true }, { moving: false }, { moving: true }];
     const places = placesIn([0, 1, 3, 2, 4, 5], nodes);
@@ -546,7 +568,7 @@ describe('the SVG draws a copy for each place (R10, D6)', () => {
     const copies = motionCopies(sources, 's');
     assert.ok(copies.length > 0, 'items cross others in the order');
     assert.ok(out.style.includes('-z0'), 'the CSS has copies');
-    assert.ok(took < 20000, `took ${took.toFixed(0)} ms`);
+    assert.ok(took < 5000, `took ${took.toFixed(0)} ms`);
   });
 });
 
