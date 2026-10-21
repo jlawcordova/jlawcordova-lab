@@ -17,7 +17,13 @@ final class AgentModel {
     var activity: [ActivityRow] = []
     /// Clear (view only) hides the rows up to this id.
     var clearedThrough = -1
-    var errorsOnly = false
+    /// The activity filter: All, Chats (calls from the Agent chat), Errors.
+    enum ActivityFilter: String, CaseIterable, Sendable { case all, chats, errors }
+    var filter: ActivityFilter = .all
+    var errorsOnly: Bool {
+        get { filter == .errors }
+        set { filter = newValue ? .errors : .all }
+    }
     var selectedID: String?
     var detail: ProposalDetail?
     var detailError: String?
@@ -69,7 +75,14 @@ final class AgentModel {
     }
 
     var visibleActivity: [ActivityRow] {
-        activity.filter { $0.id > clearedThrough && (!errorsOnly || !$0.entry.ok) }
+        activity.filter { row in
+            guard row.id > clearedThrough else { return false }
+            switch filter {
+            case .all: return true
+            case .chats: return row.entry.chat != nil
+            case .errors: return !row.entry.ok
+            }
+        }
     }
 
     // MARK: Loading
@@ -116,6 +129,7 @@ final class AgentModel {
         let before = selected
         let oldIndex = selectedID.flatMap { id in proposals.firstIndex { $0.id == id } }
         proposals = list
+        app?.chat.proposalsListed(list.map(\.id))
         guard let id = selectedID else { return }
         if let now = list.first(where: { $0.id == id }) {
             // Rewritten by the agent (a new version) or its base changed: reload.
@@ -342,6 +356,7 @@ final class AgentModel {
             let r: ProposalApplyResult = try await connection.call("proposal.apply", params)
             working = nil
             lastResult = "Applied \(r.id): wrote \(r.file)" + (r.reloaded ? "; the open copy reloaded" : r.merged == true ? "; merged into your open copy" : r.conflict == true ? "; couldn't merge into your open copy, so choose in the editor" : "")
+            app.chat.proposalSettled(p.id, applied: true, detail: "wrote \(r.file)")
             if let ref = DocRef(id: r.doc) { await app.docWritten(ref) }
             await refreshList()
         } catch let e as RPCError {
@@ -388,6 +403,7 @@ final class AgentModel {
             let _: JSONValue = try await connection.call("proposal.reject", ["id": .string(p.id)])
             working = nil
             lastResult = "Rejected \(p.id) (\(p.ref?.name ?? p.doc))"
+            app.chat.proposalSettled(p.id, applied: false, detail: "nothing changed")
             await refreshList()
         } catch {
             working = nil
@@ -395,7 +411,7 @@ final class AgentModel {
         }
     }
 
-    private func refreshList() async {
+    func refreshList() async {
         guard let connection = app?.connection else { return }
         if let r: ProposalList = try? await connection.call("proposal.list") { setProposals(r.proposals) }
     }

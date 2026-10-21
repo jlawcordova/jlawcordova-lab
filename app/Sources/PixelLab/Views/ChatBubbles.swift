@@ -346,18 +346,32 @@ struct FlowLayout: Layout {
     }
 }
 
-/// A card's buttons (PR 3 adds Approve, Reject and Show on stage): the diff in the Agent window.
+/// A card's buttons (spec R16): Approve, Reject and Show/Hide on stage while it waits, and the diff.
 struct ProposalCardActions: View {
     var message: ChatMessage
     var chat: ChatModel
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        Button("Diff in the Agent window") {
-            if let id = message.proposal { model.agent.select(id) }
-            model.agent.showWindow()
+        let waiting = message.outcome == nil
+        let busy = model.agent.working != nil
+        VStack(alignment: .leading, spacing: 6) {
+            if waiting {
+                FlowLayout(spacing: 6) {
+                    Button("Approve") { Task { await chat.approve(message) } }
+                        .buttonStyle(CapsuleButtonStyle(prominent: true)).disabled(busy)
+                        .accessibilityHint("Writes the proposal to the document")
+                    Button("Reject") { Task { await chat.reject(message) } }
+                        .buttonStyle(CapsuleButtonStyle()).disabled(busy)
+                    Button(chat.ghostOn(message) ? "Hide on stage" : "Show on stage") { Task { await chat.toggleGhost(message) } }
+                        .buttonStyle(CapsuleButtonStyle())
+                        .accessibilityAddTraits(chat.ghostOn(message) ? .isSelected : [])
+                }
+            }
+            Button("Diff in the Agent window") { Task { await chat.showDiff(message) } }
+                .buttonStyle(AccentLinkStyle())
         }
-        .buttonStyle(AccentLinkStyle())
+        .padding(.top, 2)
     }
 }
 
