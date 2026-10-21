@@ -1,0 +1,9 @@
+{
+  "kind": "block",
+  "size": [1, 1, 1],
+  "faces": {
+    "top": "grass-2",
+    "left": "soil-2",
+    "right": "soil-3"
+  }
+}
