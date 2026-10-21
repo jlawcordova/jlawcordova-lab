@@ -47,6 +47,10 @@ final class AppModel {
     var showGrid: Bool = UserDefaults.standard.object(forKey: SettingsKey.showGrid) as? Bool ?? true {
         didSet { UserDefaults.standard.set(showGrid, forKey: SettingsKey.showGrid) }
     }
+    /// View › Show Published Frame: the outline of the box a scene publishes at.
+    var showFrame: Bool = UserDefaults.standard.object(forKey: SettingsKey.showFrame) as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showFrame, forKey: SettingsKey.showFrame) }
+    }
     var showInspector = true
     var searchText = ""
     /// The stage's visible size, for Fit.
@@ -495,6 +499,47 @@ final class AppModel {
             doc.frameInfo = r
             doc.frameStamp = generation
         }
+    }
+
+    /// `scene.frame` with params (fit, box, margin) on the open scene; the doc
+    /// changes, so the stage renders again.
+    @discardableResult
+    func frameCommand(_ params: [String: JSONValue]) async -> SceneFrameResult? {
+        guard let doc = document, doc.ref.kind == .scene, let connection else { return nil }
+        var p = params
+        p["name"] = .string(doc.ref.name)
+        do {
+            let r: SceneFrameResult = try await connection.call("scene.frame", p)
+            if document === doc {
+                doc.frameInfo = r
+                doc.frameStamp = nil
+                doc.syncFrameDraft()
+                timeline.invalidate()
+                requestRender()
+            }
+            if let s = r.summary { editor.announce(s); lastEdit = s }
+            notice = nil
+            return r
+        } catch let e as RPCError {
+            notice = e.message
+        } catch {
+            notice = error.localizedDescription
+        }
+        return nil
+    }
+
+    /// Fit to content: remove the scene's fixed size.
+    func fitFrame() async { await frameCommand(["fit": true]) }
+
+    /// Fix the size to the box typed in the inspector ("x, y, w, h").
+    func applyFrameDraft() async {
+        guard let doc = document else { return }
+        let n = doc.frameDraft.split(whereSeparator: { ", ".contains($0) }).compactMap { Int($0) }
+        guard n.count == 4, n[2] > 0, n[3] > 0 else {
+            notice = "The published box is four whole numbers: x, y, width, height."
+            return
+        }
+        await frameCommand(["box": .array(n.map { JSONValue($0) })])
     }
 
     /// What the stage must hold: the published box, where the cursor has been

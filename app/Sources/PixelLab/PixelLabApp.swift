@@ -117,6 +117,8 @@ struct PixelLabCommands: Commands {
                 if model.mode == .object { model.objectEditor.pixelGrid.toggle() } else { model.showGrid.toggle() }
             }
                 .keyboardShortcut("'")
+            Button(model.showFrame ? "Hide Published Frame" : "Show Published Frame") { model.showFrame.toggle() }
+                .disabled(model.mode != .scene)
             Button(model.showInspector ? "Hide Inspector" : "Show Inspector") { model.showInspector.toggle() }
                 .keyboardShortcut("i", modifiers: [.command, .option])
             Divider()

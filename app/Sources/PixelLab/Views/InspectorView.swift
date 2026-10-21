@@ -31,6 +31,7 @@ struct InspectorView: View {
                     if model.editor.tool == .place || model.editor.placeObject != nil {
                         PlaceInspector()
                     }
+                    PublishedSizeSection(doc: doc)
                     section("Checks") {
                         ScrollView {
                             ChecksList(doc: doc).frame(maxWidth: .infinity, alignment: .leading)
@@ -82,7 +83,7 @@ struct InspectorView: View {
                 Text(summary).font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(2)
             }
             if doc.ref.kind == .scene {
-                Text("\(Int(doc.publishSize.width))×\(Int(doc.publishSize.height)) px · \(model.effectiveZoom)×")
+                Text("\(Int(doc.publishSize.width))×\(Int(doc.publishSize.height)) px · \(doc.isFixedFrame ? "fixed" : "fits") · \(model.effectiveZoom)×")
                     .font(Theme.monoFont(10.5))
                     .foregroundStyle(Theme.inkMuted)
             } else if let render = doc.render {

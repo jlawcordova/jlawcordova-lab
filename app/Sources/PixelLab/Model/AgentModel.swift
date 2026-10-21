@@ -238,6 +238,7 @@ final class AgentModel {
         if let hit = ghostCache[wanted.key] {
             ghost = hit
             memo = nil
+            app?.ensureWorkspace()
             return
         }
         // While the timeline plays, the ghost follows it: one render in flight
@@ -265,6 +266,8 @@ final class AgentModel {
                         ghost = made
                         ghostError = nil
                         memo = nil
+                        // The stage holds the proposal's box too, so a proposal that grows the scene isn't clipped.
+                        app?.ensureWorkspace()
                     }
                 } catch {
                     ghostError = error.localizedDescription

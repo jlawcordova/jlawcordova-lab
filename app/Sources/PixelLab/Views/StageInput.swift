@@ -51,16 +51,21 @@ final class StageInputView: NSView {
     private var panStart: (window: CGPoint, origin: CGPoint)?
     private var tracking: NSTrackingArea?
 
-    /// The workspace grew toward the top or left, so the content moved right or
-    /// down: scroll by as much, and what the owner is looking at stays put.
+    /// The workspace changed size or place (it grew, or the viewport did): scroll
+    /// so the scene pixel at the middle of the view stays there, and what the
+    /// owner is looking at stays put.
     private func keepScroll(from old: StageGeometry?) {
-        guard isScene, let old, let new = geometry, old.zoom == new.zoom, old.viewBox.origin != new.viewBox.origin else { return }
-        let dx = (old.viewBox.minX - new.viewBox.minX) * new.zoom + new.artOrigin.x - old.artOrigin.x
-        let dy = (old.viewBox.minY - new.viewBox.minY) * new.zoom + new.artOrigin.y - old.artOrigin.y
+        guard isScene, let old, let new = geometry, old.zoom == new.zoom,
+              old.viewBox != new.viewBox || old.contentSize != new.contentSize,
+              let scroll = enclosingScrollView else { return }
+        let clip = scroll.contentView
+        let size = clip.bounds.size
+        let center = old.scenePoint(fromView: CGPoint(x: clip.bounds.origin.x + size.width / 2, y: clip.bounds.origin.y + size.height / 2))
         DispatchQueue.main.async { [weak self] in
             guard let scroll = self?.enclosingScrollView else { return }
             let clip = scroll.contentView
-            clip.scroll(to: CGPoint(x: clip.bounds.origin.x + dx, y: clip.bounds.origin.y + (clip.isFlipped ? dy : -dy)))
+            let p = new.viewPoint(fromScene: center)
+            clip.scroll(to: CGPoint(x: max(p.x - size.width / 2, 0), y: max(p.y - size.height / 2, 0)))
             scroll.reflectScrolledClipView(clip)
         }
     }
