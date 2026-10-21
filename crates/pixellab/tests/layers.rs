@@ -320,7 +320,6 @@ fn r1_a_merge_that_would_leave_an_item_in_a_layer_neither_side_kept_is_refused()
 // --- paint order and output (R2) ---
 
 #[test]
-#[ignore = "needs U28"]
 fn r2_art_build_of_a_document_with_layers_is_byte_identical_to_the_same_document_without_them() {
     let strip = |mut s: Value| {
         s.as_object_mut().unwrap().shift_remove("layers");
@@ -340,7 +339,7 @@ fn r2_art_build_of_a_document_with_layers_is_byte_identical_to_the_same_document
     assert_eq!(stringify(&strip(layered())), stringify(&yard()), "the stripped scene is the scene without layers");
     let mut outs: Vec<BTreeMap<String, Vec<u8>>> = Vec::new();
     for scene in [strip(layered()), layered()] {
-        let fx = Fx::new();
+        let fx = Fx::bare();
         fx.write_scene("layered", &scene);
         let out = fx.doc.base.join("out");
         let r = cli(&fx, &["art", "build", "--dir", out.to_str().unwrap(), "--document", fx.doc.root.to_str().unwrap()]);
@@ -385,13 +384,12 @@ fn r2_making_renaming_assigning_and_ungrouping_layers_never_reorder_or_move_item
 }
 
 #[test]
-#[ignore = "needs U28"]
 fn r2_depth_order_r4_a_layer_edit_on_a_scene_whose_file_is_out_of_depth_order_sorts_it_and_publishes_the_same_bytes() {
     // The two ground cubes listed the wrong way round: the cube at 1,0 stands in front of the one at 0,0 but is listed first.
     let mut swapped = yard();
     let items = swapped["items"].as_array_mut().unwrap();
     items.swap(0, 1);
-    let fx = Fx::new();
+    let fx = Fx::bare();
     fx.write_scene("yard", &swapped);
     let out = fx.doc.base.join("out");
     let build = || {
@@ -634,9 +632,8 @@ fn r5_scene_render_hide_leaves_hidden_layers_out_focus_adds_the_layers_own_rende
 }
 
 #[test]
-#[ignore = "needs U28"]
 fn r5_the_cli_runs_the_layer_commands_and_writes_the_scene() {
-    let fx = Fx::new();
+    let fx = Fx::bare();
     fx.write_scene("yard", &yard());
     let root = fx.doc.root.to_str().unwrap();
     let made = cli(&fx, &["scene", "layer", "new", "yard", "--layer-name", "Ground", "--items", "0.0,1.0", "--document", root]);
@@ -657,10 +654,9 @@ fn r5_the_cli_runs_the_layer_commands_and_writes_the_scene() {
 }
 
 #[test]
-#[ignore = "needs U28"]
 fn r5_over_mcp_the_layer_commands_are_tools_and_their_edits_become_a_proposal() {
     use std::io::{BufRead, BufReader, Write};
-    let fx = Fx::new();
+    let fx = Fx::bare();
     fx.write_scene("yard", &yard());
     let before = std::fs::read_to_string(fx.doc.root.join("scenes/yard.json")).unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_pixellab"))
@@ -714,10 +710,13 @@ struct Fx {
 }
 
 impl Fx {
+    /// The sample document and a state folder, with no extra scenes (the command-level tests add only what they need).
+    fn bare() -> Fx {
+        Fx { doc: common::make_document(), state: common::temp_dir("pixellab-state-") }
+    }
+
     fn new() -> Fx {
-        let doc = common::make_document();
-        let state = common::temp_dir("pixellab-state-");
-        let fx = Fx { doc, state };
+        let fx = Fx::bare();
         fx.write_scene("yard", &yard());
         fx.write_scene("layered", &layered());
         fx
