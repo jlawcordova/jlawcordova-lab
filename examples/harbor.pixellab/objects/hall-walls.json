@@ -1,0 +1,10 @@
+{
+  "kind": "block",
+  "size": [2, 1, 1],
+  "faces": {
+    "top": "path-1",
+    "left": "cream",
+    "right": "path-1",
+    "edge": "wood-4"
+  }
+}

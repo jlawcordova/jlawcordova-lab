@@ -1,10 +1,10 @@
 # Example documents (`examples/`)
 
-Two small `.pixellab` documents with scene layers, to try the app on and to test with. They're made from scratch by [`scripts/make-examples.mjs`](../scripts/make-examples.mjs) with the starter palette, so they're the same on every run, and `npm test` checks the committed copies still match it. Each scene is written in depth order, back to front by where its items stand, as every edit in the app leaves it; reorder nothing by hand. Neither is the site's art.
+Two small `.pixellab` documents with scene layers, to try the app on and to test with. They're in format 2 (JSON sources), made from scratch by [`scripts/make-examples.mjs`](../scripts/make-examples.mjs), which drives the `pixellab` program (`target/release/pixellab`) with the starter palette, so they're the same on every run. `npm run examples` rewrites them, and `npm test` checks the committed copies still match. Each scene is written in depth order, back to front by where its items stand, as every edit in the app leaves it; reorder nothing by hand. Neither is the site's art.
 
 | Document | Scenes | What it has |
 | --- | --- | --- |
-| `harbor.pixellab` | `harbor`, `harbor-flat` | An 8×8 island: 89 items in 16 layers up to three deep, the site's `{ group }` wrappers around every tile and object, two rocks in no layer, and an animated boat. `harbor-flat` is the same scene with no layers, and publishes the same SVG. |
+| `harbor.pixellab` | `harbor`, `harbor-flat` | An 8×8 island: 89 items in 16 layers up to three deep, the site's `{ group }` wrappers around every tile and object, two rocks in no layer, an animated boat that hops (the `hop` action), and a barrel on the dock that bobs (an ambient loop). `harbor-flat` is the same scene with no layers, and publishes the same SVG. |
 | `town.pixellab` | `town` | A 16×16 island: 379 items in 59 layers four deep (district › street › house), with eight lamps in no layer. |
 
 The harbor's layers:

@@ -6,8 +6,8 @@
 // and points --site at that copy. Both set HOME to a temp folder so no real
 // config file is read.
 
-import { spawn } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -19,6 +19,21 @@ import { openDocument } from '../lib/document.mjs';
 
 export const REPO = fileURLToPath(new URL('../..', import.meta.url));
 export const BIN = join(REPO, 'cli', 'bin', 'pixellab.mjs');
+
+/**
+ * The format-1 example documents (.mjs sources), until cutover: examples/ is in format 2
+ * now (made by the Rust program), and the Node CLI reads format 1 only. They come from the
+ * parity gate's commit, PR 2's merge into feat/rust-engine, with `git archive`, into a
+ * temp folder that goes when the process ends.
+ */
+export const FORMAT1_COMMIT = '00ef555';
+export const FORMAT1_EXAMPLES = (() => {
+  const dir = mkdtempSync(join(tmpdir(), 'pixellab-examples-f1-'));
+  process.on('exit', () => rmSync(dir, { recursive: true, force: true }));
+  const archive = execFileSync('git', ['-C', REPO, 'archive', FORMAT1_COMMIT, 'examples/']);
+  execFileSync('tar', ['-x', '-C', dir], { input: archive });
+  return join(dir, 'examples');
+})();
 
 /** The sample document the core suites run on: two objects, two scenes, a manifest. */
 export const FIXTURE_DOC = join(REPO, 'cli', 'test', 'fixtures', 'sample.pixellab');

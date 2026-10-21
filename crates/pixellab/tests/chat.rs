@@ -2,10 +2,11 @@
 //! docs/intents/2026-10-agent-chat/spec.md): the selection block
 //! (chat.context, D5), questions (chat.ask, D8), and proposals and activity
 //! that know where they came from (D7). Everything runs on temp copies of
-//! examples/harbor.pixellab, bootstrapped to format 2 once per run.
+//! examples/harbor.pixellab (format 2), copied once per run.
 
 #![allow(clippy::result_large_err)]
 
+mod bootstrap;
 mod common;
 
 use std::collections::HashMap;
@@ -23,21 +24,12 @@ use pixellab::registry::registry;
 use pixellab::session::{Options, Session};
 use serde_json::{json, Value};
 
-/// The harbor as format 2, made once with Node's bootstrap.
+/// The harbor example (format 2), copied once.
 fn harbor_master() -> &'static PathBuf {
     static MASTER: OnceLock<PathBuf> = OnceLock::new();
     MASTER.get_or_init(|| {
         let base = common::temp_dir("pixellab-chat-harbor-");
-        let to = base.join("harbor.pixellab");
-        let out = Command::new("node")
-            .current_dir(common::repo())
-            .args(["scripts/goldens.mjs", "--bootstrap"])
-            .arg(common::repo().join("examples/harbor.pixellab"))
-            .arg(&to)
-            .output()
-            .expect("node");
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-        to
+        bootstrap::example(&base, "harbor")
     })
 }
 

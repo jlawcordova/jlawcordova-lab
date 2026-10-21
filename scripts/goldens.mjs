@@ -189,10 +189,15 @@ export async function bootstrap(from, to) {
 
 /** The documents of the corpus, as [name, format-1 folder]. @param {string} dir @param {string | null} site */
 function corpusDocs(dir, site) {
+  // examples/ is in format 2 now; the corpus is format 1, so the examples are the ones at
+  // PR 2's merge commit (the parity gate's), by `git archive`, until cutover.
+  const examples = join(dir, 'examples-format1');
+  mkdirSync(examples, { recursive: true });
+  execFileSync('tar', ['-x', '-C', examples], { input: execFileSync('git', ['-C', REPO, 'archive', '00ef555', 'examples/']) });
   const docs = [
     ['sample', join(REPO, 'cli/test/fixtures/sample.pixellab')],
-    ['harbor', join(REPO, 'examples/harbor.pixellab')],
-    ['town', join(REPO, 'examples/town.pixellab')],
+    ['harbor', join(examples, 'examples/harbor.pixellab')],
+    ['town', join(examples, 'examples/town.pixellab')],
   ];
   const format1 = join(dir, 'format1');
   mkdirSync(format1, { recursive: true });
