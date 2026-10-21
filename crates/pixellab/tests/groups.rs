@@ -85,6 +85,7 @@ fn session() -> Session {
     unimplemented!("needs U14: a session over a document with the stone and the groups scene")
 }
 
+#[allow(clippy::result_large_err)]
 fn call(_s: &mut Session, _name: &str, _params: Value) -> Result<Value, CommandError> {
     unimplemented!("needs U22: the scene commands")
 }
@@ -218,7 +219,7 @@ fn r11_into_a_new_group_with_its_foot_the_group_goes_where_its_item_stands_among
     let t = call(&mut s, "scene.place", json!({ "object": "block", "at": [0, 0, 0], "newGroup": { "data-enter": "ground" } })).unwrap();
     let items = call(&mut s, "scene.items", json!({})).unwrap()["items"].as_array().unwrap().clone();
     let new0 = items.iter().find(|i| i["path"] == t["path"]).unwrap();
-    let cube1 = items.iter().find(|i| i["object"] == "block" && i["at"]["tile"].to_string() == "[1,0,0]").unwrap();
+    let cube1 = items.iter().find(|i| i["object"] == "block" && i["at"]["tile"] == json!([1, 0, 0])).unwrap();
     let first = |p: &Value| p["path"].as_str().unwrap().split('.').next().unwrap().parse::<usize>().unwrap();
     assert!(first(new0) < first(cube1), "before the group whose cube is at 1,0,0");
     let nested = call(
