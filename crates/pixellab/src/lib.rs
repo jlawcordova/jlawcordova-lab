@@ -4,6 +4,9 @@
 //! names it. The executable is `main.rs`; the library is here so the tests
 //! can call the doors directly.
 
+// A CommandError is large; results carry it by value, as the Node CLI threw it.
+#![allow(clippy::result_large_err)]
+
 pub mod activity_summary;
 pub mod argv;
 pub mod chat_context;
@@ -27,5 +30,6 @@ pub mod serve;
 pub mod server_mcp;
 pub mod server_stdio;
 pub mod session;
+pub mod sorting;
 pub mod state;
 pub mod watch;

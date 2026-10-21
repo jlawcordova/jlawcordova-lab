@@ -26,7 +26,7 @@
     "cli/README.md"
   ],
   "scripts": {
-    "test": "node --test \"cli/test/**/*.test.mjs\"",
+    "test": "cargo build --release --quiet && node --test \"cli/test/**/*.test.mjs\" \"scripts/test/**/*.test.mjs\"",
     "docs:cli": "node scripts/docs-cli.mjs",
     "docs:site": "node scripts/docs-site/build.mjs",
     "examples": "node scripts/make-examples.mjs"

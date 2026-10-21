@@ -7,6 +7,7 @@ pub mod check;
 pub mod common;
 pub mod doc;
 pub mod document;
+pub mod migrate;
 pub mod object;
 pub mod object_edit;
 pub mod proposal;
