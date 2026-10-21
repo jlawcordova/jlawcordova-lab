@@ -211,7 +211,7 @@ fn call_tool(session: &mut Session, registry: &Registry, left: &[(&str, &str)], 
             append(session, true, &summary);
             if let Some(png) = result.get("png").and_then(Value::as_str) {
                 let mut rest = result.as_object().cloned().unwrap_or_default();
-                rest.remove("png");
+                rest.shift_remove("png");
                 let rest = Value::Object(rest);
                 return Ok(json!({
                     "content": [

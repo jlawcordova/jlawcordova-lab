@@ -175,7 +175,7 @@ impl Edit {
             Value::Object(m) => m,
             _ => Map::new(),
         };
-        let message = match result.remove("message") {
+        let message = match result.shift_remove("message") {
             Some(Value::String(s)) => Message::Text(s),
             _ => Message::None,
         };

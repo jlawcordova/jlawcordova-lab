@@ -628,7 +628,7 @@ pub fn scene_sizes(sources: &Sources, name: &str) -> Result<SceneSizes> {
         // A motion track moves an item by id, so the tracks of the items just taken out go with them.
         let left = items_by_id(&Value::Array(left_items.clone()));
         let mut probe_scene = scene.as_object().cloned().unwrap_or_default();
-        probe_scene.remove("output");
+        probe_scene.shift_remove("output");
         probe_scene.insert("items".into(), Value::Array(left_items));
         if let Some(motion) = scene.get("motion").filter(|m| crate::engine::truthy(Some(m))) {
             let mut m = motion.clone();
