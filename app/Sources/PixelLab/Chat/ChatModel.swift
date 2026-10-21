@@ -68,6 +68,8 @@ final class ChatModel {
     }
 
     var running: Running?
+    /// A send is fetching its block (before its turn starts).
+    @ObservationIgnored private var sending = false
     @ObservationIgnored private var turn: LineProcess?
 
     var isRunning: Bool { running != nil }
@@ -112,6 +114,7 @@ final class ChatModel {
 
     func loadChats() {
         chats = store.load()
+        defer { if let agent = app?.agent, agent.listed { proposalsListed(agent.proposals.map(\.id)) } }
         draftChat = nil
         if let first = documentChats.first { currentID = first.id } else { newChat() }
         showingList = false
@@ -417,7 +420,10 @@ final class ChatModel {
     /// Return, the send button, an answer: sends the text with the context.
     func send(_ override: String? = nil) async {
         let text = (override ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, cantSend == nil, let id = currentID else { return }
+        guard !text.isEmpty, cantSend == nil, !sending, let id = currentID else { return }
+        // Two quick sends (Return twice, Return and an answer) can't both start a turn while the block is fetched.
+        sending = true
+        defer { sending = false }
         if override == nil { draft = "" }
         let context = await messageContext()
         var m = ChatMessage(kind: .user, text: text)
@@ -718,6 +724,7 @@ final class ChatModel {
     /// A turn made a proposal: in the open chat, it's selected with its ghost on (D7).
     func proposalMade(_ m: ChatMessage, chatID: String) {
         guard let id = m.proposal, let agent = app?.agent else { return }
+        madeThisLaunch.insert(id)
         Task {
             await agent.refreshList()
             guard chatID == currentID, !showingList, agent.proposals.contains(where: { $0.id == id }) else { return }
@@ -731,7 +738,11 @@ final class ChatModel {
 
     func proposalsListed(_ ids: [String]) {
         let now = Set(ids)
-        let gone = seenProposals.subtracting(now)
+        // Gone: listed earlier in this launch and not now, or a card from an earlier launch (or a turn's
+        // card not made in this launch) whose proposal isn't listed: settled while Pixel Lab was closed.
+        // A card made in this launch waits until its proposal has been listed once (the list can lag the save).
+        let waitingCards = Set(chats.flatMap(\.messages).filter { $0.kind == .proposal && $0.outcome == nil }.compactMap(\.proposal))
+        let gone = seenProposals.subtracting(now).union(waitingCards.subtracting(madeThisLaunch).subtracting(now))
         seenProposals.formUnion(now)
         guard !gone.isEmpty else { return }
         for c in chats where c.messages.contains(where: { $0.kind == .proposal && $0.outcome == nil && gone.contains($0.proposal ?? "") }) {
@@ -743,6 +754,9 @@ final class ChatModel {
         }
         seenProposals.subtract(gone)
     }
+
+    /// Proposals whose cards this launch's turns made.
+    @ObservationIgnored private var madeThisLaunch = Set<String>()
 
     /// Approved or rejected here (a card, the banner or the Agent window): the card says so, with a note.
     func proposalSettled(_ id: String, applied: Bool, detail: String) {
@@ -765,7 +779,16 @@ final class ChatModel {
     private func selectProposal(_ m: ChatMessage) async -> Bool {
         guard let id = m.proposal, let agent = app?.agent else { return false }
         if !agent.proposals.contains(where: { $0.id == id }) { await agent.refreshList() }
-        guard agent.proposals.contains(where: { $0.id == id }) else { return false }
+        guard agent.proposals.contains(where: { $0.id == id }) else {
+            // It isn't waiting any more: say so on the card, rather than a button that does nothing.
+            for c in chats where c.messages.contains(where: { $0.id == m.id }) {
+                update(c.id) { chat in
+                    if let i = chat.messages.firstIndex(where: { $0.id == m.id }), chat.messages[i].outcome == nil { chat.messages[i].outcome = "elsewhere" }
+                }
+                note("\(m.number.map { "#\($0)" } ?? "That proposal") isn't waiting any more: it was approved or rejected outside Pixel Lab.", in: c.id)
+            }
+            return false
+        }
         agent.select(id)
         return true
     }

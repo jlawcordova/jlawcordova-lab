@@ -10,6 +10,8 @@ import Observation
 final class AgentModel {
     @ObservationIgnored weak var app: AppModel?
 
+    /// The list has been read from the server at least once.
+    var listed = false
     var proposals: [ProposalSummary] = [] {
         didSet { if proposals.count != oldValue.count { updateDockBadge() } }
     }
@@ -129,6 +131,7 @@ final class AgentModel {
         let before = selected
         let oldIndex = selectedID.flatMap { id in proposals.firstIndex { $0.id == id } }
         proposals = list
+        listed = true
         app?.chat.proposalsListed(list.map(\.id))
         guard let id = selectedID else { return }
         if let now = list.first(where: { $0.id == id }) {

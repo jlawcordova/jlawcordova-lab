@@ -338,7 +338,8 @@ struct ProposalBanner: View {
     private var title: String { proposal.bannerTitle }
 
     private var detail: String {
-        var parts = [proposal.editsLabel]
+        // "2 edits · pine moved to column 4, …" (docs/intents/2026-10-agent-chat/spec.md, D7).
+        var parts = [proposal.editsLabel + (proposal.summary.first.map { " · \($0)\(proposal.summary.count > 1 ? ", …" : "")" } ?? "")]
         if !proposal.baseMatches { parts.append("the file changed since") }
         if let e = agent.ghostError { parts.append("couldn't render: \(e)") }
         if let r = agent.working { parts.append(r) }
