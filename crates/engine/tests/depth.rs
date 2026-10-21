@@ -4,7 +4,7 @@
 //!
 //! Adapted: problems name `.json` files; the serializer tests check format 2's
 //! text (expected text from Node's `canonical` in scripts/goldens.mjs); the
-//! harbor tests run on a format-2 copy made with `goldens.mjs --bootstrap`.
+//! harbor tests run on a copy of examples/harbor.pixellab (format 2).
 //! Not here (they are program tests): "scene.items lists an item's depth…",
 //! "a document carries the depth module" (Node's module wiring, no Rust
 //! counterpart) and the `scene.render` half of "the compiler, the preview and

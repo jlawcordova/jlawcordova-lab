@@ -1,7 +1,7 @@
 // The Agent chat's CLI side (docs/intents/2026-10-agent-chat/spec.md): the
 // selection block (chat.context, D5), questions (chat.ask, D8), and proposals
 // and activity that know where they came from (D7). Everything runs on temp
-// copies of examples/harbor.pixellab.
+// copies of the format-1 harbor example (helpers.mjs, FORMAT1_EXAMPLES).
 
 import assert from 'node:assert/strict';
 import { cp, readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
@@ -13,9 +13,9 @@ import { openDocument } from '../lib/document.mjs';
 import { registry } from '../lib/registry.mjs';
 import { Session } from '../lib/session.mjs';
 import { createState } from '../lib/state.mjs';
-import { REPO, runCli, startServer, tempDir } from './helpers.mjs';
+import { FORMAT1_EXAMPLES, runCli, startServer, tempDir } from './helpers.mjs';
 
-const HARBOR = join(REPO, 'examples', 'harbor.pixellab');
+const HARBOR = join(FORMAT1_EXAMPLES, 'harbor.pixellab');
 
 /** @type {string} */
 let tmp;
