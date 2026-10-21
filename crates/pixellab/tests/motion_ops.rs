@@ -152,8 +152,14 @@ fn r12_a_scene_with_no_motion_gets_one_from_scene_track_add_duration_or_scene_mo
 }
 
 #[test]
-#[ignore = "needs U21"]
-fn r12_the_commands_are_one_shot_edits_on_the_command_line_too() {}
+fn r12_the_commands_are_one_shot_edits_on_the_command_line_too() {
+    let fx = Fx::new();
+    let (code, out, err) = cli(&fx, &["scene", "key", "set", "moving", "cart", "--time", "1500", "--no-show"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("Made cart's key at 1500 ms: show false"), "{out}");
+    assert!(out.contains("warning: scenes/moving.json: motion.tracks[0] (cart): 0 \u{2192} 1000 ms moves (16, -3) in 1 step"), "{out}");
+    assert!(out.contains("wrote scenes/moving.json"), "{out}");
+}
 
 #[test]
 fn r13_on_the_grid_means_each_step_is_1_px_straight_1_1_or_2_1() {
@@ -203,9 +209,26 @@ fn r13_check_warns_about_each_off_grid_move_the_loop_back_included_without_faili
 }
 
 #[test]
-#[ignore = "needs U25"]
 fn r13_check_warns_about_each_off_grid_move_the_loop_back_included_without_failing_through_check() {
-    // check's ok, the all-scenes count of 2, the object's none, and the CLI's "2 warnings" and exit code 0.
+    let fx = Fx::new();
+    let mut s = fx.session();
+    let r = registry().call(&mut Ctx::new(&mut s), "check", json!({ "name": "moving" }), false).unwrap();
+    assert_eq!(r["ok"], true);
+    let texts: Vec<String> = r["warnings"].as_array().unwrap().iter().map(|w| w["text"].as_str().unwrap().to_string()).collect();
+    assert_eq!(
+        texts,
+        vec![
+            "scenes/moving.json: motion.tracks[0] (cart): 0 \u{2192} 1000 ms moves (16, -3) in 1 step of (16, -3); on the grid each step is 1 px straight, 1:1 or 2:1 (scene_motion_path makes such keys)",
+            "scenes/moving.json: motion.tracks[0] (cart): 1000 \u{2192} 2000 ms moves (-16, 3) in 1 step of (-16, 3); on the grid each step is 1 px straight, 1:1 or 2:1 (scene_motion_path makes such keys)",
+        ]
+    );
+    let all = registry().call(&mut Ctx::new(&mut s), "check", json!({}), false).unwrap();
+    assert_eq!(all["warnings"].as_array().unwrap().len(), 2, "a check of everything lists them too");
+    let obj = registry().call(&mut Ctx::new(&mut s), "check", json!({ "name": "pebble" }), false).unwrap();
+    assert_eq!(obj["warnings"], json!([]), "an object has none");
+    let (code, out, _) = cli(&fx, &["check", "moving"]);
+    assert_eq!(code, 0, "warnings keep the exit code 0");
+    assert!(out.lines().any(|l| l == "2 warnings"), "{out}");
 }
 
 #[test]
@@ -416,6 +439,21 @@ impl Fx {
         .unwrap();
         Session::new(document, Options { mode: Mode::Direct, env, agent: Some("test".into()), ..Options::default() })
     }
+}
+
+fn cli(fx: &Fx, args: &[&str]) -> (i32, String, String) {
+    let reg = registry();
+    let mut env = fx.doc.env();
+    env.insert("PIXELLAB_STATE".into(), fx.state.to_string_lossy().into_owned());
+    let mut argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    argv.push("--document".into());
+    argv.push(fx.doc.root.to_string_lossy().into_owned());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let code = {
+        let mut io = pixellab::cli::Io { stdout: &mut out, stderr: &mut err, env, cwd: fx.doc.root.clone(), registry: &reg };
+        pixellab::cli::main(&argv, &mut io)
+    };
+    (code, String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap())
 }
 
 fn call(s: &mut Session, name: &str, params: Value, scene: &str) -> Result<Value, Error> {

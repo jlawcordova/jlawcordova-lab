@@ -6,11 +6,11 @@
 //! The Node suite ran every command as a one-shot command line with
 //! --dry-run and a real run, on a shared site. Here each test has its own
 //! document and checks the session's working copy; the parts that go through
-//! the CLI door (the dry-run diff, `wrote …`, exit codes) are written as
-//! ignored tests until the CLI (U21) exists, and so is object.new (U24).
+//! the CLI door (the dry-run diff, `wrote …`, exit codes) run `pixellab::cli::main`.
 
 mod common;
 
+use pixellab::cli::{main, Io};
 use pixellab::context::{Ctx, DocKind};
 use pixellab::document::{open_document, OpenOptions};
 use pixellab::errors::{CommandError, Error};
@@ -118,6 +118,34 @@ fn join(v: &Value) -> String {
     v.as_array().map(|a| a.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(",")).unwrap_or_default()
 }
 
+fn cli_doc() -> common::TempDocument {
+    let doc = common::make_document();
+    for name in ["pine", "house", "tree"] {
+        doc.write(&format!("objects/{name}.json"), &engine::format::stringify_pretty(&sprite()));
+    }
+    doc.write("scenes/zz-test.json", &engine::format::stringify_pretty(&zz_test()));
+    doc
+}
+
+fn cli(doc: &common::TempDocument, args: &[&str]) -> (i32, String, String) {
+    let reg = registry();
+    let mut env = doc.env();
+    env.insert("PIXELLAB_STATE".into(), doc.base.join("state").to_string_lossy().into_owned());
+    let mut argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    argv.push("--document".into());
+    argv.push(doc.root.to_string_lossy().into_owned());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let code = {
+        let mut io = Io { stdout: &mut out, stderr: &mut err, env, cwd: doc.root.clone(), registry: &reg };
+        main(&argv, &mut io)
+    };
+    (code, String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap())
+}
+
+fn read_doc(doc: &common::TempDocument, file: &str) -> Value {
+    serde_json::from_str(&std::fs::read_to_string(doc.root.join(file)).unwrap()).unwrap()
+}
+
 #[test]
 fn scene_place() {
     let mut lab = lab();
@@ -142,14 +170,35 @@ fn scene_place() {
 }
 
 #[test]
-#[ignore = "needs U21"]
 fn scene_place_cli_door() {
-    // pixellab scene place zz-test pine --at 0,1,0 --class sway --dry-run prints
-    // "--- a/scenes/zz-test.json\n+++ b/scenes/zz-test.json\n@@ " and "dry run: nothing written" and writes nothing;
-    // the real run prints "wrote scenes/zz-test.json"; with --json, saved is
-    // [{ doc: 'scene:zz-test', file, wrote: true, hash }]; a --dry-run --json has dryRun[0].file;
-    // an unknown object exits 1 with "no object named no-such-thing".
-    unreachable!("needs the CLI (U21)");
+    let doc = cli_doc();
+    let file = "scenes/zz-test.json";
+    let before = std::fs::read_to_string(doc.root.join(file)).unwrap();
+    let (code, dry, err) = cli(&doc, &["scene", "place", "zz-test", "pine", "--at", "0,1,0", "--class", "sway", "--dry-run"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(dry.contains(&format!("--- a/{file}\n+++ b/{file}\n@@ ")), "{dry}");
+    assert!(dry.contains("dry run: nothing written"), "{dry}");
+    assert_eq!(std::fs::read_to_string(doc.root.join(file)).unwrap(), before, "--dry-run wrote the file");
+    let (code, out, err) = cli(&doc, &["scene", "place", "zz-test", "pine", "--at", "0,1,0", "--class", "sway"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.lines().any(|l| l == format!("wrote {file}")), "{out}");
+    let d = read_doc(&doc, file);
+    let swayed = d["items"].as_array().unwrap().iter().find(|i| i["class"] == "sway").unwrap().clone();
+    assert_eq!(swayed, json!({ "object": "pine", "class": "sway", "at": { "tile": [0, 1, 0] } }));
+    let (code, out, _) = cli(&doc, &["scene", "place", "zz-test", "tree", "--px", "3,4", "--id", "tall", "--json"]);
+    assert_eq!(code, 0);
+    let r: Value = serde_json::from_str(&out).unwrap();
+    let saved = &r["saved"];
+    assert_eq!(saved, &json!([{ "doc": "scene:zz-test", "file": file, "wrote": true, "hash": saved[0]["hash"] }]));
+    let at: usize = r["path"].as_str().unwrap().parse().unwrap();
+    assert_eq!(read_doc(&doc, file)["items"][at], json!({ "object": "tree", "id": "tall", "at": { "px": [3, 4] } }));
+    let (_, out, _) = cli(&doc, &["scene", "place", "zz-test", "pine", "--dry-run", "--json"]);
+    let middle: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(middle["item"]["at"], json!({ "tile": [0, 0, 0] }));
+    assert_eq!(middle["dryRun"][0]["file"], file);
+    let (code, _, err) = cli(&doc, &["scene", "place", "zz-test", "no-such-thing"]);
+    assert_eq!(code, 1);
+    assert!(err.contains("no object named no-such-thing"), "{err}");
 }
 
 #[test]
@@ -232,10 +281,13 @@ fn r6_scene_raise_and_scene_lower_are_gone_the_override_is_scene_set_depth() {
 }
 
 #[test]
-#[ignore = "needs U21"]
 fn r6_scene_raise_and_scene_lower_are_gone_cli_door() {
-    // pixellab scene raise zz-test 0: exit 2, stderr "unknown command scene raise" (and lower).
-    unreachable!("needs the CLI (U21)");
+    let doc = cli_doc();
+    for verb in ["raise", "lower"] {
+        let (code, _, err) = cli(&doc, &["scene", verb, "zz-test", "0"]);
+        assert_eq!(code, 2);
+        assert!(err.contains(&format!("unknown command scene {verb}")), "{err}");
+    }
 }
 
 #[test]
@@ -253,12 +305,26 @@ fn scene_new() {
 }
 
 #[test]
-#[ignore = "needs U21"]
 fn scene_new_and_object_new_cli_door() {
-    // scene new zz-made --dry-run prints "+++ b/scenes/zz-made.json\n@@ -0,0 +1,… @@" and writes nothing;
-    // object new zz-rock --width 5 --height 3 has anchor [2, 2] and a map of three '.....' rows;
-    // object new zz-cube --kind block is a block (U24).
-    unreachable!("needs the CLI (U21) and object.new (U24)");
+    let doc = cli_doc();
+    let (code, dry, err) = cli(&doc, &["scene", "new", "zz-made", "--dry-run"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(dry.contains("+++ b/scenes/zz-made.json\n@@ -0,0 +1,"), "{dry}");
+    assert!(!doc.root.join("scenes/zz-made.json").exists());
+    assert_eq!(cli(&doc, &["scene", "new", "zz-made"]).0, 0);
+    assert_eq!(read_doc(&doc, "scenes/zz-made.json"), json!({ "viewBox": [-64, -64, 128, 128], "origin": [0, 0], "items": [] }));
+    let (code, _, err) = cli(&doc, &["scene", "new", "zz-made"]);
+    assert_eq!(code, 1);
+    assert!(err.contains("already an object or scene called zz-made"), "{err}");
+    assert_eq!(cli(&doc, &["scene", "new", "Bad_Name"]).0, 2);
+    assert_eq!(cli(&doc, &["object", "new", "zz-rock", "--width", "5", "--height", "3"]).0, 0);
+    let rock = read_doc(&doc, "objects/zz-rock.json");
+    assert_eq!(rock["anchor"], json!([2, 2]));
+    assert_eq!(rock["layers"][0]["map"], json!([".....", ".....", "....."]));
+    assert_eq!(cli(&doc, &["object", "new", "zz-cube", "--kind", "block"]).0, 0);
+    assert_eq!(read_doc(&doc, "objects/zz-cube.json")["kind"], "block");
+    assert_eq!(cli(&doc, &["object", "new", "zz-outfit", "--extends", "pebble"]).0, 0);
+    assert_eq!(cli(&doc, &["object", "new", "zz-x", "--kind", "block", "--width", "3"]).0, 2);
 }
 
 #[test]

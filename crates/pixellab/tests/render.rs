@@ -497,13 +497,39 @@ fn object_render_layers_only_those_layers_as_the_lab_stage_shows_them() {
     assert!(differs, "the top layer adds pixels");
 }
 
+fn cli(doc: &common::TempDocument, args: &[&str]) -> (i32, String, String) {
+    let reg = registry();
+    let mut env = doc.env();
+    env.insert("PIXELLAB_STATE".into(), doc.base.join("state").to_string_lossy().into_owned());
+    let mut argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    argv.push("--document".into());
+    argv.push(doc.root.to_string_lossy().into_owned());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let code = {
+        let mut io = pixellab::cli::Io { stdout: &mut out, stderr: &mut err, env, cwd: doc.root.clone(), registry: &reg };
+        pixellab::cli::main(&argv, &mut io)
+    };
+    (code, String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap())
+}
+
 #[test]
-#[ignore = "needs U21"]
 fn the_cli_writes_the_png_with_out() {
-    // pixellab scene render zz-pine --scale 3 --out <file> prints
-    // "zz-pine: 240×240 PNG at 3×, 1 items shown, time 0 ms\nwrote … (240×240)\n";
-    // object render pine --json --out <file> has png equal to the file's base64.
-    unreachable!("needs the CLI (U21), and scene.render (U22) and object.render (U24)");
+    let doc = common::make_document();
+    let zz = scene(json!([{ "object": "pebble", "at": { "tile": [0, 0, 0] } }]), view80(), json!({}));
+    doc.write("scenes/zz-pine.json", &engine::format::stringify_pretty(&zz));
+    let out = doc.base.join("out.png");
+    let (code, stdout, stderr) = cli(&doc, &["scene", "render", "zz-pine", "--scale", "3", "--out", &out.to_string_lossy()]);
+    assert_eq!(code, 0, "{stderr}");
+    let lines: Vec<&str> = stdout.split_inclusive('\n').collect();
+    assert_eq!(lines.len(), 2, "{stdout}");
+    assert_eq!(lines[0], "zz-pine: 240\u{d7}240 PNG at 3\u{d7}, 1 items shown, time 0 ms\n");
+    assert!(lines[1].starts_with("wrote ") && lines[1].ends_with("out.png (240\u{d7}240)\n"), "{stdout}");
+    assert_eq!(decode(&std::fs::read(&out).unwrap()).unwrap().width, 240);
+    let pine = doc.base.join("pine.png");
+    let (code, stdout, stderr) = cli(&doc, &["object", "render", "pebble", "--json", "--out", &pine.to_string_lossy()]);
+    assert_eq!(code, 0, "{stderr}");
+    let r: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(r["png"].as_str().unwrap(), base64(&std::fs::read(&pine).unwrap()));
 }
 
 #[test]
@@ -536,10 +562,11 @@ fn render_params_are_checked_scale_range_time_show() {
 }
 
 #[test]
-#[ignore = "needs U21"]
 fn render_out_goes_with_a_render_command() {
-    // scene list --out x.png: exit 2, "--out goes with a render command".
-    unreachable!("needs the CLI (U21)");
+    let doc = common::make_document();
+    let (code, _, err) = cli(&doc, &["scene", "list", "--out", "x.png"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("--out goes with a render command"), "{err}");
 }
 
 // ------------------------------------------------------------------ helpers

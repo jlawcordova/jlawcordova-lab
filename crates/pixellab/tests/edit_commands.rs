@@ -5,9 +5,13 @@
 //! session suite does), and the tests that need the commands are ignored.
 #![allow(clippy::result_large_err)]
 
+mod bootstrap;
 mod common;
 
+use std::cell::Cell;
+use std::collections::HashMap;
 use std::fs;
+use std::rc::Rc;
 
 use common::{make_document, TempDocument};
 use pixellab::context::{Ctx, DocKind};
@@ -187,19 +191,79 @@ fn propose_mode_validates_too_a_proposal_with_problems_is_refused_unless_forced(
 }
 
 #[test]
-#[ignore = "needs the scene and object edit commands (U22 and later): scene.place, scene.move, object.paint"]
 fn rapid_repeats_coalesce_into_one_undo_step_other_edits_do_not() {
-    todo!("scene.move x3 within 1 s coalesce; undo twice gives `(3 edits)`");
+    let doc = make_document();
+    let clock = Rc::new(Cell::new(1000.0));
+    let c = clock.clone();
+    let mut env = doc.env();
+    env.insert("PIXELLAB_STATE".into(), doc.base.join("state").to_string_lossy().into_owned());
+    let document = open_document(&OpenOptions {
+        doc: Some(doc.root.to_string_lossy().into_owned()),
+        site: None,
+        env: env.clone(),
+        cwd: doc.root.clone(),
+    })
+    .unwrap();
+    let mut s = Session::new(document, Options { mode: Mode::Direct, env, now: Box::new(move || c.get()), ..Options::default() });
+    for _ in 0..3 {
+        call(&mut s, "scene.move", json!({ "name": "sample", "item": "0", "by": [1, 0] })).unwrap();
+        clock.set(clock.get() + 100.0);
+    }
+    clock.set(clock.get() + 5000.0);
+    call(&mut s, "scene.move", json!({ "name": "sample", "item": "0", "by": [1, 0] })).unwrap();
+    let st = call(&mut s, "doc.status", json!({ "doc": "sample" })).unwrap();
+    assert_eq!(st["undo"].as_array().unwrap().len(), 4, "every edit is listed");
+    assert!(call(&mut s, "doc.undo", json!({ "doc": "sample" })).unwrap()["summary"].as_str().unwrap().starts_with("Undid: block moved"));
+    let second = call(&mut s, "doc.undo", json!({ "doc": "sample" })).unwrap();
+    assert!(second["summary"].as_str().unwrap().ends_with("(3 edits)"), "{}", second["summary"]);
+    assert_eq!(second["canUndo"], false);
+    assert_eq!(second["dirty"], false);
 }
 
 #[test]
-#[ignore = "needs the scene and object edit commands (U22 and later): scene.set"]
 fn a_failed_edit_leaves_the_working_copy_as_it_was() {
-    todo!("scene.set with a bad id fails with kebab-case and leaves the copy");
+    let doc = make_document();
+    let mut s = session(&doc, Mode::Direct);
+    call(&mut s, "doc.open", json!({ "doc": "scene:sample" })).unwrap();
+    let before = call(&mut s, "doc.status", json!({ "doc": "sample" })).unwrap();
+    let err = call(&mut s, "scene.set", json!({ "name": "sample", "item": "0", "tile": [5, 5, 0], "id": "Bad Id" })).unwrap_err();
+    assert!(err.to_string().contains("kebab-case"), "{err}");
+    let after = call(&mut s, "doc.status", json!({ "doc": "sample" })).unwrap();
+    assert_eq!(after["canUndo"], false);
+    assert_eq!(after["dirty"], false);
+    assert_eq!(before["undo"], after["undo"]);
 }
 
+/// R20: no site checkout. The subject is generic (the engine serializer is the authority for
+/// every source), so it runs over the fixture and format-2 copies of the two examples.
 #[test]
-#[ignore = "needs the owner's site checkout"]
-fn every_real_scene_and_object_serializes_to_its_file_byte_for_byte_and_saves_unchanged() {
-    todo!("round trip over the owner's document; the corpus and session suites cover the serializer");
+fn every_scene_and_object_serializes_to_its_file_byte_for_byte_and_saves_unchanged() {
+    let base = common::temp_dir("pixellab-roundtrip-");
+    let docs = vec![common::fixture(), bootstrap::example(&base, "harbor"), bootstrap::example(&base, "town")];
+    let mut n = 0;
+    for root in docs {
+        let env = HashMap::from([
+            ("HOME".to_string(), base.to_string_lossy().into_owned()),
+            ("PIXELLAB_STATE".to_string(), base.join("state").to_string_lossy().into_owned()),
+        ]);
+        let document =
+            open_document(&OpenOptions { doc: Some(root.to_string_lossy().into_owned()), site: None, env: env.clone(), cwd: root.clone() })
+                .unwrap();
+        let mut s = Session::new(document, Options { mode: Mode::Direct, env, ..Options::default() });
+        for kind in [DocKind::Scene, DocKind::Object] {
+            let names = Ctx::new(&mut s).names(kind).unwrap();
+            for name in names {
+                let (file, ref_, same) = {
+                    let entry = s.open(kind, &name).unwrap();
+                    (entry.file.clone(), entry.ref_.clone(), entry.clean == entry.base.text)
+                };
+                n += 1;
+                assert!(same, "{file} differs from serialize() of itself");
+                let r = call(&mut s, "doc.save", json!({ "doc": ref_ })).unwrap();
+                assert_eq!(r["wrote"], false, "{file} was rewritten");
+            }
+        }
+    }
+    assert!(n > 10, "{n} docs");
+    let _ = fs::remove_dir_all(base);
 }

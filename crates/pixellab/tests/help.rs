@@ -117,7 +117,6 @@ fn test_registry() -> Registry {
 // ---- help ----
 
 #[test]
-#[ignore = "needs U22–U26"]
 fn pixellab_help_lists_every_command_the_global_flags_the_mapping_and_exit_codes() {
     let reg = registry();
     let (code, out, err) = spawn_cli(&["help"]);
@@ -178,7 +177,6 @@ fn bare_pixellab_prints_help_to_stderr_with_exit_code_2() {
 }
 
 #[test]
-#[ignore = "needs U22–U26"]
 fn group_help_pixellab_scene_help_pixellab_help_scene() {
     let (code, out, _) = spawn_cli(&["scene", "--help"]);
     assert_eq!(code, 0);
@@ -213,7 +211,6 @@ fn group_help_pixellab_scene_help_pixellab_help_scene_test_registry() {
 }
 
 #[test]
-#[ignore = "needs U22–U26"]
 fn command_help_pixellab_scene_render_help() {
     let (code, out, _) = spawn_cli(&["scene", "render", "--help"]);
     assert_eq!(code, 0);
@@ -250,7 +247,6 @@ fn command_help_pixellab_scene_render_help_test_registry() {
 }
 
 #[test]
-#[ignore = "needs U22–U26"]
 fn help_for_every_command_and_group_renders() {
     for cmd in &registry().commands {
         let mut args: Vec<&str> = cmd.name.split('.').collect();
@@ -341,7 +337,6 @@ fn a_param_that_clashes_with_a_global_flag_is_an_internal_error() {
 // ---- exit codes ----
 
 #[test]
-#[ignore = "needs U22–U26"]
 fn exit_codes_0_ok_1_command_error_2_usage_error() {
     let site = make_site();
     let mut env = site.env();
@@ -471,8 +466,25 @@ fn help_markdown_is_the_cli_reference() {
 }
 
 #[test]
-#[ignore = "needs U22–U26"]
 fn docs_cli_md_is_generated_from_the_registry_and_up_to_date() {
+    // docs/cli.md is Node's reference until the cutover regenerates it. The Rust reference
+    // differs from it in exactly three ways, all of format 2 (R26, R8): source files are
+    // .json (and starter.rs), and document migrate is new (left out of MCP). Undo those
+    // and the two must be equal.
     let docs = std::fs::read_to_string(common::repo().join("docs/cli.md")).unwrap();
-    assert_eq!(markdown(&registry()), docs, "docs/cli.md is out of date: run npm run docs:cli");
+    let docs = docs
+        .replace("scenes/hero-island.mjs", "scenes/hero-island.json")
+        .replace("(palette.mjs,", "(palette.json,")
+        .replace("writes manifest.json, palette.mjs", "writes manifest.json, palette.json")
+        .replace("Writes manifest.json, palette.mjs", "Writes manifest.json, palette.json")
+        .replace("(starter.mjs)", "(starter.rs)");
+    let mut out = markdown(&registry());
+    out = out.lines().filter(|l| !l.starts_with("| [`document migrate`]")).collect::<Vec<_>>().join("\n") + "\n";
+    let sentence = "; `document_migrate` (migrating the document is for a person, in Pixel Lab or with pixellab document migrate)";
+    out = out.replace(sentence, "");
+    if let Some(at) = out.find("#### document.migrate\n") {
+        let end = out[at + 1..].find("\n#### ").map(|i| at + 1 + i + 1).unwrap();
+        out.replace_range(at..end, "");
+    }
+    assert_eq!(out, docs, "docs/cli.md is out of date: run npm run docs:cli");
 }
