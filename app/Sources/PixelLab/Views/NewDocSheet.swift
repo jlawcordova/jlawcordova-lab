@@ -66,7 +66,7 @@ struct NewDocSheet: View {
                         .font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(2)
                 }
             } else {
-                Text("An empty 128×128 view around tile 0,0,0.")
+                Text("An empty scene with no size: it publishes at what you put in it.")
                     .font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(2)
             }
             HStack {

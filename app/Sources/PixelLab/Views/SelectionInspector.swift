@@ -199,7 +199,7 @@ struct PlaceInspector: View {
             HStack {
                 Text("Level").font(.caption).foregroundStyle(Theme.inkMuted)
                 Text("\(editor.placeLevel)").font(Theme.monoFont(12)).foregroundStyle(Theme.ink).frame(minWidth: 18)
-                Stepper("Place level", value: Binding(get: { editor.placeLevel }, set: { editor.placeLevel = $0 }), in: -4...12)
+                Stepper("Place level", value: Binding(get: { editor.placeLevel }, set: { editor.setPlaceLevel($0) }), in: -4...12)
                     .labelsHidden()
                     .controlSize(.small)
                 Spacer()

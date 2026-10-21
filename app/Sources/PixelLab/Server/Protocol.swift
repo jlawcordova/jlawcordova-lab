@@ -443,6 +443,8 @@ struct EditResult: Codable, Sendable {
     var pixels: Int?
     var layer: Int?
     var frame: Int?
+    /// A scene edit's item, as `{ object, at }` (the edit's result: where it stands now).
+    var item: JSONValue?
     /// A scene edit puts the items in depth order. When that moved any, this
     /// maps each old path to its new one, relative to the doc as the edit left
     /// it before the sort (docs/intents/2026-10-depth-order/plan.md, "Sorting in the session").
@@ -451,6 +453,15 @@ struct EditResult: Codable, Sendable {
 
 /// `scene.sort` on one scene: it names no doc (the command can sort every scene),
 /// so it isn't an `EditResult`. `reordered` is as there.
+extension EditResult {
+    /// The tile the edited item stands on, when the result says.
+    var itemTile: Tile? {
+        guard let t = item?["at"]?["tile"]?.arrayValue, t.count == 3,
+              let c = t[0].doubleValue, let r = t[1].doubleValue, let l = t[2].doubleValue else { return nil }
+        return Tile(col: Int(c), row: Int(r), level: Int(l))
+    }
+}
+
 struct SceneSortResult: Codable, Sendable {
     var changed: Bool
     var summary: String?

@@ -85,6 +85,26 @@ struct PixelLabCommands: Commands {
                 .disabled(!hasSelection)
             Button("Snap to Tile") { Task { await model.editor.snap() } }
                 .disabled(model.document?.selectedItem?.at.isTile ?? true)
+            // Every stage key, so the keys can be found (docs/intents/2026-10-scene-canvas/spec.md, R19).
+            // Only ⌘↓ is a shortcut here: the others are the stage's own keys, which a text field must keep.
+            Menu("Move") {
+                Button("Select Next Item (Tab)") { stageKey(.tab) }
+                Button("Select Previous Item (⇧Tab)") { stageKey(.tab, shift: true) }
+                Divider()
+                Button("Column −1 (←)") { stageKey(.left) }
+                Button("Column +1 (→)") { stageKey(.right) }
+                Button("Row −1 (↑)") { stageKey(.up) }
+                Button("Row +1 (↓)") { stageKey(.down) }
+                Divider()
+                Button("Up a Level (⇧↑, Page Up)") { stageKey(.up, shift: true) }
+                Button("Down a Level (⇧↓, Page Down)") { stageKey(.down, shift: true) }
+                Button("Drop onto What Is Below") { dropOrText() }
+                    .keyboardShortcut(.downArrow, modifiers: .command)
+                Divider()
+                Button("Nudge a Pixel (⌥ + arrows)") { stageKey(.right, option: true) }
+                Button("Place at the Cursor, on Top of a Block (Return)") { stageKey(.returnKey) }
+            }
+            .disabled(!(model.mode == .scene && model.document != nil))
             Button("Select None") { model.layers.select([]) }
                 .disabled(!(model.mode == .scene && !(model.document?.selection.isEmpty ?? true)))
             // ⌥-click's keyboard way (docs/intents/2026-10-agent-chat/spec.md, D6).
@@ -131,6 +151,19 @@ struct PixelLabCommands: Commands {
             Button("Agent Window") { openWindow(id: WindowID.agent) }
                 .keyboardShortcut("a", modifiers: [.command, .option, .shift])
             Divider()
+        }
+    }
+
+    private func stageKey(_ key: KeyInput.Key, shift: Bool = false, option: Bool = false) {
+        _ = model.editor.handleKey(KeyInput(key: key, option: option, shift: shift))
+    }
+
+    /// ⌘↓ drops the selection on the stage; in a text field it keeps moving the caret to the end.
+    private func dropOrText() {
+        if NSApp.keyWindow?.firstResponder is NSTextView {
+            NSApp.sendAction(Selector(("moveToEndOfDocument:")), to: nil, from: nil)
+        } else {
+            Task { await model.editor.dropSelection() }
         }
     }
 
