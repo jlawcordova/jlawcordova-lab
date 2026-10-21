@@ -483,3 +483,12 @@ fn docs_cli_md_is_generated_from_the_registry_and_up_to_date() {
     let docs = std::fs::read_to_string(common::repo().join("docs/cli.md")).unwrap();
     assert_eq!(markdown(&registry()), docs, "docs/cli.md is out of date: run npm run docs:cli");
 }
+
+#[test]
+fn r27_pixellab_version_prints_the_releases_version() {
+    let (code, out, err) = exec(&registry(), &["--version"], HashMap::new());
+    assert_eq!((code, err.as_str()), (0, ""));
+    assert_eq!(out, format!("pixellab {}\n", pixellab::server_stdio::version()));
+    let (code, _, err) = exec(&registry(), &["scene", "list", "--version"], HashMap::new());
+    assert_eq!(code, 2, "--version goes alone: {err}");
+}

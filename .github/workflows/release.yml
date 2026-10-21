@@ -1,8 +1,14 @@
 name: Release Pixel Lab
 
-# Pushing a tag like v0.2.0 publishes one GitHub Release with Pixel Lab.app
-# for Apple Silicon Macs, as a disk image and a zip. The app bundles the CLI,
-# so the same download is the MCP server. Steps in README.md, "Releases".
+# Pushing a tag like v0.6.0 publishes one GitHub Release (spec R17, R27):
+#   - PixelLab-darwin-arm64.dmg and .zip: Pixel Lab.app for Apple Silicon,
+#     with the pixellab program bundled (Contents/Helpers/pixellab), so the
+#     same download is the CLI and the MCP server;
+#   - pixellab-darwin-arm64.tar.gz and pixellab-linux-x64.tar.gz: the program
+#     alone, for a site's CI to pin and verify;
+#   - SHA256SUMS for all of them.
+# The asset names stay the same from release to release. Steps in README.md,
+# "Releases".
 on:
   push:
     tags: ["v*"]
@@ -15,19 +21,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    # Apple Silicon, so the app is built and smoke-tested where it runs.
-    runs-on: macos-latest
+  # The program for Linux: built, tested and packaged on Linux.
+  linux:
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: Set up Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-
       # The version is the tag's: nothing in the repo is bumped for a release.
       # Guards: nothing below runs unless the tag is v<major>.<minor>.<patch>
       # and the tagged commit is on main.
@@ -35,7 +36,7 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Tag $GITHUB_REF_NAME isn't v<major>.<minor>.<patch>, like v0.4.0."
+            echo "::error::Tag $GITHUB_REF_NAME isn't v<major>.<minor>.<patch>, like v0.6.0."
             exit 1
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
@@ -46,18 +47,60 @@ jobs:
             echo "::error::$GITHUB_REF_NAME points at a commit that isn't on main."
             exit 1
           fi
-
-      # The site holds the art the suites pin (the engine is this repo's). The CLI
-      # tests copy from it and the smoke test runs against a copy; nothing
-      # writes to this clone.
-      - name: Fetch the site
-        run: |
-          git clone --depth 1 https://github.com/jlawcordova/jlawcordova.github.io.git "$RUNNER_TEMP/site"
-          echo "SITE=$RUNNER_TEMP/site" >> "$GITHUB_ENV"
-
-      - name: Test the CLI
+      # rustup is on the runner; it installs the pinned toolchain on first use.
+      - name: Install the pinned Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Test the program
+        run: cargo test --locked
+      - name: Package the program
         env:
-          PIXELLAB_TEST_SITE: ${{ env.SITE }}
+          PIXELLAB_VERSION: ${{ env.VERSION }}
+        run: scripts/package-program.sh x86_64-unknown-linux-gnu "$RUNNER_TEMP/linux"
+      - name: Keep the package for the release
+        uses: actions/upload-artifact@v4
+        with:
+          name: pixellab-linux-x64
+          path: |
+            ${{ runner.temp }}/linux/pixellab-linux-x64.tar.gz
+            ${{ runner.temp }}/linux/SHA256SUMS
+          if-no-files-found: error
+
+  release:
+    # Apple Silicon, so the app is built and smoke-tested where it runs.
+    needs: linux
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Take the version from the tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME isn't v<major>.<minor>.<patch>, like v0.6.0."
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Check the tagged commit is on main
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME points at a commit that isn't on main."
+            exit 1
+          fi
+      - name: Install the pinned Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      # Nothing here needs a site checkout: the suites run on the repo's
+      # fixture and examples.
+      - name: Test the program
+        run: cargo test --locked
+      - name: Test the repo's tooling
         run: npm test
       - name: Test the app
         run: scripts/test-app.sh
@@ -69,8 +112,9 @@ jobs:
           scripts/build-app.sh
           app="build/Pixel Lab.app"
           [ "$(lipo -archs "$app/Contents/MacOS/PixelLab")" = arm64 ] || { echo "::error::PixelLab isn't an arm64 binary."; exit 1; }
+          [ "$(lipo -archs "$app/Contents/Helpers/pixellab")" = arm64 ] || { echo "::error::The bundled program isn't an arm64 binary."; exit 1; }
           [ "$(plutil -extract CFBundleShortVersionString raw "$app/Contents/Info.plist")" = "$VERSION" ] || { echo "::error::Info.plist doesn't say $VERSION."; exit 1; }
-          [ "$(node -p "require('./build/Pixel Lab.app/Contents/Resources/package.json').version")" = "$VERSION" ] || { echo "::error::The bundled CLI doesn't say $VERSION."; exit 1; }
+          [ "$("$app/Contents/Helpers/pixellab" --version)" = "pixellab $VERSION" ] || { echo "::error::The bundled program doesn't say $VERSION."; exit 1; }
       # A disk image to drag the app out of, and a zip of the same bundle.
       # ditto keeps the bundle's signature and attributes intact.
       - name: Package the app
@@ -83,11 +127,28 @@ jobs:
           hdiutil create -volname "Pixel Lab $VERSION" -srcfolder "$stage" -fs HFS+ -format UDZO "$dist/PixelLab-darwin-arm64.dmg"
           hdiutil verify "$dist/PixelLab-darwin-arm64.dmg"
           echo "DIST=$dist" >> "$GITHUB_ENV"
+      - name: Package the program
+        env:
+          PIXELLAB_VERSION: ${{ env.VERSION }}
+        run: scripts/package-program.sh aarch64-apple-darwin "$RUNNER_TEMP/darwin"
+      - name: Fetch the Linux package
+        uses: actions/download-artifact@v4
+        with:
+          name: pixellab-linux-x64
+          path: ${{ runner.temp }}/linux
+      # Each package is checked against the sum its own job wrote, then one
+      # SHA256SUMS covers everything the release publishes.
+      - name: Gather the release files
+        run: |
+          (cd "$RUNNER_TEMP/linux" && shasum -a 256 -c SHA256SUMS)
+          (cd "$RUNNER_TEMP/darwin" && shasum -a 256 -c SHA256SUMS)
+          cp "$RUNNER_TEMP/linux/pixellab-linux-x64.tar.gz" "$RUNNER_TEMP/darwin/pixellab-darwin-arm64.tar.gz" "$DIST/"
+          (cd "$DIST" && shasum -a 256 pixellab-darwin-arm64.tar.gz pixellab-linux-x64.tar.gz PixelLab-darwin-arm64.dmg PixelLab-darwin-arm64.zip > SHA256SUMS && cat SHA256SUMS)
 
       # Installs the app from the disk image the way a user would, then
-      # checks the signature, the bundled CLI's MCP server (it must answer
+      # checks the signature, the bundled program's MCP server (it must answer
       # initialize with this version) and the app itself, which opens a scene
-      # on a copy of the site through the test hook and snapshots it.
+      # on a copy of the fixture through the test hook and snapshots it.
       - name: Smoke test the installed app
         run: |
           mnt="$RUNNER_TEMP/mnt"
@@ -99,18 +160,18 @@ jobs:
           app="$apps/Pixel Lab.app"
           codesign --verify --deep --strict "$app"
 
+          smoke="$RUNNER_TEMP/smoke"
+          mkdir -p "$smoke/state"
+          cp -R fixtures/sample.pixellab "$smoke/sample.pixellab"
           reply="$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"release","version":"0"}}}' \
-            | HOME="$RUNNER_TEMP" node "$app/Contents/Resources/cli/bin/pixellab.mjs" serve --mcp --site "$SITE")"
+            | HOME="$RUNNER_TEMP" PIXELLAB_STATE="$smoke/state" "$app/Contents/Helpers/pixellab" serve --mcp --document "$smoke/sample.pixellab")"
           echo "$reply"
           echo "$reply" | grep -q "\"version\":\"$VERSION\"" || { echo "::error::The bundled MCP server didn't report version $VERSION."; exit 1; }
 
-          smoke="$RUNNER_TEMP/smoke"
-          mkdir -p "$smoke/site" "$smoke/state"
-          cp -R "$SITE/src" "$SITE/scripts" "$SITE/package.json" "$SITE/package-lock.json" "$smoke/site/"
-          printf '%s\n' "open scene:hero-island" "snapshot $smoke/hero-island.png" > "$smoke/script.txt"
-          PIXELLAB_SCRIPT="$smoke/script.txt" PIXELLAB_SITE="$smoke/site" PIXELLAB_STATE="$smoke/state" \
+          printf '%s\n' "open scene:sample" "snapshot $smoke/sample.png" > "$smoke/script.txt"
+          PIXELLAB_SCRIPT="$smoke/script.txt" PIXELLAB_DOC="$smoke/sample.pixellab" PIXELLAB_STATE="$smoke/state" \
             "$app/Contents/MacOS/PixelLab"
-          [ -s "$smoke/hero-island.png" ] || { echo "::error::The app didn't snapshot the scene."; exit 1; }
+          [ -s "$smoke/sample.png" ] || { echo "::error::The app didn't snapshot the scene."; exit 1; }
 
       - name: Publish the release
         env:
@@ -119,6 +180,9 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             "$DIST/PixelLab-darwin-arm64.dmg" \
             "$DIST/PixelLab-darwin-arm64.zip" \
+            "$DIST/pixellab-darwin-arm64.tar.gz" \
+            "$DIST/pixellab-linux-x64.tar.gz" \
+            "$DIST/SHA256SUMS" \
             --title "Pixel Lab $VERSION" \
             --generate-notes \
             --verify-tag

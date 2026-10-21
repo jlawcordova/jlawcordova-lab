@@ -125,6 +125,11 @@ pub fn main(argv: &[String], io: &mut Io) -> i32 {
 }
 
 fn run(argv: &[String], io: &mut Io) -> Result<i32, Error> {
+    // `pixellab --version`: the release's version (spec R27), or 0.0.0-dev.
+    if argv.len() == 1 && (argv[0] == "--version" || argv[0] == "-V") {
+        put(io.stdout, &format!("pixellab {}\n", crate::server_stdio::version()));
+        return Ok(0);
+    }
     let registry = io.registry;
     for cmd in &registry.commands {
         let props = cmd.params.get("properties").and_then(Value::as_object);
