@@ -312,7 +312,7 @@ pub fn commands() -> Vec<Command> {
         render_run,
     );
     render.description = Some(
-        "The anchor is at (0, 0). A sprite's viewBox is its whole map, so at scale 1 PNG pixel (x, y) is map column x, row y; a block's is the box around its pixels. Returns the same shape as scene.render, with one item. --time also places the layers' ambient loops, and --play <action>@<ms> (with --time) places the layers that have that action where it has them <ms> into it. On the command line, --out <file.png> writes the PNG.",
+        "The anchor is at (0, 0). A sprite's viewBox is its whole map, so at scale 1 PNG pixel (x, y) is map column x, row y; a block's is the box around its pixels. Returns the same shape as scene.render, with one item. --time also places the layers' ambient loops, and --play <action>@<ms> (with --time) places the layers that have that action where it has them <ms> into it; with --time the viewBox grows to hold the moved layers (the map's box, plus what moved outside it), and viewBox says where. On the command line, --out <file.png> writes the PNG.",
     );
     render.args = vec!["name"];
     render.writes_png = true;

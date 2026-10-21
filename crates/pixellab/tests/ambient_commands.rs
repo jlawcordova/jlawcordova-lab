@@ -419,6 +419,33 @@ fn r24_d8_object_render_places_a_layers_loop_at_time_and_play_moves_it_while_the
     assert_eq!(refused(run(&mut s, "object.render", json!({ "name": "dot", "time": 0, "play": "wave@10" }))).0, "not_found");
 }
 
+#[test]
+fn r23_a_layer_moved_by_its_action_or_loop_is_fully_inside_the_render_and_the_rest_render_is_unchanged() {
+    let doc = doc_with_dot();
+    let mut s = session(&doc);
+    // Layer 0's square sits at the map's top left: moving it left and up leaves the map's box.
+    run(&mut s, "object.action", json!({ "name": "dot", "layer": 0, "action": "lunge", "duration": 400, "keys": json!([{ "t": 0, "move": [0, 0] }, { "t": 100, "move": [-3, -2] }]) })).unwrap();
+    let render = |s: &mut Session, extra: Value| {
+        let mut p = json!({ "name": "dot" });
+        for (k, v) in extra.as_object().unwrap() {
+            p[k] = v.clone();
+        }
+        run(s, "object.render", p).unwrap()
+    };
+    let rest = render(&mut s, json!({}));
+    assert_eq!(rest["viewBox"], json!([0, 0, 12, 12]), "the rest render is the map's box, as before");
+    let at_rest_time = render(&mut s, json!({ "time": 0 }));
+    assert_eq!(at_rest_time["viewBox"], json!([0, 0, 12, 12]), "nothing moved at time 0");
+    assert_eq!(at_rest_time["png"], rest["png"]);
+    let moved = render(&mut s, json!({ "time": 0, "play": "lunge@300" }));
+    assert_eq!(moved["viewBox"], json!([-3, -2, 15, 14]), "the box grows to hold the moved layer");
+    let ink = ink_box(&moved);
+    // The square (2 by 2) now covers x -3..-2, y -2..-1: columns 0..1 and rows 0..1 of the grown image.
+    assert_eq!([ink[0], ink[1]], [0, 0], "the whole square is inside the render, none of it clipped");
+    assert_eq!(moved["width"], json!(15));
+    assert_eq!(png_of(&moved).rgba[3], 255, "its first pixel is opaque");
+}
+
 // ---- serve --stdio and serve --mcp
 
 struct Server {

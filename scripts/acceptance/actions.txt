@@ -1,0 +1,33 @@
+# Ambient loops and actions on the stage (spec R23, D10; plan step 27), on a
+# temp copy of examples/harbor.pixellab: the dock barrel bobs on an ambient
+# loop and the boat has a hop action. The boat also has scene motion, so the
+# timeline is the longer of its motion and the barrel's loop.
+appearance light
+open scene:harbor
+expect ambient 3000
+# The barrel's loop: the timeline holds it.
+select 68
+expect actions none
+# The boat: its hop in the Inspector, played once, mid-play held for a snapshot, then the rest frame.
+select 41
+expect actions hop
+snapshot @OUT@/actions-inspector-light.png
+play hop
+expect lastplay hop:
+expect playing none
+playat hop 120
+expect playing hop
+snapshot @OUT@/actions-mid-play-light.png
+playend
+expect playing none
+snapshot @OUT@/actions-rest-light.png
+# Reduce Motion: Play shows the rest frame and says so.
+reducemotion on
+play hop
+expect announced hop: shown at rest
+expect playing none
+reducemotion system
+appearance dark
+playat hop 120
+snapshot @OUT@/actions-mid-play-dark.png
+playend

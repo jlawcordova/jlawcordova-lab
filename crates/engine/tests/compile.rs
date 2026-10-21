@@ -10,7 +10,7 @@
 //!   corpus parity check, `tests/corpus.rs`, compares the compiler with Node's on the fixture
 //!   and the examples.)
 //! - "R3: in depth order, every scene of the site's art compiles lossless…" is rewritten on
-//!   format-2 copies of the harbor and town examples (`goldens.mjs --bootstrap`), with the
+//!   copies of the harbor and town examples (format 2), with the
 //!   engine's default budget since an example has no site budgets; it still lists, rather than
 //!   fails on, the scenes whose output changed and any over budget.
 //!

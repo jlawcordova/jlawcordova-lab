@@ -74,7 +74,7 @@ struct InspectorView: View {
             }
             if doc.ref.kind == .scene, doc.itemsLoaded {
                 let layerCount = doc.layerTree.layers.count
-                Text("\(doc.items.count) items\(layerCount > 0 ? " · \(layerCount) layer\(layerCount == 1 ? "" : "s")" : "")\(model.timeline.hasMotion ? " · motion \(TimelineModel.label(model.timeline.duration ?? 0))" : "")")
+                Text("\(doc.items.count) items\(layerCount > 0 ? " · \(layerCount) layer\(layerCount == 1 ? "" : "s")" : "")\(model.timeline.hasMotion ? " · \((model.timeline.motionDuration ?? 0) > 0 ? "motion" : "loops") \(TimelineModel.label(model.timeline.duration ?? 0))" : "")")
                     .font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(1)
             } else if doc.ref.kind == .object, let summary = model.objectEditor.info?.description ?? doc.summary {
                 Text(summary).font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(2)

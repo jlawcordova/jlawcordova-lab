@@ -17,7 +17,7 @@ import { previewColors, renderPreview } from '../lib/engine/preview.mjs';
 import { serialize } from '../lib/engine/serialize.mjs';
 import { flattenItems } from '../lib/render.mjs';
 import { registry } from '../lib/registry.mjs';
-import { decodePng, FIXTURE_DOC, makeDocument, REPO } from './helpers.mjs';
+import { decodePng, FIXTURE_DOC, FORMAT1_EXAMPLES, makeDocument } from './helpers.mjs';
 
 /** Deterministic pseudo-random numbers (mulberry32), so a failure can be replayed from its seed. */
 function rng(seed) {
@@ -735,7 +735,7 @@ describe('the engine draws in depth order (R3, R5, R9, D2)', () => {
 
 describe("the harbor example: a pine moved behind the red house (R3, intent)", () => {
   it('R3: harbor-flat\'s front pine moved by -5,-5 draws behind the house\'s wall, where the old order drew it over', async () => {
-    const { sources, loadErrors } = await readSources(join(REPO, 'examples', 'harbor.pixellab'));
+    const { sources, loadErrors } = await readSources(join(FORMAT1_EXAMPLES, 'harbor.pixellab'));
     assert.deepEqual(loadErrors, []);
     const flat = structuredClone(sources.scenes.get('harbor-flat'));
     const pine = flat.items.find((item) => item.group && item.items[0].object === 'pine' && item.items[0].at.tile.join() === '5,6,0').items[0];
@@ -758,7 +758,7 @@ describe("the harbor example: a pine moved behind the red house (R3, intent)", (
   });
 
   it('R3: the hall\'s 2×1 walls and roof draw over a tree one row behind them and under a tree one row in front', async () => {
-    const { sources } = await readSources(join(REPO, 'examples', 'harbor.pixellab'));
+    const { sources } = await readSources(join(FORMAT1_EXAMPLES, 'harbor.pixellab'));
     const base = structuredClone(sources.scenes.get('harbor-flat'));
     const hall = [{ object: 'hall-walls', at: { tile: [2, 5, 1] } }, { object: 'hall-roof', at: { tile: [2, 5, 2] } }];
     const trees = [{ object: 'tree', at: { tile: [3, 6, 0] } }, { object: 'tree', at: { tile: [3, 4, 0] } }];
@@ -840,7 +840,7 @@ describe('the sort moves as few items as it can (R2)', () => {
   });
 
   it('R2: the harbor pine moved behind the red house moves one item, and back again moves one item', async () => {
-    const { sources } = await readSources(join(REPO, 'examples', 'harbor.pixellab'));
+    const { sources } = await readSources(join(FORMAT1_EXAMPLES, 'harbor.pixellab'));
     const flat = structuredClone(sources.scenes.get('harbor-flat'));
     const lone = { ...sources, scenes: new Map([['flat', flat]]) };
     const pineAt = (list, tile) => list.findIndex((item) => item.group && item.items[0].object === 'pine' && item.items[0].at.tile.join() === tile);

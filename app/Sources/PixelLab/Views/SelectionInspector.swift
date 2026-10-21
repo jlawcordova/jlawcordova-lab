@@ -75,6 +75,11 @@ struct SelectionInspector: View {
                     .accessibilityLabel("Position: nothing selected")
                 }
             }
+
+            // The item's own actions and those of its object's map layers (R23).
+            if let item = doc.selectedItem {
+                ActionsSection(rows: model.timeline.actionRows(forItem: item.path))
+            }
         }
     }
 

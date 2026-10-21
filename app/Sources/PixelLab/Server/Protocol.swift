@@ -378,7 +378,8 @@ struct MotionTrack: Sendable, Hashable, Identifiable {
     var id: String { item }
 }
 
-/// `scene.show --doc`, only the motion part of the doc.
+/// `scene.show --doc`, the motion part of the doc and its source items (for
+/// their ambient loops and actions).
 struct SceneShowMotion: Codable, Sendable {
     struct Doc: Codable, Sendable {
         struct Motion: Codable, Sendable {
@@ -391,6 +392,7 @@ struct SceneShowMotion: Codable, Sendable {
             var tracks: [Track]?
         }
         var motion: Motion?
+        var items: [JSONValue]?
     }
     var name: String
     var doc: Doc?
@@ -470,6 +472,8 @@ struct ObjectShowResult: Codable, Sendable {
     var character: Bool?
     /// The hex values the object paints (the colors meter counts them).
     var usedColors: [String]
+    /// The object's source (`object.show --doc`): its layers' ambient loops and actions.
+    var doc: JSONValue?
 
     var isBlock: Bool { kind == "block" }
     /// Layers and frames can change: a sprite with layers of its own.
