@@ -18,6 +18,11 @@ import Foundation
 ///     depth front|back|auto   (the selected item's Depth control: the group's when the item is alone in its SVG group)
 ///     groupdepth <group path>|selected front|back|auto   (the wrapper line's menu, for a group of several items; `selected` is the item's group)
 ///     sort   (Checks' Sort button: the scene's items in depth order)   set level <n>  (a pixel item's, too)
+///     play <action> [<item>]   (the Inspector's Play for an ACTIONS row of the selected item, or of item path <item>, which it selects;
+///         in object mode, of the selected layer. Waits until the action has played once and the stage is back at rest)
+///     playat <action> <ms> [<item>]   (renders the action <ms> into it, as a mid-play frame, and holds it on the stage for a snapshot)
+///     playend   (releases a held `playat` frame: the stage draws the playhead's frame again)
+///     reducemotion on|off|system   (overrides the system's Reduce Motion for Play and the timeline)
 ///     undo redo save [force] revert publish [<dir>] done   saveas <path.pixellab>
 ///     time <ms>  play  pause  tracks on|off   zoom fit|1-4   sidebar library|items
 ///     search <text>   wait <ms>   snapshot <file.png>   log <text>
@@ -30,6 +35,10 @@ import Foundation
 ///     expect depth front|back|auto (what the Depth control shows)   expect level <n>   expect groupdepth <path>|selected front|back|auto
 ///     expect order <entry entry …>   (the scene's items in list order: each entry is a path, `#id`, `selected`,
 ///         an object name (its first item) or `name@col,row,level`; they must appear in that order)
+///     expect ambient <ms|none>   (the longest ambient loop on the scene's items and on the map layers of the objects it uses)
+///     expect timeline <ms|none>   (the timeline's length: the longest of motion and ambient loops, at most 60000)
+///     expect actions <name,name|none>   (the ACTIONS rows shown for the selected item, or the selected object layer)
+///     expect playing <name|none>   (the action on the stage now)   expect lastplay|announced <text>   (what the last Play did / said; contains)
 ///     expect warning <code>   expect nowarning <code>   (check's warnings: off_grid, out_of_order, copies)
 ///     expect cli <text>   (the last `cli` step's output contains it)
 ///     expect footprint <w>,<d>   (the open sprite's)   footprint <w>,<d>   (object mode: the Footprint steppers)
@@ -427,6 +436,25 @@ final class ScriptRunner {
         case "time":
             model.timeline.pause()
             model.timeline.scrub(to: Double(try int(words, 1)))
+            return nil
+        case "play" where words.count > 1:
+            let row = try actionRow(words, nameAt: 1, itemAt: 2, model: model)
+            await model.timeline.playAction(row)
+            return model.timeline.lastPlay
+        case "playat":
+            let row = try actionRow(words, nameAt: 1, itemAt: 3, model: model)
+            await model.timeline.playAction(row, hold: try int(words, 2))
+            return model.timeline.reduceMotion ? model.timeline.lastPlay : "\(row.name) held at \(words[2]) ms"
+        case "playend":
+            model.timeline.endAction(render: true)
+            return nil
+        case "reducemotion":
+            switch try arg(words, 1) {
+            case "on": model.timeline.reduceMotionOverride = true
+            case "off": model.timeline.reduceMotionOverride = false
+            case "system": model.timeline.reduceMotionOverride = nil
+            default: throw Failure("reducemotion on|off|system")
+            }
             return nil
         case "play" where model.document?.ref.kind == .object:
             model.objectEditor.play()
@@ -1231,6 +1259,16 @@ final class ScriptRunner {
         case "build": got = model.build?.result.map { $0.ok ? "ok" : "failed" } ?? "none"
         case "tool": got = doc?.ref.kind == .object ? model.objectEditor.tool.rawValue : model.editor.tool.rawValue
         case "time": got = String(model.timeline.renderTime)
+        case "ambient": got = model.timeline.ambientDuration.map { String(Int($0)) } ?? "none"
+        case "timeline": got = model.timeline.duration.map { String(Int($0)) } ?? "none"
+        case "actions":
+            let rows = doc?.ref.kind == .object ? model.objectEditor.actionRows : (doc?.selectedPath.map { model.timeline.actionRows(forItem: $0) } ?? [])
+            got = rows.isEmpty ? "none" : rows.map(\.name).joined(separator: ",")
+        case "playing": got = model.timeline.playingAction ?? "none"
+        case "lastplay", "announced":
+            let said = what == "announced" ? model.timeline.lastAnnouncement : model.timeline.lastPlay
+            guard said.contains(want) else { throw Failure("expected \(what) to contain \"\(want)\", got \"\(said)\"") }
+            return "\(what) = \(said)"
         case "alert": got = model.saveAlert.map { "\($0.kind)" } ?? "none"
         case "stale": got = String(model.showsStaleBanner)
         case "mergealert": got = String(model.mergeAlert != nil)
@@ -1345,6 +1383,24 @@ final class ScriptRunner {
         }
         guard got == want else { throw Failure("expected \(what) \(want), got \(got)") }
         return "\(what) = \(got)"
+    }
+
+    /// The ACTIONS row `play`/`playat` names: for the selected item (or `<item>`, which it selects),
+    /// or the selected layer of the open object.
+    private func actionRow(_ words: [String], nameAt: Int, itemAt: Int, model: AppModel) throws -> ActionRow {
+        let name = try arg(words, nameAt)
+        var rows: [ActionRow]
+        if model.document?.ref.kind == .object {
+            rows = model.objectEditor.actionRows
+        } else {
+            if words.count > itemAt { model.editor.select(words[itemAt]) }
+            guard let path = model.document?.selectedPath else { throw Failure("select an item first, or give its path") }
+            rows = model.timeline.actionRows(forItem: path)
+        }
+        guard let row = rows.first(where: { $0.name == name }) else {
+            throw Failure("no action \(name) in ACTIONS (\(rows.map(\.name).joined(separator: ", ")))")
+        }
+        return row
     }
 
     /// Where an entry of `expect order` stands in the scene's items (list order):

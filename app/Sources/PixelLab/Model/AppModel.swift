@@ -269,6 +269,7 @@ final class AppModel {
                 }
             }
             if everything { thumbnails.invalidateAll() } else { thumbnails.invalidate(objectsChanged) }
+            timeline.forgetObjects(everything ? nil : objectsChanged)
             if everything { await loadPalette() }
             if let doc = document, doc.ref.kind == .object, everything || objectsChanged.contains(doc.ref.name) { objectEditor.docChanged() }
             await loadLists()
@@ -404,6 +405,8 @@ final class AppModel {
     /// Renders the open doc; coalesces requests that arrive mid-render.
     func requestRender() {
         guard let doc = document, let connection else { return }
+        // An action is on the stage: it puts the playhead's frame back when it ends.
+        if timeline.actionActive { return }
         if doc.rendering {
             doc.needsRender = true
             return
@@ -501,7 +504,7 @@ final class AppModel {
                 } catch {
                     notice = "Couldn't list the items of \(doc.ref.name): \(error.localizedDescription)"
                 }
-                if timeline.hasMotion || !timeline.tracks.isEmpty { await loadMotion() }
+                await loadMotion()
             } while doc.needsItems && document === doc
             doc.loadingItems = false
             if document === doc { editor.syncDrafts() }
@@ -524,7 +527,20 @@ final class AppModel {
         guard let doc = document, doc.ref.kind == .scene, let connection else { return }
         do {
             let r: SceneShowMotion = try await connection.call("scene.show", ["name": .string(doc.ref.name), "doc": true])
-            if document === doc { timeline.load(r) }
+            // The layers of the objects the scene places carry ambient loops and actions too.
+            var names = Set<String>()
+            Animation.walk(r.doc?.items) { _, item in if let o = item["object"]?.stringValue { names.insert(o) } }
+            var objects: [String: [Int: ElementAnimation]] = [:]
+            for name in names.sorted() where timeline.objectAnimation[name] == nil {
+                let o: ObjectShowResult? = try? await connection.call("object.show", ["name": .string(name), "doc": true])
+                objects[name] = Animation.layers(of: o?.doc)
+            }
+            if document === doc {
+                let before = (timeline.duration, timeline.itemAnimation)
+                timeline.load(r, objects: objects)
+                // A loop that came or went changes what the stage shows at a time.
+                if before.0 != timeline.duration || before.1 != timeline.itemAnimation { timeline.invalidate(); requestRender() }
+            }
         } catch {
             if document === doc { timeline.load(SceneShowMotion(name: doc.ref.name, doc: nil)) }
         }

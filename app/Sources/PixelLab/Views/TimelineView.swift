@@ -32,7 +32,7 @@ struct TimelineStrip: View {
                         .frame(height: 22)
                     HStack(spacing: 8) {
                     Spacer(minLength: 0)
-                    Text("\(TimelineModel.label(timeline.time)) / \(TimelineModel.label(duration))")
+                    Text("\(TimelineModel.label(timeline.time)) / \(TimelineModel.label(duration))\(timeline.hasAmbient ? " · loops" : "")")
                         .font(Theme.monoFont(11))
                         .foregroundStyle(Theme.inkMuted)
                         .monospacedDigit()
@@ -44,13 +44,13 @@ struct TimelineStrip: View {
                             .labelStyle(.iconOnly)
                     }
                     .buttonStyle(.borderless)
-                    .help(timeline.showTracks ? "Hide the tracks" : "Show a track per animated item")
+                    .help(timeline.showTracks ? "Hide the tracks" : "Show a track per animated item (ambient loops play on their own and have none)")
                     .accessibilityLabel(timeline.showTracks ? "Hide tracks" : "Show tracks")
                     }
                     .frame(width: TimelineStrip.trailing)
                 } else {
                     Capsule().fill(Theme.border).frame(height: 3).frame(maxWidth: .infinity)
-                    Text(isScene ? "No motion" : "—")
+                    Text(isScene ? "No motion or loops" : "—")
                         .font(Theme.monoFont(11))
                         .foregroundStyle(Theme.inkMuted)
                 }
