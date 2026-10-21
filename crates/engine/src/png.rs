@@ -2,7 +2,7 @@
 //! cli/lib/engine/preview.mjs): 8-bit RGBA, no interlace. Encoding writes
 //! filter 0 on every row and deflates with `deflate::zlib`, as Node's
 //! `deflateSync` did; decoding reads any 8-bit RGBA or RGB PNG with the five
-//! standard filters, which is what the tests and the parity check need to
+//! standard filters, which is what the tests need to
 //! compare previews pixel for pixel.
 
 /// An image: width × height pixels, four bytes each (RGBA), row by row.

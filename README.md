@@ -199,7 +199,7 @@ Every tool call is logged to `activity.jsonl` in the same folder and shown in th
 
 ## Development
 
-The developer docs are in [docs/README.md](docs/README.md): the architecture, contributing, testing, and a README for each of [`cli/`](cli/README.md), [`app/`](app/README.md) and [`scripts/`](scripts/README.md). They're also published as a site at [jlawcordova.com/jlawcordova-lab](https://jlawcordova.com/jlawcordova-lab/), built with `npm run docs:site` and deployed from `main` by [`.github/workflows/docs.yml`](.github/workflows/docs.yml).
+The developer docs are in [docs/README.md](docs/README.md): the architecture, contributing, testing, and a README for each of [`cli/`](crates/pixellab/README.md), [`app/`](app/README.md) and [`scripts/`](scripts/README.md). They're also published as a site at [jlawcordova.com/jlawcordova-lab](https://jlawcordova.com/jlawcordova-lab/), built with `npm run docs:site` and deployed from `main` by [`.github/workflows/docs.yml`](.github/workflows/docs.yml).
 
 ```sh
 npm test                                   # CLI tests (node:test), must show "# fail 0"

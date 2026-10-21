@@ -1,6 +1,6 @@
 # The CLI and servers (`cli/`)
 
-`pixellab` is a Node CLI (Node ≥ 22, ESM, Node built-ins only, no `node_modules`) and the two servers built on the same commands: `serve --stdio` for the Mac app and `serve --mcp` for agents. How it fits with the app and the site is in [Architecture](../docs/architecture.md); every command, flag, method and error code is in the generated [command reference](../docs/cli.md).
+`pixellab` is a Node CLI (Node ≥ 22, ESM, Node built-ins only, no `node_modules`) and the two servers built on the same commands: `serve --stdio` for the Mac app and `serve --mcp` for agents. How it fits with the app and the site is in [Architecture](../../docs/architecture.md); every command, flag, method and error code is in the generated [command reference](../../docs/cli.md).
 
 ```sh
 node cli/bin/pixellab.mjs help              # every command, from the registry
@@ -82,9 +82,9 @@ async run(ctx, params) {
 1. Add the definition to the right file in `lib/commands/` and to its default export. A new area gets a new file, added to the list at the bottom of `lib/registry.mjs`.
 2. Use the engine (`lib/engine/`) for anything the art's format decides (validate, serialize, edit, starters, compile, previews), from `ctx.site.engine` and friends (`ctx.document` is the same object): never reimplement it in a command. Scene edits go in `lib/scene-ops.mjs`.
 3. Throw `CommandError` with a stable `code` for failures a person or agent can act on (`not_found`, `invalid`, `conflict`, …), `UsageError` for bad params beyond the schema.
-4. Test it in `cli/test/`, named after the requirement it proves (`R3: …`), against the sample document (`makeDocument()` in `test/helpers.mjs`) or, for the owner's art, a copy of the site (`makeSite()`). See [Testing](../docs/testing.md).
-5. Run `npm run docs:cli` to regenerate [docs/cli.md](../docs/cli.md), and `npm test`. A test fails if the reference is out of date.
-6. It's now on the command line, in the stdio server and in MCP. If agents shouldn't have it, add it to `LEFT_OUT` in `lib/server-mcp.mjs` with the reason. If the app needs it, model its result in `app/Sources/PixelLab/Server/Protocol.swift` (or decode it where it's used) and call it through `ServerConnection` (see [the app's README](../app/README.md#adding-a-feature)).
+4. Test it in `cli/test/`, named after the requirement it proves (`R3: …`), against the sample document (`makeDocument()` in `test/helpers.mjs`) or, for the owner's art, a copy of the site (`makeSite()`). See [Testing](../../docs/testing.md).
+5. Run `npm run docs:cli` to regenerate [docs/cli.md](../../docs/cli.md), and `npm test`. A test fails if the reference is out of date.
+6. It's now on the command line, in the stdio server and in MCP. If agents shouldn't have it, add it to `LEFT_OUT` in `lib/server-mcp.mjs` with the reason. If the app needs it, model its result in `app/Sources/PixelLab/Server/Protocol.swift` (or decode it where it's used) and call it through `ServerConnection` (see [the app's README](../../app/README.md#adding-a-feature)).
 
 ## Sessions, undo and saving
 

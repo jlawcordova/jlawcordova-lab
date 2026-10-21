@@ -296,9 +296,11 @@ fn usage_errors_exit_2_with_a_pointer_to_help() {
     assert_eq!(err, "pixellab: no help for nope; run pixellab help\n");
     let (_, _, err) = exec(&reg, &["scene", "render"], HashMap::new());
     assert_eq!(err, "pixellab: scene.render: name is required\n");
-    // --version is not a command line flag of the Node CLI either.
-    let (code, _, err) = exec(&reg, &["--version"], HashMap::new());
-    assert_eq!((code, err.as_str()), (2, "pixellab: a command comes before --version; run pixellab help\n"));
+    // --version alone is the version (spec R27); with a command it is a usage error.
+    let (code, out, _) = exec(&reg, &["--version"], HashMap::new());
+    assert_eq!((code, out.starts_with("pixellab ")), (0, true));
+    let (code, _, err) = exec(&reg, &["scene", "list", "--version"], HashMap::new());
+    assert_eq!(code, 2, "{err}");
 }
 
 #[test]

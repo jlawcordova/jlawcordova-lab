@@ -12,8 +12,7 @@
 //!   so a scene merges and diffs a line per item;
 //! - an item's `at.level` is left out when it is 0, as `serialize.mjs` did.
 //!
-//! `scripts/goldens.mjs` writes the same text from Node for the bootstrap
-//! copy of the corpus; `serialize(parse(text)) == text` for every file.
+//! `serialize(parse(text)) == text` for every file of the committed fixture.
 
 use std::collections::BTreeMap;
 use std::fs;

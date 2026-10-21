@@ -44,7 +44,7 @@ The app never orders items itself: the server puts a scene in depth order after 
 - **Colors come from `Theme`.** Never a literal color in a view; every token has a night and a day value.
 - **Pixel art is nearest-neighbor at integer zoom,** everywhere, including snapshots.
 - **Accessibility:** VoiceOver labels on every control, visible focus, comfortable hit targets on custom controls, and Reduce Motion respected (with it on, the timeline doesn't play; scrubbing still previews).
-- **Everything is a command.** If the app needs to do something new to a doc, it's a new command in the registry first (see [the CLI's README](../cli/README.md#adding-a-command)), so agents and the command line get it too.
+- **Everything is a command.** If the app needs to do something new to a doc, it's a new command in the registry first (see [the CLI's README](../crates/pixellab/README.md#adding-a-command)), so agents and the command line get it too.
 
 ## Adding a feature
 

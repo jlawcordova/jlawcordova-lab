@@ -1,4 +1,4 @@
-// The sample document's palette (cli/test/fixtures): a few world colors and one outfit color.
+// The sample document's palette (fixtures/format1): a few world colors and one outfit color.
 export default {
   world: {
     ink: '#2E2418',
