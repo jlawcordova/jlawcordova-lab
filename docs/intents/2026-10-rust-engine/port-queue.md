@@ -36,7 +36,7 @@ A unit's checks: `cargo fmt --check`, `cargo test` for its crate, its ported sui
 | U26 | `commands/chat.mjs`, `chat-context.mjs` | `chat.test.mjs` | U14, U21 | S | merged |
 | U27 | `depth-edit.test.mjs`, the program parts of `depth-motion.test.mjs` | → program tests | U22–U24 | S | waiting |
 | U28 | `serve.mjs`, `server-stdio.mjs`, `server-mcp.mjs` | `servers.test.mjs`, transcripts replayed | U11, U14, U16, U21 | O | waiting |
-| U29 | `migrate.rs`, `document migrate` (D3, R8) | new tests: every refusal, notes, `colorNotes`, the legacy `source/` folder, the SVG check refusing, `--to`, in place; its output equals the bootstrap's for the corpus apart from `notes` | U7, U13, U25 | O | waiting |
+| U29 | `migrate.rs`, `document migrate` (D3, R8) | new tests: every refusal, notes, `colorNotes`, the legacy `source/` folder, the SVG check refusing, `--to`, in place; its output equals the bootstrap's for the corpus apart from `notes` | U7, U13, U25 | O | merged |
 
 ## Signatures settled by the main session
 

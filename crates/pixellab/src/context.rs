@@ -75,18 +75,21 @@ pub fn doc_file(kind: DocKind, name: &str) -> String {
 /// runs without a document).
 pub struct Ctx<'a> {
     pub session: Option<&'a mut Session>,
+    /// Where the document is, for a command that runs without opening one
+    /// (`document migrate`, which reads a format-1 document no session can open).
+    pub open: Option<crate::document::OpenOptions>,
 }
 
 impl<'a> Ctx<'a> {
     /// A ctx for a command that runs without a document (`document: false`).
     pub fn none() -> Ctx<'static> {
-        Ctx { session: None }
+        Ctx { session: None, open: None }
     }
 
     /// A ctx for one call over a session.
     pub fn new(session: &'a mut Session) -> Ctx<'a> {
         session.begin_call();
-        Ctx { session: Some(session) }
+        Ctx { session: Some(session), open: None }
     }
 
     /// The session (`sessionOf`): a command that needs one and has none is

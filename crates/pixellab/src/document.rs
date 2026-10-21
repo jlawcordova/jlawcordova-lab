@@ -381,7 +381,7 @@ fn base_name(path: &Path) -> String {
 
 /// The name of a document: the manifest's, else the folder's without
 /// `.pixellab`, else (for a bare folder) its site's folder name.
-fn document_name(root: &Path, site_root: Option<&Path>, manifest: Option<&Value>) -> String {
+pub fn document_name(root: &Path, site_root: Option<&Path>, manifest: Option<&Value>) -> String {
     if let Some(n) = manifest.and_then(|m| m.get("name")).and_then(Value::as_str).filter(|n| !n.is_empty()) {
         return n.to_string();
     }

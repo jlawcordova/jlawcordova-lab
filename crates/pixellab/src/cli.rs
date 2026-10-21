@@ -180,6 +180,8 @@ fn run(argv: &[String], io: &mut Io) -> Result<i32, Error> {
     if !command.needs_document {
         // It makes a document, so there's none to open first (a Mac with no site checkout has no default).
         let mut ctx = Ctx::none();
+        ctx.open =
+            Some(OpenOptions { doc: globals.document.clone(), site: globals.site.clone(), env: io.env.clone(), cwd: io.cwd.clone() });
         let result = registry.call(&mut ctx, command.name, Value::Object(checked.clone()), false)?;
         if globals.json {
             put(io.stdout, &format!("{}\n", stringify_pretty(&result)));
