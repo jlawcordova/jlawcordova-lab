@@ -92,7 +92,7 @@ impl<K: Hash + Eq + Clone, V> OMap<K, V> {
     {
         let i = self.index.remove(key)?;
         let (_, value) = self.entries.remove(i);
-        for (_, j) in self.index.iter_mut() {
+        for j in self.index.values_mut() {
             if *j > i {
                 *j -= 1;
             }

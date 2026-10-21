@@ -60,7 +60,7 @@ pub fn to_string(x: f64) -> String {
     let k = digits.len() as i32;
     if k <= n && n <= 21 {
         let mut out = digits;
-        out.extend(std::iter::repeat('0').take((n - k) as usize));
+        out.extend(std::iter::repeat_n('0', (n - k) as usize));
         return out;
     }
     if 0 < n && n <= 21 {
@@ -178,6 +178,67 @@ pub fn number_string(n: &Number) -> String {
     to_string(n.as_f64().unwrap_or(f64::NAN))
 }
 
+/// `Number(text)` for a string: trimmed, "" is 0, decimal (with an optional
+/// sign, point and exponent), `0x`/`0o`/`0b` integers, and `Infinity`;
+/// anything else is NaN.
+pub fn parse(text: &str) -> f64 {
+    let t = text.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
+    if t.is_empty() {
+        return 0.0;
+    }
+    let (sign, body) = match t.as_bytes()[0] {
+        b'+' => (1.0, &t[1..]),
+        b'-' => (-1.0, &t[1..]),
+        _ => (1.0, t),
+    };
+    if body == "Infinity" {
+        return sign * f64::INFINITY;
+    }
+    for (prefix, radix) in [("0x", 16), ("0X", 16), ("0o", 8), ("0O", 8), ("0b", 2), ("0B", 2)] {
+        if let Some(digits) = t.strip_prefix(prefix) {
+            if digits.is_empty() || !digits.chars().all(|c| c.is_digit(radix)) {
+                return f64::NAN;
+            }
+            return digits.chars().fold(0.0, |n, c| n * radix as f64 + c.to_digit(radix).unwrap() as f64);
+        }
+    }
+    let bytes = body.as_bytes();
+    let mut i = 0;
+    let int_start = i;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    let mut digits = i - int_start;
+    if i < bytes.len() && bytes[i] == b'.' {
+        i += 1;
+        let f = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        digits += i - f;
+    }
+    if digits == 0 {
+        return f64::NAN;
+    }
+    if i < bytes.len() && (bytes[i] == b'e' || bytes[i] == b'E') {
+        i += 1;
+        if i < bytes.len() && (bytes[i] == b'+' || bytes[i] == b'-') {
+            i += 1;
+        }
+        let e = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i == e {
+            return f64::NAN;
+        }
+    }
+    if i != bytes.len() {
+        return f64::NAN;
+    }
+    sign * body.parse::<f64>().unwrap_or(f64::NAN)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,6 +288,20 @@ mod tests {
         assert_eq!(to_fixed(99.9999, 3), "100.000");
         assert_eq!(to_fixed(1e21, 2), "1e+21");
         assert_eq!(to_fixed(12.3456, 1), "12.3");
+    }
+
+    #[test]
+    fn parses_like_number() {
+        assert_eq!(parse(" 12 "), 12.0);
+        assert_eq!(parse(""), 0.0);
+        assert_eq!(parse("01"), 1.0);
+        assert_eq!(parse("1e3"), 1000.0);
+        assert_eq!(parse(".5"), 0.5);
+        assert_eq!(parse("5."), 5.0);
+        assert_eq!(parse("0x1F"), 31.0);
+        assert!(parse("1a").is_nan());
+        assert!(parse("inf").is_nan());
+        assert_eq!(parse("-Infinity"), f64::NEG_INFINITY);
     }
 
     #[test]

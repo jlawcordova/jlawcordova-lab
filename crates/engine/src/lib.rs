@@ -11,6 +11,8 @@
 //! plain JavaScript data; `jsnum` and `serialize` keep JavaScript's number
 //! printing and key order, so outputs stay byte for byte the Node CLI's.
 
+#![allow(clippy::type_complexity)]
+
 pub mod ambient;
 pub mod compile;
 pub mod deflate;
