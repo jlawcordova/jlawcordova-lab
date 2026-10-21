@@ -18,13 +18,16 @@ struct PixelLabApp: App {
         .windowToolbarStyle(.unified)
         .commands { PixelLabCommands(model: model) }
 
-        // A Window scene is single and listed in the Window menu (Window › Agent);
-        // SwiftUI remembers its frame.
+        // A single window SwiftUI remembers the frame of. Its automatic Window
+        // menu item is replaced by Window › Agent Window (⇧⌥⌘A), since Window ›
+        // Agent (⌥⌘A) shows the main window's Agent tab
+        // (docs/intents/2026-10-agent-chat/spec.md, D13).
         Window("Agent", id: WindowID.agent) {
             AgentWindow().environment(model)
         }
         .defaultSize(width: 880, height: 820)
         .defaultPosition(.trailing)
+        .commandsRemoved()
 
         Settings {
             SettingsView().environment(model)
@@ -84,6 +87,9 @@ struct PixelLabCommands: Commands {
                 .disabled(model.document?.selectedItem?.at.isTile ?? true)
             Button("Select None") { model.layers.select([]) }
                 .disabled(!(model.mode == .scene && !(model.document?.selection.isEmpty ?? true)))
+            // ⌥-click's keyboard way (docs/intents/2026-10-agent-chat/spec.md, D6).
+            Button("Select Every Use") { if let o = model.document?.selectedItem?.object { model.layers.selectEveryUse(of: o, add: false) } }
+                .disabled(!(model.mode == .scene && model.document?.selectedItem != nil))
             Divider()
             // Scene layers (docs/intents/2026-10-scene-layers/spec.md, D9, D10).
             Button("Group") { Task { await model.layers.group() } }
@@ -114,8 +120,14 @@ struct PixelLabCommands: Commands {
             Button(model.showInspector ? "Hide Inspector" : "Show Inspector") { model.showInspector.toggle() }
                 .keyboardShortcut("i", modifiers: [.command, .option])
             Divider()
-            Button(model.agent.pendingCount > 0 ? "Show Agent (\(model.agent.pendingCount) to review)" : "Show Agent") { openWindow(id: WindowID.agent) }
+        }
+        // The chat in the main window, and the review window (spec D13).
+        CommandGroup(before: .windowList) {
+            Button(model.agent.pendingCount > 0 ? "Agent (\(model.agent.pendingCount) to review)" : "Agent") { model.showAgentTab(focusInput: true) }
                 .keyboardShortcut("a", modifiers: [.command, .option])
+                .disabled(model.phase != .ready)
+            Button("Agent Window") { openWindow(id: WindowID.agent) }
+                .keyboardShortcut("a", modifiers: [.command, .option, .shift])
             Divider()
         }
     }
@@ -174,6 +186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSApp.reply(toApplicationShouldTerminate: false)
                 return
             }
+            model.chat.stopEverything()
             await model.shutdown()
             NSApp.reply(toApplicationShouldTerminate: true)
         }

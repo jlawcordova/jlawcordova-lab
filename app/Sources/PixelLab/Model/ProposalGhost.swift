@@ -8,16 +8,29 @@ import Foundation
 /// One proposal of `proposal.list` / `proposals.changed`.
 struct ProposalSummary: Codable, Sendable, Hashable, Identifiable {
     var id: String
+    /// #n (docs/intents/2026-10-agent-chat/spec.md, D7); older proposals have none.
+    var number: Int?
     var doc: String
     var summary: [String]
     var createdAt: String
     var agent: String?
+    /// The Agent chat it came from, if any.
+    var chat: ProposalChat?
     var baseMatches: Bool
 
     var ref: DocRef? { DocRef(id: doc) }
     /// A rewrite of the same proposal (the agent saved again) has a new createdAt.
     var version: String { "\(id)@\(createdAt)" }
     var agentName: String { agent ?? "an agent" }
+    /// "#12", or "" for an older proposal.
+    var numberLabel: String { number.map { "#\($0)" } ?? "" }
+    /// The stage banner's title: "Previewing proposal #12 from the chat “Pines”" (docs/intents/2026-10-agent-chat/spec.md, D7).
+    var bannerTitle: String {
+        let n = number.map { "proposal #\($0)" } ?? "proposal"
+        return chat.map { "Previewing \(n) from the chat “\($0.title)”" } ?? "Previewing \(n) from \(agentName)"
+    }
+    /// Where it came from: "Chat · Forest by the house", or "claude-code 2.1.0 · terminal".
+    var source: String { chat.map { "Chat · \($0.title)" } ?? "\(agentName) · terminal" }
     var editsLabel: String { "\(summary.count) edit\(summary.count == 1 ? "" : "s")" }
 }
 
@@ -77,6 +90,18 @@ struct ActivityEntry: Codable, Sendable, Hashable {
     var tool: String
     var ok: Bool
     var summary: String?
+    /// The MCP client and, from the Agent chat, the chat (docs/intents/2026-10-agent-chat/spec.md, D7).
+    var agent: String?
+    var chat: ProposalChat?
+
+    /// Who made the call: the chat's title, else the agent.
+    var who: String { chat.map { "chat · \($0.title)" } ?? agent ?? "" }
+}
+
+/// `{ id, title }`: the Agent chat a proposal or tool call came from.
+struct ProposalChat: Codable, Sendable, Hashable {
+    var id: String
+    var title: String
 }
 
 struct ActivityList: Codable, Sendable { var entries: [ActivityEntry] }

@@ -12,15 +12,17 @@
 # then the example documents' layers, read from a file, on temp copies of
 # examples/ (examples-harbor.txt, examples-town.txt), and depth order on the harbor example: the front
 # pine moved behind the red house draws behind its wall, the Depth override draws it over, and the saved
-# file is in order (examples-depth.txt). The temp site is put in depth order first, with the bundled CLI's
-# scene sort --all, and that is the base it starts from; a copy of the site's own document, unsorted,
+# file is in order (examples-depth.txt). The Agent chat (docs/intents/2026-10-agent-chat/) runs against the fake
+# Claude Code in scripts/fake-claude/, from an empty temp home: install, sign in and chat on a temp harbor copy
+# (chat-setup.txt), never the owner's Claude Code or plan. The temp site is put in depth order first, with the bundled CLI's
+# scene sort --all, and that is the base it starts from; a copy of the site's document from before its depth-order change, unsorted,
 # checks the Checks warning and its Sort button (sort.txt).
 # The real checkout is only read (copied). Exits 0 if every step passed.
 #
 #   scripts/acceptance.sh [out-dir]      (default: a new temp dir)
 #
 # Needs build/Pixel Lab.app (scripts/build-app.sh). The scripts expect the
-# site as it was on 2026-10-20 (15 scenes, 164 objects, the house at
+# site as it was on 2026-10-21 (28 scenes, 204 objects, the house at
 # px -59,59); update their `expect` lines when the art changes.
 set -euo pipefail
 
@@ -47,6 +49,25 @@ run() { # run <script> <log>
   grep -q 'all steps passed' "$out/$2"
 }
 
+# The Agent chat's scripts run against the fake Claude Code (scripts/fake-claude/), installed and signed in
+# in a temp home, never the owner's Claude Code or plan.
+fake_home="$out/claude-signed-in"
+rm -rf "$fake_home" && mkdir -p "$fake_home" && HOME="$fake_home" "$root/scripts/fake-claude/install.sh" > /dev/null
+run_chat() { # run_chat <script> <log> [<example>]: on the temp site, or a temp copy of examples/<example>.pixellab
+  sed "s#@OUT@#$shots#g" "$root/scripts/acceptance/$1" > "$out/$1"
+  local where=(PIXELLAB_SITE="$site") st="$state"
+  if [[ -n ${3:-} ]]; then
+    # An example gets its own copy and its own state dir (its proposals count from #1).
+    local doc="$out/examples/$3-chat.pixellab"
+    rm -rf "$doc" "$out/state-$3-chat" && mkdir -p "$out/examples" && cp -R "$root/examples/$3.pixellab" "$doc"
+    where=(PIXELLAB_DOC="$doc") st="$out/state-$3-chat"
+  fi
+  env FAKE_CLAUDE_SIGNED_IN=1 FAKE_CLAUDE_STATE="$fake_home/state" PIXELLAB_CLAUDE_HOME="$fake_home" "${where[@]}" \
+    PIXELLAB_SCRIPT="$out/$1" PIXELLAB_STATE="$st" "$app/Contents/MacOS/PixelLab" 2>&1 | grep '^script:' > "$out/$2" || true
+  tail -1 "$out/$2"
+  grep -q 'all steps passed' "$out/$2"
+}
+
 run_example() { # run_example <script> <log> <example>: on a temp copy of examples/<example>.pixellab
   local doc="$out/examples/$3.pixellab"
   rm -rf "$doc" && mkdir -p "$out/examples" && cp -R "$root/examples/$3.pixellab" "$doc"
@@ -69,6 +90,10 @@ run agent.txt agent.log
 echo "==> a doc changed on disk under unsaved edits: merge, reload, keep; an approve merged in"
 PIXELLAB_CLI_PATH="$app/Contents/Resources/cli/bin/pixellab.mjs" node "$root/scripts/acceptance/stale-agent.mjs" "$site" "$state"
 run stale.txt stale.log
+echo "==> the Agent chat on the site: a chat's proposal ghosted, approved and rejected from its card; the Agent window"
+run_chat chat.txt chat.log
+grep -q 'closeup-front-trees' <(git -C "$site" diff --stat) || { echo "approving the chat's proposal didn't change closeup-front-trees" >&2; exit 1; }
+git -C "$site" add -A && git -C "$site" -c user.email=t@t -c user.name=t commit -qm "after chat"
 echo "==> the document: save as, reopen the copy, publish into a folder"
 run document.txt document.log
 copied=$(ls "$shots"/copy-out/*.svg | wc -l | tr -d ' ')
@@ -87,9 +112,54 @@ run_example examples-harbor.txt examples-harbor.log harbor
 run_example examples-town.txt examples-town.log town
 echo "==> depth order: the pine moved behind the house, the override, the saved file"
 run_example examples-depth.txt examples-depth.log harbor
+echo "==> the Agent chat: Claude Code's setup (the fake), chats, steps, a question, Stop"
+claude_home="$out/claude-home" chat_state="$out/chat-state"
+rm -rf "$claude_home" "$chat_state" && mkdir -p "$claude_home" "$chat_state"
+doc="$out/examples/chat.pixellab"
+rm -rf "$doc" && cp -R "$root/examples/harbor.pixellab" "$doc"
+sed "s#@OUT@#$shots#g" "$root/scripts/acceptance/chat-setup.txt" > "$out/chat-setup.txt"
+FAKE_CLAUDE_INSTALL_S=1 FAKE_CLAUDE_LOGIN_MS=2500 PIXELLAB_CLAUDE_HOME="$claude_home" PIXELLAB_CLAUDE_INSTALLER="$root/scripts/fake-claude/install.sh" \
+  PIXELLAB_SCRIPT="$out/chat-setup.txt" PIXELLAB_DOC="$doc" PIXELLAB_STATE="$chat_state" "$app/Contents/MacOS/PixelLab" 2>&1 | grep '^script:' > "$out/chat-setup.log" || true
+tail -1 "$out/chat-setup.log"
+grep -q 'all steps passed' "$out/chat-setup.log"
+proposal=$(ls "$chat_state"/proposals/*.json | head -1)
+grep -q '"chat": {' "$proposal" && grep -q '"number": 1' "$proposal" || { echo "the chat's proposal doesn't name its chat and number" >&2; exit 1; }
+grep -q '"chat":{"id"' "$chat_state/activity.jsonl" || { echo "no chat lines in the activity log" >&2; exit 1; }
+[[ $(ls "$chat_state"/chats/*.json | wc -l | tr -d ' ') == 2 ]] || { echo "expected 2 chats in the state dir" >&2; exit 1; }
+[[ -z $(find "$doc" -name '*.json' ! -name manifest.json) ]] || { echo "chat state went into the document" >&2; exit 1; }
+# R3: each chat is one Claude session, its follow-ups resumed (the stopped turn never got to save one).
+sessions=("$claude_home"/.local/share/claude/fake/fake-claude-state/sessions/*.json)
+[[ ${#sessions[@]} == 2 ]] || { echo "expected 2 Claude sessions for 2 chats, found ${#sessions[@]}: follow-ups didn't resume (R3)" >&2; exit 1; }
+grep -q '"turns":4' "${sessions[@]}" || { echo "the first chat's four turns weren't one resumed session (R3)" >&2; exit 1; }
+echo "the chat's proposals name their chat and number; 2 chats kept in the state dir, none in the document; one Claude session per chat"
+echo "==> the Agent chat on the harbor example: layers as chips, Option-click, pins, unsaved items, a question, ghosts per chat"
+run_chat chat-harbor.txt chat-harbor.log harbor
+echo "==> the Agent chat across launches: the session resumed, a proposal settled while closed, a lost session"
+relaunch_doc="$out/examples/relaunch.pixellab" relaunch_state="$out/state-relaunch" relaunch_fake="$out/fake-relaunch"
+rm -rf "$relaunch_doc" "$relaunch_state" "$relaunch_fake" && cp -R "$root/examples/harbor.pixellab" "$relaunch_doc" && mkdir -p "$relaunch_state"
+relaunch() { # relaunch <part>
+  sed "s#@OUT@#$shots#g" "$root/scripts/acceptance/chat-relaunch-$1.txt" > "$out/chat-relaunch-$1.txt"
+  FAKE_CLAUDE_SIGNED_IN=1 FAKE_CLAUDE_STATE="$relaunch_fake" PIXELLAB_CLAUDE_HOME="$fake_home" PIXELLAB_DOC="$relaunch_doc" \
+    PIXELLAB_SCRIPT="$out/chat-relaunch-$1.txt" PIXELLAB_STATE="$relaunch_state" "$app/Contents/MacOS/PixelLab" 2>&1 | grep '^script:' > "$out/chat-relaunch-$1.log" || true
+  tail -1 "$out/chat-relaunch-$1.log"
+  grep -q 'all steps passed' "$out/chat-relaunch-$1.log"
+}
+relaunch 1
+# Pixel Lab is closed: the chat's proposal is rejected from a terminal.
+proposal=$(basename "$(ls "$relaunch_state"/proposals/*.json | head -1)" .json)
+PIXELLAB_STATE="$relaunch_state" node "$app/Contents/Resources/cli/bin/pixellab.mjs" proposal reject "$proposal" --document "$relaunch_doc"
+relaunch 2
+# Claude Code loses the chat's session.
+rm -rf "$relaunch_fake/sessions"
+relaunch 3
 echo "==> sort: a document written before depth order, the Checks warning, Sort, save"
+# The site's document is in depth order since its own depth-order change (f5d74e3), so the unsorted one is
+# the document as it was just before it, read (not checked out) from the site's history.
+unsorted_rev=${PIXELLAB_UNSORTED_REV:-6d19714}
 doc="$out/examples/unsorted.pixellab"
-rm -rf "$doc" && cp -R "$real/src/assets/pixel-art/jlawcordova.pixellab" "$doc"
+rm -rf "$doc" "$out/unsorted-src" && mkdir -p "$out/unsorted-src"
+git -C "$real" archive "$unsorted_rev" src/assets/pixel-art/jlawcordova.pixellab | tar -x -C "$out/unsorted-src"
+mv "$out/unsorted-src/src/assets/pixel-art/jlawcordova.pixellab" "$doc"
 sed "s#@OUT@#$shots#g" "$root/scripts/acceptance/sort.txt" > "$out/sort.txt"
 PIXELLAB_SCRIPT="$out/sort.txt" PIXELLAB_DOC="$doc" PIXELLAB_STATE="$state" "$app/Contents/MacOS/PixelLab" 2>&1 | grep '^script:' > "$out/sort.log" || true
 tail -1 "$out/sort.log"

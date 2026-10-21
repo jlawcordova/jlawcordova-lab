@@ -115,6 +115,8 @@ final class LayersModel {
         if doc?.selectedLayer == nil { baseline = nil } else if baseline == nil { selectionChanged() }
         if itemsCurrent { settledMove = measured }
         syncDraft()
+        // The Agent chat's pins (docs/intents/2026-10-agent-chat/spec.md, D3).
+        app?.chat.itemsChanged()
     }
 
     // MARK: Selection
@@ -167,6 +169,7 @@ final class LayersModel {
         doc?.follow(reordered)
         baseline = baseline?.following(reordered)
         hover = hover?.following(reordered)
+        app?.chat.followSort(reordered)
     }
 
     /// The layer and name the name field last took, so a reload doesn't overwrite typing.
@@ -374,6 +377,8 @@ final class LayersModel {
     func stageMouseDown(_ p: CGPoint, geometry: StageGeometry, option: Bool, shift: Bool, clickCount: Int) {
         guard let editor = app?.editor else { return }
         let px = geometry.scenePixel(fromView: p)
+        // ⌥: on a mouse-up that didn't move, every use of what's drawn here (docs/intents/2026-10-agent-chat/spec.md, D6).
+        everyUseClick = option && clickCount == 1 ? (px.x, px.y, shift) : nil
         guard case .selected(let sel) = click(scenePixel: px.x, px.y, shift: shift, clickCount: clickCount) else { return }
         if sel.count == 1, case .item(let path) = sel[0] {
             editor.drag = ItemDrag(path: path, startView: p, startScene: geometry.scenePoint(fromView: p), byPixel: option)
@@ -404,6 +409,26 @@ final class LayersModel {
         drag = nil
         if d.moved, !d.isZero { Task { await move(d.targets, dc: d.dc, dr: d.dr, dl: 0) } }
         return true
+    }
+
+    /// A ⌥-press waiting for its mouse-up: if the pointer didn't move, it selects every use.
+    @ObservationIgnored var everyUseClick: (x: Int, y: Int, shift: Bool)?
+
+    /// ⌥-click: every item using the object drawn at the scene pixel, among those a click can reach; ⇧ adds them.
+    func selectEveryUse(scenePixel x: Int, _ y: Int, add: Bool) {
+        guard let doc, let render = doc.render, let hit = pick(scenePixel: x, y, render: render),
+              let object = doc.itemsByPath[hit.path]?.object else { return }
+        selectEveryUse(of: object, add: add)
+    }
+
+    /// Every use of an object (also Edit › Select Every Use, for the selected item).
+    func selectEveryUse(of object: String, add: Bool) {
+        guard let doc else { return }
+        let paths = tree.everyUse(of: object, items: doc.items, inside: inside, hidden: hidden, locked: locked)
+        guard !paths.isEmpty else { return }
+        let targets = paths.map { LayerTarget.item($0) }
+        select(add ? doc.selection + targets.filter { !doc.selection.contains($0) } : targets, reveal: false, announce: false)
+        announce("Selected \(paths.count) \(object)\(paths.count == 1 ? "" : "s")")
     }
 
     /// A right-click on the stage: what's under the pointer joins the selection

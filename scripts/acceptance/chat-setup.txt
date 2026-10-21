@@ -1,0 +1,126 @@
+# The Agent chat, part 1 (docs/intents/2026-10-agent-chat/spec.md): Claude Code's setup from no
+# claude command to signed in, then chats on a temp copy of the harbor example. acceptance.sh runs it
+# with PIXELLAB_CLAUDE_HOME (an empty temp home), PIXELLAB_CLAUDE_INSTALLER (the fake installer) and
+# FAKE_CLAUDE_LOGIN_MS=2500, so nothing touches the owner's Claude Code or plan.
+open scene:harbor
+appearance dark
+expect righttab inspector
+righttab agent
+expect righttab agent
+# R4: not installed: the installer's command shown, Copy, Install
+expect setup missing
+expect claudeinfo Claude Code isn't installed
+setup check
+expect setupmessage Still not found in ~/.local/bin or on your PATH
+setup copy
+snapshot @OUT@/chat-setup-missing-dark.png
+appearance light
+snapshot @OUT@/chat-setup-missing-light.png
+appearance dark
+setup install
+expect setup installing
+setup wait signedout
+expect installlog Installed claude to ~/.local/bin/claude
+expect installlog claude --version → 2.1.290 (Claude Code)
+expect claudeinfo Claude Code 2.1.290 · signed out
+snapshot @OUT@/chat-setup-signedout-dark.png
+appearance light
+snapshot @OUT@/chat-setup-signedout-light.png
+appearance dark
+# Sign in with browser, waiting, Cancel, again
+setup signin
+expect setup waiting
+expect loginurl https://claude.ai/oauth/authorize?code=true&fake=1
+setup open
+snapshot @OUT@/chat-setup-waiting-dark.png
+appearance light
+snapshot @OUT@/chat-setup-waiting-light.png
+appearance dark
+setup cancel
+expect setup signedout
+setup signin
+setup wait ready
+expect lastnote Signed in · Claude Code is ready
+expect claudeinfo Claude Code 2.1.290 · signed in with your plan
+# R12, R13: a turn with steps and a proposal card
+expect placeholder Select something on the stage, then ask Claude
+select 14.0
+select add 39.0
+chat send Move these one tile east
+expect running true
+chat wait
+expect running false
+# R3: the chat has a Claude session; its follow-ups resume it
+chat remember
+expect session same
+expect chattitle Move these one tile east
+expect steps 5
+expect steplabel Saved it as proposal #1 for you to review · 5 steps
+expect cards 1
+expect cardstatus Waiting for you
+expect lastreply Moved pine 14.0 and pine 39.0 one tile down-right
+expect proposals 1
+snapshot @OUT@/chat-turn-dark.png
+details on
+steps expand 1
+snapshot @OUT@/chat-details-dark.png
+appearance light
+snapshot @OUT@/chat-details-light.png
+appearance dark
+details off
+# R14: a link in the reply selects it on the stage
+select none
+link pine 39.0
+expect selection 39.0
+# R15: a question, answered with a button; the conversation carries on (the chat's session)
+select 14.0
+select add 39.0
+chat send Make these taller
+chat wait
+expect chatquestion pine is used 3 times in harbor. Make every pine taller, or only these 2?
+snapshot @OUT@/chat-question-dark.png
+appearance light
+snapshot @OUT@/chat-question-light.png
+appearance dark
+choose 1
+chat wait
+expect chosen Only these 2
+expect cards 2
+expect proposals 2
+expect session same
+# R18: Return sends from the input, Shift-Return adds a line
+chat type What are these
+chatkey shift+return
+expect draftlines 2
+chatkey return
+chat wait
+expect lastreply pine is a 11×18 sprite, used 3 times in harbor
+# R18: Stop ends the turn
+chat send Look slowly at these
+expect running true
+chat stop
+expect running false
+expect lastnote Stopped · nothing was proposed
+# R19: several chats
+chat new
+expect messages 0
+expect chattitle New chat
+expect session none
+select 51
+chat send What is this
+chat wait
+expect session new
+expect chats 2
+chat list
+snapshot @OUT@/chat-list-dark.png
+appearance light
+snapshot @OUT@/chat-list-light.png
+chat open 2
+expect chattitle Move these one tile east
+snapshot @OUT@/chat-turn-light.png
+righttab inspector
+expect righttab inspector
+righttab agent
+expect setup ready
+setup signout
+expect setup signedout

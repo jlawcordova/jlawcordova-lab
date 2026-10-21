@@ -1,0 +1,5 @@
+#!/bin/sh
+# The fake Claude Code's command (see README.md): runs fake-claude.mjs beside this file's real
+# path with the node on the PATH (a .mjs, so any Node from 20 on reads it as a module).
+here=$(dirname "$(realpath "$0")")
+exec node "$here/fake-claude.mjs" "$@"

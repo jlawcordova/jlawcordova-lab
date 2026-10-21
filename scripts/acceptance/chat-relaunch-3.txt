@@ -1,0 +1,13 @@
+# Part 3 of 3: Claude Code lost the chat's session (acceptance.sh cleared the fake's sessions): the turn
+# starts a new one once and says so (spec D1), and the reply still comes.
+open scene:harbor
+righttab agent
+expect setup ready
+chat remember
+select 51
+chat send What is this
+chat wait
+expect session new
+expect lastnote Claude started a new session; it doesn't remember the earlier messages.
+expect lastreply rock 51
+chat list

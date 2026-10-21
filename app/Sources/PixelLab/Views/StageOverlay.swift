@@ -309,7 +309,7 @@ struct ProposalBanner: View {
         HStack(spacing: 10) {
             Image(systemName: "sparkles").foregroundStyle(Theme.gold)
             VStack(alignment: .leading, spacing: 1) {
-                Text("Previewing proposal from \(proposal.agentName)").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
+                Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                 Text(detail).font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(1)
             }
             Spacer(minLength: 12)
@@ -332,11 +332,14 @@ struct ProposalBanner: View {
         .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
         .shadow(color: .black.opacity(0.18), radius: 8, y: 2)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Previewing proposal from \(proposal.agentName)")
+        .accessibilityLabel(title)
     }
 
+    private var title: String { proposal.bannerTitle }
+
     private var detail: String {
-        var parts = [proposal.editsLabel]
+        // "2 edits · pine moved to column 4, …" (docs/intents/2026-10-agent-chat/spec.md, D7).
+        var parts = [proposal.editsLabel + (proposal.summary.first.map { " · \($0)\(proposal.summary.count > 1 ? ", …" : "")" } ?? "")]
         if !proposal.baseMatches { parts.append("the file changed since") }
         if let e = agent.ghostError { parts.append("couldn't render: \(e)") }
         if let r = agent.working { parts.append(r) }

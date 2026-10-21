@@ -72,6 +72,19 @@ import Foundation
 ///     snapshot agent <file.png>   menus (logs the Edit, View and Window menus)
 ///     expect proposals|ghost|ghostchanges|base|activity|question|proposal <value>
 ///
+/// The Agent tab's chat (docs/intents/2026-10-agent-chat/spec.md, D15; with PIXELLAB_CLAUDE_HOME
+/// and PIXELLAB_CLAUDE_INSTALLER pointing at scripts/fake-claude, never the owner's Claude Code):
+///
+///     righttab inspector|agent   setup check|install|signin|open|cancel|signout|copy|choose <path>|wait <state>
+///     chat new|list|open <n>|type <text…>|send [<text…>]|stop|wait|remember   (expect session same|new|none)   chatkey tab|shift+tab|return|shift+return|esc
+///     details on|off   steps expand <n>   choose <answer n> [<question n>]   link <text…>
+///     expect setup|righttab|chats|chattitle|messages|steps|steplabel|chatquestion|chosen|cards|cardstatus <value>
+///     expect placeholder|draft|draftlines|running|claudeinfo|lastnote|loginurl|details <value>
+///     expect lastreply|setupmessage|installlog|context <text>   (contains)
+///     chip pin|unpin|remove <target>   savenow   card approve|reject|ghost|diff [<n>]   altclick <x> <y> [shift]
+///     selectuses   activity all|chats|errors   askclaude   agentwindow
+///     expect chips|pinned|unsaved|contextline|suggestion|ghostchat|activityrows|proposalsource|proposalnumber|banner|askedabout <value>
+///
 /// Each action waits until renders, checks and edits settle. The app logs
 /// each step to stderr and quits at the end: exit 0 if every step and
 /// expectation passed, 1 if any failed, 2 if it couldn't start.
@@ -81,6 +94,8 @@ final class ScriptRunner {
     let lines: [String]
     let size: CGSize
     private var failures = 0
+    /// The chat's Claude session when `chat remember` ran, for `expect session same|new`.
+    private var rememberedSession: String?
     /// What the last `cli` step printed, for `expect cli`.
     private var lastCLIOutput = ""
 
@@ -383,14 +398,16 @@ final class ScriptRunner {
             // `saveas <path>`: document.copy, then the app switches to the copy.
             let to = try arg(words, 1)
             await model.saveAs(to: to)
-            let expected = to.hasSuffix(".pixellab") ? to : "\(to).pixellab"
+            // Compared as standardized paths, so "…/T//copy.pixellab" (a $TMPDIR with a trailing /) matches.
+            let expected = ((to.hasSuffix(".pixellab") ? to : "\(to).pixellab") as NSString).standardizingPath
+            let opened = { model.sessionInfo?.document.map { ($0.root as NSString).standardizingPath } }
             let started = Date()
             while Date().timeIntervalSince(started) < 30 {
-                if case .ready = model.phase, model.sessionInfo?.document?.root == expected { break }
+                if case .ready = model.phase, opened() == expected { break }
                 if model.notice != nil { break }
                 try? await Task.sleep(for: .milliseconds(100))
             }
-            guard case .ready = model.phase, model.sessionInfo?.document?.root == expected else {
+            guard case .ready = model.phase, opened() == expected else {
                 throw Failure(model.notice ?? "the copy didn't open; still on \(model.sessionInfo?.document?.root ?? "?")")
             }
             return "now \(expected)"
@@ -498,6 +515,9 @@ final class ScriptRunner {
             return out.path
         case "agent", "proposal", "approve", "reject", "ghost", "answer", "menus", "agentkey":
             return try await performAgent(words, model: model)
+        case "righttab", "setup", "chat", "chatkey", "details", "steps", "choose", "link", "chip", "savenow", "card", "altclick", "selectuses",
+             "activity", "askclaude", "agentwindow":
+            return try await performChat(words, model: model)
         case "dblclick", "pointer", "rightclick", "menu", "group", "ungroup", "inside", "crumb", "hide", "show", "lock", "unlock",
              "expand", "collapse", "rename", "movedby", "layernudge", "placeinto", "layerskey":
             return try await performLayers(words, model: model)
@@ -820,6 +840,237 @@ final class ScriptRunner {
         }
     }
 
+    /// The Agent tab's chat (docs/intents/2026-10-agent-chat/spec.md, D15).
+    private func performChat(_ words: [String], model: AppModel) async throws -> String? {
+        let chat = model.chat
+        func waitFor(_ what: String, seconds: Double = 60, _ done: () -> Bool) async throws {
+            let started = Date()
+            while !done() {
+                if Date().timeIntervalSince(started) > seconds { throw Failure("still waiting for \(what) after \(Int(seconds)) s") }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+        }
+        switch words[0] {
+        case "righttab":
+            switch try arg(words, 1) {
+            case "agent": model.showAgentTab()
+            case "inspector": model.rightTab = .inspector
+            default: throw Failure("righttab inspector|agent")
+            }
+            if model.rightTab == .agent { try await waitFor("the setup check", seconds: 20) { chat.setup != .checking } }
+            return chat.setup.rawValue
+        case "setup":
+            switch try arg(words, 1) {
+            case "check":
+                await chat.checkAgain()
+            case "install":
+                chat.runInstaller()
+            case "signin":
+                chat.signIn()
+            case "open":
+                chat.openLoginPage()
+                return "opened the sign-in page \(chat.openedLoginPage) time(s)"
+            case "cancel":
+                chat.cancelSignIn()
+            case "signout":
+                await chat.signOut()
+            case "copy":
+                chat.copyInstallCommand()
+                return NSPasteboard.general.string(forType: .string)
+            case "choose":
+                await chat.choose(path: NSString(string: words.dropFirst(2).joined(separator: " ")).expandingTildeInPath)
+            case "wait":
+                let want = try arg(words, 2)
+                try await waitFor("setup \(want)", seconds: 30) { chat.setup.rawValue == want }
+            default:
+                throw Failure("setup check|install|signin|open|cancel|signout|copy|choose <path>|wait <state>")
+            }
+            return chat.setup.rawValue
+        case "chat":
+            switch try arg(words, 1) {
+            case "new":
+                chat.newChat()
+            case "list":
+                chat.showList()
+            case "open":
+                let n = try int(words, 2)
+                let list = chat.documentChats
+                guard list.indices.contains(n - 1) else { throw Failure("no chat \(n) (there are \(list.count))") }
+                chat.open(list[n - 1].id)
+                return list[n - 1].title
+            case "type":
+                chat.draft = words.dropFirst(2).joined(separator: " ")
+            case "send":
+                let text = words.dropFirst(2).joined(separator: " ")
+                if let why = chat.cantSend { throw Failure("can't send: \(why)") }
+                await chat.send(text.isEmpty ? nil : text)
+                guard chat.isRunning else { throw Failure("the turn didn't start: \(chat.current?.messages.last?.text ?? "")") }
+            case "stop":
+                guard chat.isRunning else { throw Failure("no turn is running") }
+                chat.stop()
+                try await waitFor("the turn to stop", seconds: 10) { !chat.isRunning }
+            case "remember":
+                rememberedSession = chat.current?.session
+                return rememberedSession ?? "no session yet"
+            case "wait":
+                try await waitFor("the turn to end") { !chat.isRunning }
+                return chat.current?.messages.last.map { "\($0.kind.rawValue): \(($0.text ?? $0.human ?? "").prefix(80))" }
+            default:
+                throw Failure("chat new|list|open <n>|type <text>|send [<text>]|stop|wait")
+            }
+            return nil
+        case "chatkey":
+            guard let view = chat.inputView, let window = view.window else { throw Failure("no chat input on screen (righttab agent)") }
+            window.makeFirstResponder(view)
+            let spec = try arg(words, 1)
+            let (code, chars, flags): (UInt16, String, NSEvent.ModifierFlags) = switch spec {
+            case "tab": (48, "\t", [])
+            case "shift+tab": (48, "\t", .shift)
+            case "return": (36, "\r", [])
+            case "shift+return": (36, "\r", .shift)
+            case "esc": (53, "\u{1b}", [])
+            default: throw Failure("chatkey tab|shift+tab|return|shift+return|esc")
+            }
+            guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
+                                               windowNumber: window.windowNumber, context: nil, characters: chars, charactersIgnoringModifiers: chars, isARepeat: false, keyCode: code)
+            else { throw Failure("couldn't make the key") }
+            view.keyDown(with: event)
+            try? await Task.sleep(for: .milliseconds(150))
+            return "draft \"\(chat.draft)\", focus \(window.firstResponder === view ? "input" : "moved")"
+        case "details":
+            chat.details = try arg(words, 1) == "on"
+            return nil
+        case "steps":
+            guard try arg(words, 1) == "expand" else { throw Failure("steps expand <n>") }
+            let n = try int(words, 2)
+            let runs = ChatRow.rows(chat.current?.messages ?? [], typing: false).filter { if case .steps = $0.kind { return true }; return false }
+            guard runs.indices.contains(n - 1) else { throw Failure("no steps row \(n) (there are \(runs.count))") }
+            chat.expanded.insert(runs[n - 1].id)
+            if case .steps(let s) = runs[n - 1].kind { return s.compactMap(\.human).joined(separator: " | ") }
+            return nil
+        case "choose":
+            let option = try int(words, 1)
+            let questions = (chat.current?.messages ?? []).filter { $0.kind == .question }
+            let q = words.count > 2 ? questions[safe: (try int(words, 2)) - 1] : questions.last
+            guard let q, let options = q.options, options.indices.contains(option - 1) else { throw Failure("no answer \(option) to choose") }
+            await chat.answer(q.id, options[option - 1])
+            return options[option - 1]
+        case "chip":
+            guard let t = LayerTarget(spec: try arg(words, 2)) else { throw Failure("chip pin|unpin|remove layer:<id>|<path>") }
+            switch try arg(words, 1) {
+            case "pin": if !chat.pins.contains(t) { chat.togglePin(t) }
+            case "unpin": if chat.pins.contains(t) { chat.togglePin(t) }
+            case "remove": chat.removeChip(t)
+            default: throw Failure("chip pin|unpin|remove <target>")
+            }
+            await chat.refreshContext(force: true)
+            return chat.chips.map { "\($0.label) \($0.sub)\($0.pinned ? " (pinned)" : "")" }.joined(separator: ", ")
+        case "savenow":
+            await chat.saveNow()
+            return chat.context.map { "unsaved: \($0.unsaved.isEmpty ? "none" : $0.unsaved.joined(separator: ","))" }
+        case "card":
+            let cards = (chat.current?.messages ?? []).filter { $0.kind == .proposal }
+            let card = words.count > 2 ? cards[safe: (try int(words, 2)) - 1] : cards.last
+            guard let card else { throw Failure("no proposal card") }
+            switch try arg(words, 1) {
+            case "approve": await chat.approve(card)
+            case "reject": await chat.reject(card)
+            case "ghost": await chat.toggleGhost(card)
+            case "diff":
+                await chat.showDiff(card)
+                let started = Date()
+                while model.agent.window?.isVisible != true, Date().timeIntervalSince(started) < 5 { try? await Task.sleep(for: .milliseconds(50)) }
+            default: throw Failure("card approve|reject|ghost|diff [<n>]")
+            }
+            let now = chat.current?.messages.first { $0.id == card.id }
+            return "#\(card.number ?? 0): \(now.map(chat.statusText) ?? "?")\(chat.ghostOn(card) ? ", on stage" : "")"
+        case "altclick":
+            // A real ⌥-click through the stage: mouse down and up without moving (D6).
+            guard let view = model.editor.stageView as? StageInputView, let geometry = view.geometry else { throw Failure("no stage") }
+            if let render = model.document?.render { for item in render.items { _ = await model.thumbnails.art(item.pose ?? item.object) } }
+            let p = geometry.viewPoint(fromScene: CGPoint(x: Double(try int(words, 1)) + 0.5, y: Double(try int(words, 2)) + 0.5))
+            model.editor.mouseDown(p, geometry: geometry, option: true, shift: words.dropFirst(3).contains("shift"), clickCount: 1)
+            model.editor.mouseUp()
+            return model.document?.selection.map(\.description).joined(separator: ",")
+        case "selectuses":
+            guard let o = model.document?.selectedItem?.object else { throw Failure("select one item first") }
+            model.layers.selectEveryUse(of: o, add: false)
+            return model.document?.selection.map(\.description).joined(separator: ",")
+        case "activity":
+            guard let f = AgentModel.ActivityFilter(rawValue: try arg(words, 1)) else { throw Failure("activity all|chats|errors") }
+            model.agent.filter = f
+            return "\(model.agent.visibleActivity.count) rows"
+        case "askclaude":
+            guard let doc = model.document, !doc.selection.isEmpty else { throw Failure("nothing selected: the button isn't there") }
+            model.showAgentTab(focusInput: true)
+            try await waitFor("the setup check", seconds: 20) { chat.setup != .checking }
+            return nil
+        case "agentwindow":
+            model.agent.showWindow()
+            let started = Date()
+            while model.agent.window?.isVisible != true, Date().timeIntervalSince(started) < 5 { try? await Task.sleep(for: .milliseconds(50)) }
+            return nil
+        case "link":
+            let text = words.dropFirst().joined(separator: " ")
+            guard let reply = chat.current?.messages.last(where: { $0.kind == .claude })?.text,
+                  let seg = chat.segments(reply).first(where: { $0.text == text && $0.target != nil }), let t = seg.target
+            else { throw Failure("no link \"\(text)\" in the last reply") }
+            chat.select(t)
+            return t.description
+        default:
+            throw Failure("unknown chat action")
+        }
+    }
+
+    private func expectChat(_ what: String, model: AppModel) -> String? {
+        let chat = model.chat
+        let messages = chat.current?.messages ?? []
+        switch what {
+        case "setup": return chat.setup.rawValue
+        case "righttab": return model.rightTab.rawValue
+        case "chats": return String(chat.documentChats.filter { !$0.messages.isEmpty }.count)
+        case "chattitle": return chat.current?.title ?? "none"
+        case "messages": return String(messages.count)
+        case "steps": return String(messages.filter { $0.kind == .step }.count)
+        case "steplabel":
+            let runs = ChatRow.rows(messages, typing: false).compactMap { r -> [ChatMessage]? in if case .steps(let s) = r.kind { return s }; return nil }
+            return runs.last.map(ChatRow.stepsLabel) ?? "none"
+        case "chatquestion": return messages.last(where: { $0.kind == .question })?.text ?? "none"
+        case "chosen": return messages.last(where: { $0.kind == .question })?.chosen ?? "none"
+        case "cards": return String(messages.filter { $0.kind == .proposal }.count)
+        case "cardstatus": return messages.last(where: { $0.kind == .proposal }).map(chat.statusText) ?? "none"
+        case "placeholder": return chat.placeholder
+        case "draft": return chat.draft
+        case "draftlines": return String(chat.draft.components(separatedBy: "\n").count)
+        case "running": return String(chat.isRunning)
+        case "claudeinfo": return chat.statusLine
+        case "lastnote": return messages.last(where: { $0.kind == .note })?.text ?? "none"
+        case "loginurl": return chat.loginURL?.absoluteString ?? "none"
+        case "details": return chat.details ? "on" : "off"
+        // R3: the open chat's Claude session against the one `chat remember` noted.
+        case "session":
+            guard let now = chat.current?.session else { return "none" }
+            return now == rememberedSession ? "same" : "new"
+        case "chips": return chat.chips.isEmpty ? "none" : chat.chips.map { "\($0.label) \($0.sub)" }.joined(separator: ",")
+        case "pinned": return chat.pins.isEmpty ? "none" : chat.pins.map(\.description).joined(separator: ",")
+        case "unsavedcount": return String(chat.context?.unsaved.count ?? 0)
+        case "unsaved": return (chat.context?.unsaved ?? []).isEmpty ? "none" : (chat.context?.unsaved ?? []).joined(separator: ",")
+        case "contextline": return chat.contextSummary
+        case "suggestion": return chat.suggestion ?? "none"
+        case "ghostchat":
+            guard let g = model.agent.visibleGhost, let p = model.agent.proposals.first(where: { $0.id == g.proposalID }) else { return "off" }
+            return p.chat?.title ?? "terminal"
+        case "activityrows": return String(model.agent.visibleActivity.count)
+        case "proposalsource": return model.agent.selected?.source ?? "none"
+        case "proposalnumber": return model.agent.selected?.number.map(String.init) ?? "none"
+        case "banner":
+            guard let p = model.agent.selected, model.agent.visibleGhost != nil else { return "none" }
+            return p.bannerTitle
+        case "askedabout": return model.agent.selected.flatMap { chat.askedAbout($0.id) } ?? "none"
+        default: return nil
+        }
+    }
+
     /// The Agent window's actions.
     private func performAgent(_ words: [String], model: AppModel) async throws -> String? {
         let agent = model.agent
@@ -1009,6 +1260,16 @@ final class ScriptRunner {
         case "document": got = model.sessionInfo?.document?.name ?? "none"
         case "documentkind": got = model.sessionInfo?.document?.kind ?? "none"
         case _ where expectLayers(what, model: model) != nil: got = expectLayers(what, model: model) ?? ""
+        case "lastreply", "setupmessage", "installlog", "context":
+            let text: String = switch what {
+            case "lastreply": model.chat.current?.messages.last(where: { $0.kind == .claude })?.text ?? ""
+            case "setupmessage": model.chat.setupMessage ?? ""
+            case "context": model.chat.context?.text ?? ""
+            default: model.chat.installLog.joined(separator: "\n")
+            }
+            guard text.contains(want) else { throw Failure("expected \(what) to contain \"\(want)\", got \"\(text.suffix(300))\"") }
+            return "\(what) has \"\(want)\""
+        case _ where expectChat(what, model: model) != nil: got = expectChat(what, model: model) ?? ""
         case "scenepixel":
             // A pixel of the stage's scene render, in scene pixels: "#RRGGBB" or empty.
             let parts = words.dropFirst(2)
@@ -1060,6 +1321,7 @@ final class ScriptRunner {
                 if model.editor.pendingEdits > 0 || model.build?.running == true || model.objectEditor.busy { return true }
                 if model.newDoc?.creating == true { return true }
                 if model.agent.busy { return true }
+                if model.chat.setup == .checking, model.rightTab == .agent { return true }
                 guard let doc = model.document else { return false }
                 // A scene's items as of the last edit's result, so Moved by and the inspector read them.
                 if doc.ref.kind == .scene, doc.itemsLoaded, !model.layers.itemsCurrent { return true }
@@ -1074,4 +1336,8 @@ final class ScriptRunner {
         let d = model.document
         log("(still busy after 30 s: edits \(model.editor.pendingEdits), build \(model.build?.running == true), rendering \(d?.rendering ?? false), checking \(d?.checking ?? false), items \(d?.loadingItems ?? false), items current \(model.layers.itemsCurrent), thumbnails idle \(model.thumbnails.isIdle))")
     }
+}
+
+extension Array {
+    subscript(safe i: Int) -> Element? { indices.contains(i) ? self[i] : nil }
 }

@@ -1,0 +1,78 @@
+[
+  {
+    "match": "slowly",
+    "steps": [
+      { "tool": "scene_items", "input": { "name": "{{scene}}" } },
+      { "say": "Working on it, slowly." },
+      { "wait": 4000 },
+      { "tool": "scene_render", "input": { "name": "{{scene}}", "scale": 1 } },
+      { "say": "Done looking." }
+    ]
+  },
+  {
+    "match": "^every\\b",
+    "steps": [
+      { "tool": "scene_items", "input": { "name": "{{scene}}" } },
+      { "tool": "object_show", "input": { "name": "{{first}}" } },
+      { "tool": "object_resize", "input": { "name": "{{first}}", "height": "{{object_show.size.1+4}}" } },
+      { "tool": "doc_save", "input": { "doc": "object:{{first}}" } },
+      { "say": "Made {{first}} 4 px taller, so all {{uses}} uses change, since they share the object. It's proposal {{proposal}}." }
+    ]
+  },
+  {
+    "match": "^only\\b",
+    "steps": [
+      { "tool": "scene_items", "input": { "name": "{{scene}}" } },
+      { "tool": "scene_move", "each": "items", "input": { "name": "{{scene}}", "item": "{{item}}", "by": [0, 0, 1] } },
+      { "tool": "doc_save", "input": { "doc": "scene:{{scene}}" } },
+      { "say": "Raised {{names}} a level, so they stand taller than the rest. It's proposal {{proposal}}, so the document hasn't changed yet." }
+    ]
+  },
+  {
+    "match": "taller|bigger|grow",
+    "needsSelection": true,
+    "steps": [
+      { "tool": "scene_items", "input": { "name": "{{scene}}" } },
+      { "tool": "object_show", "input": { "name": "{{first}}" } },
+      { "ask": "{{first}} is used {{uses}} times in {{scene}}. Make every {{first}} taller, or only these {{count}}?", "options": ["Only these {{count}}", "Every {{first}} ({{uses}})"] }
+    ]
+  },
+  {
+    "match": "raise|higher|lift",
+    "needsSelection": true,
+    "steps": [
+      { "tool": "scene_items", "input": { "name": "{{scene}}" } },
+      { "tool": "scene_move", "each": "items", "input": { "name": "{{scene}}", "item": "{{item}}", "by": [0, 0, 1] } },
+      { "tool": "scene_render", "input": { "name": "{{scene}}", "scale": 1 } },
+      { "tool": "doc_save", "input": { "doc": "scene:{{scene}}" } },
+      { "say": "Raised {{names}} one level. It's proposal {{proposal}}: the gold shapes on the stage show where they'd go." }
+    ]
+  },
+  {
+    "match": "move|nudge|shift",
+    "needsSelection": true,
+    "steps": [
+      { "tool": "scene_items", "input": { "name": "{{scene}}" } },
+      { "tool": "scene_move", "each": "items", "input": { "name": "{{scene}}", "item": "{{item}}", "by": [1, 0] } },
+      { "tool": "scene_render", "input": { "name": "{{scene}}", "scale": 1 } },
+      { "tool": "doc_save", "input": { "doc": "scene:{{scene}}" } },
+      { "say": "Moved {{names}} one tile down-right. Nothing new overlaps. It's proposal {{proposal}}, so the document hasn't changed yet." }
+    ]
+  },
+  {
+    "match": "what|which|describe|tell",
+    "needsSelection": true,
+    "steps": [
+      { "tool": "scene_items", "input": { "name": "{{scene}}" } },
+      { "tool": "object_show", "input": { "name": "{{first}}" } },
+      { "say": "{{names}}: {{first}} is a {{object_show.size.0}}×{{object_show.size.1}} sprite, used {{uses}} times in {{scene}}. What would you like to change?" }
+    ]
+  },
+  {
+    "match": ".",
+    "steps": [
+      { "tool": "document_info", "input": {} },
+      { "say": "Which items do you mean? Select them on the stage or in Layers (shift-click for more, option-click for every use of an object), and they come with your message." }
+    ]
+  }
+]

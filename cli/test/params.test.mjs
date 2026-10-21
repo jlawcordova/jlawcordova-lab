@@ -149,7 +149,7 @@ describe('registry', () => {
   test('every command is well formed and has a group', () => {
     const names = [...registry.commands.keys()];
     const readOnly = [
-      'activity.list', 'art.preview', 'art.sizes', 'check', 'doc.close', 'doc.open', 'doc.status', 'document.info', 'object.list', 'object.pick', 'object.render', 'object.show',
+      'activity.list', 'art.preview', 'art.sizes', 'chat.ask', 'chat.context', 'check', 'doc.close', 'doc.open', 'doc.status', 'document.info', 'object.list', 'object.pick', 'object.render', 'object.show',
       'palette.get', 'proposal.list', 'proposal.render', 'proposal.show', 'scene.items', 'scene.list', 'scene.render', 'scene.show',
     ];
     const mutating = [
@@ -170,7 +170,7 @@ describe('registry', () => {
       ['doc.close', 'doc.merge', 'doc.open', 'doc.redo', 'doc.reload', 'doc.revert', 'doc.save', 'doc.status', 'doc.undo'],
     );
     assert.deepEqual(names.filter((n) => registry.get(n)?.writes), ['art.build', 'document.copy', 'document.new', 'proposal.apply', 'proposal.reject']);
-    assert.deepEqual([...registry.groups().keys()], ['activity', 'art', 'check', 'doc', 'document', 'object', 'palette', 'proposal', 'scene']);
+    assert.deepEqual([...registry.groups().keys()], ['activity', 'art', 'chat', 'check', 'doc', 'document', 'object', 'palette', 'proposal', 'scene']);
   });
 
   test('malformed definitions are refused', () => {
