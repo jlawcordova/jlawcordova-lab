@@ -145,6 +145,22 @@ fn warnings_of(sources: &Sources, all: &[String], names: &[String]) -> Vec<Value
     out
 }
 
+/// The sources on disk whose text isn't what saving them writes (`serialize(parse(text)) != text`),
+/// among `only` when it is given (the files a check of one doc covers).
+fn canonical_warnings(ctx: &mut Ctx, only: Option<&OSet<String>>) -> Result<Vec<Value>> {
+    let dir = ctx.document()?.source_dir.clone();
+    let mut out = Vec::new();
+    for file in ctx.files()?.keys().filter(|f| f.ends_with(".json") && only.is_none_or(|o| o.has(*f))) {
+        let Ok(text) = std::fs::read_to_string(dir.join(file)) else { continue };
+        let Ok(doc) = engine::format::parse(&text) else { continue };
+        if engine::format::serialize_file(file, &doc) != text {
+            let message = "isn't in canonical form; saving it in Pixel Lab or pixellab rewrites it";
+            out.push(with(entry(&format!("{file}: {message}")), vec![("code", json!("not_canonical"))]));
+        }
+    }
+    Ok(out)
+}
+
 fn count_items(items: &[Value]) -> usize {
     items
         .iter()
@@ -161,15 +177,17 @@ fn count_items(items: &[Value]) -> usize {
 fn run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let loaded = ctx.sources()?;
     let sources = &loaded.sources;
+    let query = opt_str(&params, "name");
+    let not_canonical = if query.is_none() { Some(canonical_warnings(ctx, None)?) } else { None };
     let all: Vec<String> = loaded.load_errors.iter().cloned().chain(validate(sources)).collect();
-    let Some(query) = opt_str(&params, "name") else {
+    let Some(query) = query else {
         let names: Vec<String> = sources.scenes.keys().cloned().collect();
         return Ok(Value::Object(obj(vec![
             ("ok", json!(all.is_empty())),
             ("target", Value::Null),
             ("checked", json!(1 + sources.objects.len() + sources.scenes.len())),
             ("problems", Value::Array(all.iter().map(|p| Value::Object(entry(p))).collect())),
-            ("warnings", Value::Array(warnings_of(sources, &all, &names))),
+            ("warnings", Value::Array(warnings_of(sources, &all, &names).into_iter().chain(not_canonical.unwrap_or_default()).collect())),
         ])));
     };
     let target = ctx.find(query, opt_str(&params, "kind").and_then(DocKind::parse))?;
@@ -190,7 +208,8 @@ fn run(ctx: &mut Ctx, params: Params) -> Result<Value> {
             summary = Some(format!("{}×{} · {} items · {objects} objects · {output}", vb(2), vb(3), count_items(&items)));
         }
     }
-    let warnings = if target.kind == DocKind::Scene { warnings_of(sources, &all, std::slice::from_ref(&target.name)) } else { vec![] };
+    let mut warnings = if target.kind == DocKind::Scene { warnings_of(sources, &all, std::slice::from_ref(&target.name)) } else { vec![] };
+    warnings.extend(canonical_warnings(ctx, Some(&files))?);
     let mut out = obj(vec![
         ("ok", json!(mine.is_empty())),
         ("target", json!({ "kind": target.kind.as_str(), "name": target.name, "file": target.file })),
