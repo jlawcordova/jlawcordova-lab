@@ -19,6 +19,8 @@ These docs are Markdown in the repo, next to what they describe, and are also pu
 
 ## Reference
 
+- [Document format](document-format.md): the `.pixellab` folder, format 2: manifest, palette, objects, scenes, ambient loops and actions, canonical form.
+- [The site contract](site-contract.md): what a site may rely on in a compiled SVG.
 - [Commands, the stdio protocol and MCP](cli.md): generated from the registry by `npm run docs:cli`.
 - [CLAUDE.md](../CLAUDE.md): the instructions agents work by in this repo.
 
