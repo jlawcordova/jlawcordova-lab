@@ -293,3 +293,30 @@ fn r8_a_source_with_a_byte_order_mark_migrates_and_one_that_is_not_utf_8_is_refu
     let (code, _, err) = cli(&["document", "migrate", "--document", root.to_str().unwrap()], &env, &root);
     assert_eq!(code, 0, "{err}");
 }
+
+/// R8 (U29): the SVG check refuses a migration whose format-2 sources would
+/// build a different SVG, and writes nothing. A test build's fault hook
+/// (`PIXELLAB_TEST_MIGRATE_FAULT`, compiled out of release) moves an item in
+/// the format-2 copy before the check.
+#[test]
+fn r8_migrate_refuses_when_a_scene_would_not_build_the_same_svg_and_writes_nothing() {
+    let (root, env) = old_document();
+    let before = list_files(&root);
+    let run = |fault: Option<&str>| {
+        let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_pixellab"));
+        cmd.args(["document", "migrate", "--document", root.to_str().unwrap()]).env_clear().envs(&env);
+        if let Some(scene) = fault {
+            cmd.env("PIXELLAB_TEST_MIGRATE_FAULT", scene);
+        }
+        cmd.output().unwrap()
+    };
+    let refused = run(Some("sample"));
+    assert_eq!(refused.status.code(), Some(1), "{refused:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&refused.stderr),
+        "pixellab: scenes/sample.json wouldn't build the same SVG as scenes/sample.mjs; nothing written\n"
+    );
+    assert_eq!(list_files(&root), before, "nothing written");
+    let migrated = run(None);
+    assert_eq!(migrated.status.code(), Some(0), "{migrated:?}");
+}

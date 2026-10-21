@@ -316,7 +316,11 @@ function town() {
 export function examples() {
   return {
     harbor: {
-      manifest: { format: 2, name: 'harbor' },
+      manifest: {
+        format: 2,
+        name: 'harbor',
+        publish: { budgets: { 'harbor.svg': { raw: 131072, gzip: 32768 }, 'harbor-flat.svg': { raw: 131072, gzip: 32768 } } },
+      },
       objects: ['grass', 'sand', 'path', 'water', 'dock', 'walls', 'roof-red', 'roof-wood', 'hall-walls', 'hall-roof', 'tree', 'pine', 'rock', 'barrel', 'lamp', 'flowers', 'boat'],
       ...harbor(),
     },

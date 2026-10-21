@@ -46,7 +46,7 @@ pixellab art build --dir /tmp/harbor-art --document examples/harbor.pixellab
 diff <(sed 's/harbor-flat/harbor/g' /tmp/harbor-art/harbor-flat.svg) /tmp/harbor-art/harbor.svg && echo same
 ```
 
-`art build` flags the harbor as over its 100 KB budget. That's a warning, not a failure: both SVGs are still written.
+The harbor's manifest gives both SVGs a 128 KB budget (32 KB gzip); over a budget, `art build` warns and still writes the SVG.
 
 Commands that edit save into the folder you name, so point them at a copy (`pixellab document copy --to <path>.pixellab`).
 

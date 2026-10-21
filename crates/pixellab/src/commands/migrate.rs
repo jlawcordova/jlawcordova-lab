@@ -83,6 +83,20 @@ fn copy_others(from: &Path, to: &Path, rel: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Test builds only (compiled out of release): `PIXELLAB_TEST_MIGRATE_FAULT=<scene>`
+/// moves that scene's first item a pixel in the format-2 copy before the SVG
+/// check, so a test can prove the check refuses a migration that changes the
+/// art (spec R8).
+#[cfg(debug_assertions)]
+fn test_fault(reread: &mut [(String, Value)]) {
+    let Ok(scene) = std::env::var("PIXELLAB_TEST_MIGRATE_FAULT") else { return };
+    let file = format!("scenes/{scene}.json");
+    let Some((_, doc)) = reread.iter_mut().find(|(f, _)| *f == file) else { return };
+    if let Some(item) = doc.get_mut("items").and_then(Value::as_array_mut).and_then(|items| items.first_mut()) {
+        item["at"] = json!({ "px": [1000, 1000] });
+    }
+}
+
 fn migrate_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     // Where the document is: the CLI's flags and environment, or a session's open document.
     let options = match (&ctx.open, &ctx.session) {
@@ -186,7 +200,10 @@ fn migrate_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     }
     // The format-2 text, and every scene built both ways.
     let texts: Vec<(String, String)> = converted.iter().map(|(f, v)| (f.clone(), serialize_file(f, v))).collect();
-    let reread: Vec<(String, Value)> = texts.iter().map(|(f, t)| (f.clone(), parse(t).expect("canonical text parses"))).collect();
+    #[allow(unused_mut)]
+    let mut reread: Vec<(String, Value)> = texts.iter().map(|(f, t)| (f.clone(), parse(t).expect("canonical text parses"))).collect();
+    #[cfg(debug_assertions)]
+    test_fault(&mut reread);
     let (before, after) = (sources_from(&converted), sources_from(&reread));
     let budgets = Budgets::new();
     for scene in before.scenes.keys() {
