@@ -100,6 +100,8 @@ struct SceneSummary: Codable, Sendable, Identifiable, Hashable {
     var file: String
     var output: String?
     var viewBox: [Double]
+    /// `"fit"` or `"fixed"` (scene.frame).
+    var frame: String?
     var origin: [Double]
     var items: Int
     var motion: Bool
@@ -140,12 +142,45 @@ struct RenderResult: Codable, Sendable {
     var width: Int
     var height: Int
     var time: Double?
-    var frame: Int?
+    /// An object's frame (a number), or a scene's `"fit"` / `"fixed"` (the size it publishes at).
+    var frame: RenderFrame?
     var anchor: [Double]?
     var items: [RenderItem]
     /// `scene.render --focus <layer>`: the same render with only that layer's
     /// items (docs/intents/2026-10-scene-layers/spec.md, D6's fade).
     var focusPng: Data?
+}
+
+/// The `frame` of a render: a number for an object's frame, a word for a scene's size.
+struct RenderFrame: Codable, Sendable, Hashable {
+    var number: Int?
+    var kind: String?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if let n = try? c.decode(Int.self) { number = n } else { kind = try? c.decode(String.self) }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        if let number { try c.encode(number) } else if let kind { try c.encode(kind) } else { try c.encodeNil() }
+    }
+}
+
+/// `scene.frame`: how a scene's published size is made (docs/intents/2026-10-scene-canvas/spec.md, R8).
+struct SceneFrameResult: Codable, Sendable {
+    var scene: String
+    /// `"fit"` (the box follows the content) or `"fixed"` (the scene's own `viewBox`).
+    var frame: String
+    /// [x, y, w, h] in scene pixels: the box the scene publishes at.
+    var viewBox: [Double]
+    var size: [Int]
+    var margin: Int
+    var changed: Bool
+    var summary: String?
+
+    var box: CGRect { CGRect(x: viewBox[0], y: viewBox[1], width: viewBox[2], height: viewBox[3]) }
+    var isFixed: Bool { frame == "fixed" }
 }
 
 struct CheckProblem: Codable, Sendable, Hashable {

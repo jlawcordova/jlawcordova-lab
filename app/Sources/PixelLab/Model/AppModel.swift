@@ -50,7 +50,9 @@ final class AppModel {
     var showInspector = true
     var searchText = ""
     /// The stage's visible size, for Fit.
-    var stageViewport: CGSize = .zero
+    var stageViewport: CGSize = .zero {
+        didSet { if oldValue != stageViewport { ensureWorkspace() } }
+    }
     /// The sidebar row or cell under the pointer ("scene:x" / "object:y").
     var hovered: String?
     /// Settings changed the document path since the server started.
@@ -421,6 +423,9 @@ final class AppModel {
                 let focus = layerParams["focus"]?.stringValue
                 let t = timeline.renderTime
                 let generation = timeline.generation
+                // A scene's size and the workspace around it (docs/intents/2026-10-scene-canvas/spec.md, R9).
+                if isScene { await refreshFrame(doc, connection: connection) }
+                let window = isScene ? workspace(for: doc) : nil
                 let objects = objectEditor
                 let objectFrame = objects.frame
                 let objectKey = objects.cacheKey(frame: objectFrame)
@@ -433,7 +438,7 @@ final class AppModel {
                     doc.renderCount += 1
                     continue
                 }
-                if animated, focus == nil, let frame = timeline.cached(t), let image = PixelImage(png: frame.png, renderScale: frame.scale) {
+                if animated, focus == nil, let frame = timeline.cached(t), frame.viewBox == window, let image = PixelImage(png: frame.png, renderScale: frame.scale) {
                     doc.render = StageImage(image: image, viewBox: frame.viewBox, scale: frame.scale, items: frame.items, anchor: nil, time: Double(t))
                     doc.renderCount += 1
                     continue
@@ -443,6 +448,7 @@ final class AppModel {
                     var params: [String: JSONValue] = ["name": .string(doc.ref.name), "scale": 1]
                     if animated { params["time"] = JSONValue(t) }
                     if isScene { params["theme"] = stageTheme }
+                    if let window { params["view"] = window.sceneView }
                     params.merge(layerParams) { _, b in b }
                     if !isScene { params.merge(objects.renderParams(frame: objectFrame)) { _, b in b } }
                     let r: RenderResult = try await connection.call(method, params)
@@ -478,6 +484,52 @@ final class AppModel {
             if doc.ref.kind == .object, document === doc, !objectEditor.playing { objectEditor.requestExtras() }
             if document === doc { agent.syncGhost() }
         }
+    }
+
+    /// `scene.frame`: the box the open scene publishes at, asked again once per
+    /// change of the doc (the timeline's generation counts them).
+    func refreshFrame(_ doc: DocumentModel, connection: ServerConnection) async {
+        let generation = timeline.generation
+        if doc.frameInfo != nil, doc.frameStamp == generation { return }
+        if let r: SceneFrameResult = try? await connection.call("scene.frame", ["name": .string(doc.ref.name)]), r.viewBox.count == 4 {
+            doc.frameInfo = r
+            doc.frameStamp = generation
+        }
+    }
+
+    /// What the stage must hold: the published box, where the cursor has been
+    /// and a proposal's ghost.
+    func neededRect(for doc: DocumentModel) -> CGRect {
+        var r = doc.publishBox
+        if let reach = doc.reach { r = r.union(reach) }
+        if let ghost = agent.visibleGhost, ghost.ref == doc.ref { r = r.union(ghost.image.viewBox) }
+        return r
+    }
+
+    /// The window the stage renders now, growing the doc's if the box, the
+    /// cursor, the zoom or the viewport need more room.
+    func workspace(for doc: DocumentModel) -> CGRect {
+        let pad = StageWindow.pad(viewport: stageViewport, zoom: effectiveZoom)
+        let window = StageWindow.grow(current: doc.window, needed: neededRect(for: doc), pad: pad)
+        if doc.window != window { doc.window = window }
+        return window
+    }
+
+    /// The zoom, the viewport or the cursor changed: render again if the
+    /// workspace has to grow to hold what's on stage.
+    func ensureWorkspace() {
+        guard let doc = document, doc.ref.kind == .scene, let window = doc.window else { return }
+        let pad = StageWindow.pad(viewport: stageViewport, zoom: effectiveZoom)
+        if StageWindow.grow(current: window, needed: neededRect(for: doc), pad: pad) != window { requestRender() }
+    }
+
+    /// The stage cursor moved: the workspace holds its tile.
+    func reachTile(_ t: Tile) {
+        guard let doc = document, doc.ref.kind == .scene, let origin = doc.origin else { return }
+        let c = StageGeometry.tileToScene(col: t.col, row: t.row, level: t.level, origin: origin)
+        let r = CGRect(x: c.x - 16, y: c.y - 8 - 16, width: 32, height: 48)
+        doc.reach = doc.reach.map { $0.union(r) } ?? r
+        ensureWorkspace()
     }
 
     /// Loads the open scene's items (the Items tree, the inspector, hit-testing
@@ -856,7 +908,10 @@ final class AppModel {
 
     var zoom: Zoom {
         get { mode == .scene ? sceneZoom : objectZoom }
-        set { if mode == .scene { sceneZoom = newValue } else { objectZoom = newValue } }
+        set {
+            if mode == .scene { sceneZoom = newValue } else { objectZoom = newValue }
+            ensureWorkspace()
+        }
     }
 
     /// Stage padding around the art when it's bigger than the stage, in points.
@@ -882,7 +937,7 @@ final class AppModel {
         case .level(let n): return n
         case .fit:
             if let forced = snapshot?.zoom { return forced }
-            return fitZoom(art: doc.render?.artSize ?? .zero, viewport: stageViewport, kind: doc.ref.kind)
+            return fitZoom(art: doc.ref.kind == .scene ? doc.publishSize : (doc.render?.artSize ?? .zero), viewport: stageViewport, kind: doc.ref.kind)
         }
     }
 

@@ -43,6 +43,19 @@ struct StageGeometry: Equatable {
         artOrigin = CGPoint(x: ((contentSize.width - art.width) / 2).rounded(.down), y: ((contentSize.height - art.height) / 2).rounded(.down))
     }
 
+    /// A scene's stage (docs/intents/2026-10-scene-canvas/spec.md, R9): the
+    /// render covers a workspace `window` of scene pixels, wider than the art on
+    /// every side, so the content has no edge to stop at. It is at least the
+    /// viewport, and centered in it when smaller.
+    init(window: CGRect, zoom: Int, viewport: CGSize, tileOrigin: CGPoint?) {
+        viewBox = window
+        self.zoom = CGFloat(max(zoom, 1))
+        self.tileOrigin = tileOrigin
+        let art = CGSize(width: window.width * self.zoom, height: window.height * self.zoom)
+        contentSize = CGSize(width: max(art.width, viewport.width), height: max(art.height, viewport.height))
+        artOrigin = CGPoint(x: ((contentSize.width - art.width) / 2).rounded(.down), y: ((contentSize.height - art.height) / 2).rounded(.down))
+    }
+
     var artRect: CGRect {
         CGRect(origin: artOrigin, size: CGSize(width: viewBox.width * zoom, height: viewBox.height * zoom))
     }

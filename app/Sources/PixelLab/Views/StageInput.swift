@@ -40,7 +40,9 @@ struct StageInput: NSViewRepresentable {
 }
 
 final class StageInputView: NSView {
-    var geometry: StageGeometry?
+    var geometry: StageGeometry? {
+        didSet { keepScroll(from: oldValue) }
+    }
     weak var editor: SceneEditor?
     weak var objects: ObjectEditor?
     var tool: StageTool = .select
@@ -48,6 +50,20 @@ final class StageInputView: NSView {
     var isScene = true
     private var panStart: (window: CGPoint, origin: CGPoint)?
     private var tracking: NSTrackingArea?
+
+    /// The workspace grew toward the top or left, so the content moved right or
+    /// down: scroll by as much, and what the owner is looking at stays put.
+    private func keepScroll(from old: StageGeometry?) {
+        guard isScene, let old, let new = geometry, old.zoom == new.zoom, old.viewBox.origin != new.viewBox.origin else { return }
+        let dx = (old.viewBox.minX - new.viewBox.minX) * new.zoom + new.artOrigin.x - old.artOrigin.x
+        let dy = (old.viewBox.minY - new.viewBox.minY) * new.zoom + new.artOrigin.y - old.artOrigin.y
+        DispatchQueue.main.async { [weak self] in
+            guard let scroll = self?.enclosingScrollView else { return }
+            let clip = scroll.contentView
+            clip.scroll(to: CGPoint(x: clip.bounds.origin.x + dx, y: clip.bounds.origin.y + (clip.isFlipped ? dy : -dy)))
+            scroll.reflectScrolledClipView(clip)
+        }
+    }
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }

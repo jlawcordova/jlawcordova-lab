@@ -79,7 +79,7 @@ struct ProposalRenderResult: Codable, Sendable {
     var width: Int
     var height: Int
     var time: Double?
-    var frame: Int?
+    var frame: RenderFrame?
     var anchor: [Double]?
     var items: [RenderItem]
 }

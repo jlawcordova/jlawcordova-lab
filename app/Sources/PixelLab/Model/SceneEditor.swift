@@ -314,8 +314,10 @@ final class SceneEditor {
     /// The tile at the middle of the view at the place level (where the stage
     /// cursor starts, as in the lab).
     func defaultCursor() -> Tile? {
-        guard let doc, let render = doc.render, let origin = doc.origin else { return nil }
-        let t = StageGeometry.sceneToTile(x: Int(render.viewBox.midX), y: Int(render.viewBox.midY), level: placeLevel, origin: origin)
+        guard let doc, doc.render != nil, let origin = doc.origin else { return nil }
+        // The middle of the box the scene publishes at (an empty scene's is tile 0, 0).
+        let box = doc.publishBox
+        let t = StageGeometry.sceneToTile(x: Int(box.midX), y: Int(box.midY), level: placeLevel, origin: origin)
         return Tile(col: t.col, row: t.row, level: t.level)
     }
 
@@ -401,6 +403,7 @@ final class SceneEditor {
         cursorTile = t
         placeLevel = t.level
         if tool == .place { hoverTile = t }
+        app?.reachTile(t)
         announce("Cursor at column \(t.col), row \(t.row), level \(t.level)")
     }
 

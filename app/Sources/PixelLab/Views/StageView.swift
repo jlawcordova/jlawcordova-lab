@@ -53,10 +53,10 @@ struct StageView: View {
     private func content(viewport: CGSize) -> some View {
         if let doc = model.document, let render = doc.render {
             let zoom = model.effectiveZoom
-            let geometry = StageGeometry(
-                viewBox: render.viewBox, zoom: zoom, viewport: viewport,
-                margin: AppModel.stageMargin, tileOrigin: doc.ref.kind == .scene ? doc.origin : nil
-            )
+            // A scene's stage has no edge: it shows a workspace around the art (R9). An object's is its card.
+            let geometry = doc.ref.kind == .scene
+                ? StageGeometry(window: render.viewBox, zoom: zoom, viewport: viewport, tileOrigin: doc.origin)
+                : StageGeometry(viewBox: render.viewBox, zoom: zoom, viewport: viewport, margin: AppModel.stageMargin, tileOrigin: nil)
             ScrollView([.horizontal, .vertical]) {
                 ZStack(alignment: .topLeading) {
                     // The input view sits at the bottom: everything drawn over it
