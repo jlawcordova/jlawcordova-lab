@@ -103,13 +103,13 @@ enum ClaudeTurn {
         return args
     }
 
-    /// The MCP config: the bundled CLI's `serve --mcp` on the app's document and
+    /// The MCP config: the bundled program's `serve --mcp` on the app's document and
     /// state dir, with the chat it works for (its proposals and activity record it).
-    static func mcpConfig(node: URL, cli: URL, location: DocumentLocation, stateDir: String, chatID: String, title: String) -> String {
+    static func mcpConfig(program: URL, location: DocumentLocation, stateDir: String, chatID: String, title: String) -> String {
         let server: JSONValue = [
             "type": "stdio",
-            "command": .string(node.path),
-            "args": .array(([cli.path, "serve", "--mcp"] + location.arguments).map { .string($0) }),
+            "command": .string(program.path),
+            "args": .array((["serve", "--mcp"] + location.arguments).map { .string($0) }),
             "env": ["PIXELLAB_STATE": .string(stateDir), "PIXELLAB_CHAT": .string(chatID), "PIXELLAB_CHAT_TITLE": .string(title)],
         ]
         let config: JSONValue = ["mcpServers": ["pixellab": server]]

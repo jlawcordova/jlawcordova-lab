@@ -7,7 +7,6 @@ enum SettingsKey {
     static let document = "documentPath"
     /// The site checkout, before documents (read once to seed `document`, never written).
     static let site = "sitePath"
-    static let node = "nodePath"
     static let appearance = "appearance"
     static let lastDoc = "lastDoc"
     static let showGrid = "showGrid"

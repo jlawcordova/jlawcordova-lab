@@ -83,7 +83,7 @@ import Testing
     }
 
     @Test func diffLinesAreClassified() {
-        let diff = "--- a/scenes/x.mjs\n+++ b/scenes/x.mjs\n@@ -1,2 +1,3 @@\n   items: [\n+    { object: 'pine' },\n-    { object: 'rock' },\n"
+        let diff = "--- a/scenes/x.json\n+++ b/scenes/x.json\n@@ -1,2 +1,3 @@\n   items: [\n+    { object: 'pine' },\n-    { object: 'rock' },\n"
         let lines = DiffLine.parse(diff)
         #expect(lines.map(\.kind) == [.file, .file, .hunk, .context, .added, .removed])
     }
@@ -98,8 +98,8 @@ import Testing
     }
 
     @Test func shellQuoting() {
-        #expect(AgentModel.shellQuote("/Users/me/cli/bin/pixellab.mjs") == "/Users/me/cli/bin/pixellab.mjs")
-        #expect(AgentModel.shellQuote("/Applications/Pixel Lab.app/x.mjs") == "'/Applications/Pixel Lab.app/x.mjs'")
+        #expect(AgentModel.shellQuote("/Users/me/pixellab") == "/Users/me/pixellab")
+        #expect(AgentModel.shellQuote("/Applications/Pixel Lab.app/Contents/Helpers/pixellab") == "'/Applications/Pixel Lab.app/Contents/Helpers/pixellab'")
         #expect(AgentModel.shellQuote("it's") == "'it'\\''s'")
     }
 }
