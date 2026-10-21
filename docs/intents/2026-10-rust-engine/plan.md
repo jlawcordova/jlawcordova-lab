@@ -341,6 +341,8 @@ flowchart TB
 
 - **As built, PR 1:** the read commands' goldens are compared by the program's own corpus test (`crates/pixellab/tests/corpus.rs`), since the engine crate can't run commands; `crates/engine/tests/corpus.rs` compares the SVGs and preview PNGs. The number cases `jsnum.rs` is tested against are committed (`crates/engine/tests/data/jsnum.json`, written by `goldens.mjs --jsnum`), so `cargo test` needs no Node. A `rustfmt.toml` sets 140 columns. The canonical text writes an unknown key after the known ones instead of dropping it, as `serialize.mjs` did.
 
+- **gzip sizes within 1.5%, not R3's 1% (the owner's decision, 2026-10-21, at the parity gate).** miniz_oxide's gzip can't match zlib's on every scene: at its closest setting (level 9) the owner's document has 3 scene totals 1.01–1.10% from zlib's and a 20-byte color row 3 bytes off. Raw sizes and every SVG, PNG and JSON result are identical. The parity check and the corpus test allow 1.5%, or 4 bytes on tiny values, and report the largest difference.
+
 If the owner wants any of these the spec's way, `spec.md` wins.
 
 ## Risks

@@ -152,12 +152,13 @@ fn every_read_command_gives_nodes_result() {
             };
             compared += 1;
             let rust_gzip = GZIP.with(|g| std::mem::take(&mut *g.borrow_mut()));
-            // gzip sizes within 1% of the larger of the value and the total it's part of (spec R3, D2).
+            // gzip sizes within 1.5% (or 4 bytes) of the larger of the value and the total it's
+            // part of: the owner's tolerance for miniz vs zlib (plan.md, "Departures from the spec").
             let total = node_gzip.iter().cloned().fold(0.0, f64::max);
             for (n, r) in node_gzip.iter().zip(&rust_gzip) {
                 let off = (n - r).abs() / n.abs().max(total).max(1.0) * 100.0;
                 worst_gzip = worst_gzip.max(off);
-                if off > 1.0 {
+                if off > 1.5 && (n - r).abs() > 4.0 {
                     gzip_over.push(format!("{name}: {command} {}: gzip {n} (node) vs {r} (rust), {off:.2}%", case["params"]));
                 }
             }
@@ -177,7 +178,8 @@ fn every_read_command_gives_nodes_result() {
     }
     eprintln!("corpus: {compared} command results compared; not ported yet: {skipped:?}; gzip sizes at most {worst_gzip:.2}% from Node's");
     for g in &gzip_over {
-        eprintln!("corpus: gzip over 1%: {g}");
+        eprintln!("corpus: gzip over 1.5%: {g}");
     }
+    assert!(gzip_over.is_empty(), "gzip sizes over 1.5% apart:\n{}", gzip_over.join("\n"));
     assert!(differ.is_empty(), "{} results differ:\n{}", differ.len(), differ.iter().take(15).cloned().collect::<Vec<_>>().join("\n"));
 }

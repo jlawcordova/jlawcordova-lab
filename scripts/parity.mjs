@@ -49,6 +49,10 @@ const SOURCES = {
   town: join(REPO, 'examples/town.pixellab'),
 };
 
+/** gzip sizes may differ by this much (the owner's call, 2026-10-21), or this many bytes on tiny values. */
+const GZIP_TOLERANCE = 0.015;
+const GZIP_BYTES = 4;
+let worstGzip = 0;
 /** @type {{ doc: string, what: string, detail: string }[]} */
 const differences = [];
 /** @type {string[]} */
@@ -205,11 +209,15 @@ function compare(/** @type {any} */ nodeResult, /** @type {any} */ rustResult, /
     const at = [...a].findIndex((ch, i) => ch !== b[i]);
     return `node …${a.slice(Math.max(0, at - 100), at + 150)}…\n  rust …${b.slice(Math.max(0, at - 100), at + 150)}…`;
   }
-  // gzip within 1% of the larger of the value and the total it's part of.
+  // gzip within 1.5% (and a few bytes for tiny values) of the larger of the
+  // value and the total it's part of: the owner's tolerance for miniz vs zlib
+  // (plan.md, "Departures from the spec").
   const total = Math.max(0, ...gzNode.map((g) => g.node));
   for (let i = 0; i < gzNode.length; i++) {
     const [n, r] = [gzNode[i].node, gzRust[i].node];
-    if (Math.abs(n - r) > 0.01 * Math.max(Math.abs(n), total)) return `${gzNode[i].path}: gzip ${n} (node) vs ${r} (rust), more than 1% apart`;
+    const off = Math.abs(n - r) / Math.max(Math.abs(n), total, 1);
+    worstGzip = Math.max(worstGzip, off * 100);
+    if (Math.abs(n - r) > Math.max(GZIP_TOLERANCE * Math.max(Math.abs(n), total), GZIP_BYTES)) return `${gzNode[i].path}: gzip ${n} (node) vs ${r} (rust), more than 1.5% apart`;
   }
   return null;
 }
@@ -390,6 +398,7 @@ async function main() {
     `Node CLI (format 1) vs ${PROGRAM} (format 2, migrated with its own document migrate --to).`,
     '',
     ...lines.map((l) => `- ${l}`),
+    `- gzip sizes at most ${worstGzip.toFixed(2)}% from Node's (miniz_oxide vs zlib; the owner allowed 1.5%, spec D2)`,
     '',
     differences.length ? `**${differences.length} differences**` : '**No differences.**',
     '',
