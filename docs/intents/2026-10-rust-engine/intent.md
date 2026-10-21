@@ -36,7 +36,9 @@ flowchart LR
 - **The document is data.** The art document's sources move from JavaScript modules to JSON, which the Rust engine reads and writes. The owner's existing document, and the examples, are migrated to it.
 - **The site keeps its art, not the engine.** The document stays in the site repo, where the art is edited. The site drops the library entirely: no engine code and no imports of it. The site's build in CI runs the Pixel Lab program to produce the SVGs and thumbnails, so the outputs don't need to be committed to the site repo.
 - **Self-contained art.** Every SVG carries its own animation: the scene's motion, the frame loops, the ambient loops, and its own reduced-motion behavior. The site no longer needs a stylesheet that knows how the art animates.
-- **The site's art tests come here.** The tests that check the art, and the engine behind them, move to Pixel Lab.
+- **Animation that answers the visitor comes with the art too.** The Range character's hop is carried by the art. The site asks the art to play it by name, when someone presses the button, and hears back when it ends. The site no longer knows how the hop moves.
+- **Over budget is a warning, never a failure.** A scene over its size budget is still built, everywhere (the app, the CLI and the site's build), and a warning says so.
+- **The site's art tests leave the site.** The ones that test the engine come to Pixel Lab. The ones that pin the site's particular art are dropped, so this repo doesn't depend on the site's art.
 - **Two builds of the program.** One for the owner's Mac and one for the site's CI.
 - **Nothing to install first.** Starting the app needs no Node, and no Rust set up by hand. The app's setup screen no longer asks for Node.
 
@@ -55,7 +57,8 @@ flowchart LR
 - **New dependencies only with the owner's approval,** Rust crates included, as with npm and Swift today.
 - **Edits stay proposals.** What agents change still becomes a proposal the owner approves in the Agent window.
 - **VoiceOver labels, visible focus and Reduce Motion** stay on everything the app shows, including the changed setup screen.
-- **Out of scope:** new features in the app or the engine, and changes to the art itself.
+- **Out of scope:** new features in the app or the engine beyond what self-contained animation needs, and changes to the art itself.
+- **Amended 2026-10-21, after the intent was accepted:** the owner decided the hop, the budgets, the art tests and the open questions below while the spec was being prepared. The spec answers the questions.
 
 ## Open questions
 
