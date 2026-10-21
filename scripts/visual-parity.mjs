@@ -184,6 +184,7 @@ async function launch(/** @type {string} */ chrome, /** @type {string[]} */ extr
     async page() {
       const { targetId } = /** @type {any} */ (await send('Target.createTarget', { url: 'about:blank' }));
       const { sessionId } = /** @type {any} */ (await send('Target.attachToTarget', { targetId, flatten: true }));
+      await send('Target.activateTarget', { targetId });
       const s = (/** @type {string} */ method, /** @type {any} */ params = {}) => send(method, params, sessionId);
       await s('Page.enable');
       return {
@@ -225,7 +226,9 @@ const PAGE_SCRIPT = `
 window.__anims = () => document.getAnimations();
 window.__at = (t) => {
   for (const a of document.getAnimations()) { a.pause(); a.currentTime = t; }
-  return new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(document.getAnimations().length))));
+  // A screenshot renders a fresh frame, so nothing waits on requestAnimationFrame (a background tab never runs it).
+  document.body.getBoundingClientRect();
+  return document.getAnimations().length;
 };
 window.__timing = () => document.getAnimations().map((a) => {
   const t = a.effect.getComputedTiming();
@@ -388,11 +391,14 @@ async function main() {
         const files = [join(pagesDir, `old-${svg}.html`), join(pagesDir, `new-${svg}.html`)];
         writeFileSync(files[0], oldPage.html);
         writeFileSync(files[1], newPage.html);
-        const [a, b] = [await browser.page(), await browser.page()];
-        await a.open(files[0], oldPage.w, oldPage.h);
-        await b.open(files[1], newPage.w, newPage.h);
-        const anims = [...(await a.evaluate('__timing()')), ...(await b.evaluate('__timing()'))];
-        /** @type {{ t: number, why: string, margin: number }[]} */
+        // One tab, in front: each page in turn, every frame of it captured, then compared.
+        const tab = await browser.page();
+        await tab.open(files[0], oldPage.w, oldPage.h);
+        const oldTiming = await tab.evaluate('__timing()');
+        await tab.open(files[1], newPage.w, newPage.h);
+        const newTiming = await tab.evaluate('__timing()');
+        const anims = [...oldTiming, ...newTiming];
+        /** @type {{ t: number, why: string, margin: number, hop?: boolean }[]} */
         const times = [{ t: 0, why: 't = 0', margin: margin(0, anims) }];
         if (!reduced) {
           const cycles = [...new Set(anims.map((x) => x.duration).filter((d) => d > 0 && Number.isFinite(d)))].sort((x, y) => x - y);
@@ -405,34 +411,57 @@ async function main() {
         } else {
           for (const t of [1234, 5678]) times.push({ t, why: 'reduced motion', margin: Infinity });
         }
-        const compare = async (/** @type {{ t: number, why: string, margin: number }} */ at, /** @type {string} */ label) => {
-          await a.evaluate(`__at(${at.t})`);
-          await b.evaluate(`__at(${at.t})`);
-          const [x, y] = [await a.shot(), await b.shot()];
+        const hops = oldSvg.includes('cbob');
+        const trigger = [`document.querySelectorAll('.cbob').forEach((e) => e.classList.add('is-hopping')), 0`, `document.querySelector('svg').setAttribute('data-play', 'hop'), 0`];
+        const capture = async (/** @type {string} */ file, /** @type {number} */ w, /** @type {number} */ h, /** @type {number} */ side) => {
+          await tab.open(file, w, h);
+          /** @type {Buffer[]} */
+          const shots = [];
+          for (const at of times) {
+            await tab.evaluate(`__at(${at.t})`);
+            shots.push(await tab.shot());
+          }
+          /** @type {{ t: number, why: string, margin: number }[]} */
+          const hopTimes = [];
+          if (hops) {
+            await tab.evaluate(trigger[side]);
+            const hopAnims = await tab.evaluate('__timing()');
+            for (let at = 0; at < 480; at += 40) hopTimes.push({ ...cleanTime(at + 20, hopAnims, 5, 20), why: '' });
+            for (const at of hopTimes) {
+              await tab.evaluate(`__at(${at.t})`);
+              shots.push(await tab.shot());
+            }
+          }
+          return { shots, hopTimes };
+        };
+        const oldShots = await capture(files[0], oldPage.w, oldPage.h, 0);
+        const newShots = await capture(files[1], newPage.w, newPage.h, 1);
+        // Both pages' hop boundaries count: a hop sample sits clear of either.
+        const hopAt = oldShots.hopTimes.map((o, i) => {
+          const n = newShots.hopTimes[i];
+          return Math.abs(o.t - n.t) < 0.01 ? o : { t: o.t, why: '', margin: Math.min(o.margin, n.margin) };
+        });
+        const all = [...times, ...hopAt.map((x) => ({ ...x, why: `the hop at ${x.t} ms`, hop: true }))];
+        all.forEach((at, i) => {
           frames++;
-          if (Number.isFinite(at.margin)) tightest = Math.min(tightest, at.margin);
+          // t = 0 is a boundary by definition (R16 asks for it); the margin is the other samples'.
+          if (Number.isFinite(at.margin) && at.t !== 0) tightest = Math.min(tightest, at.margin);
+          const [x, y] = [oldShots.shots[i], newShots.shots[i]];
           if (!samePixels(x, y)) {
-            const stem = `${svg.replace(/\.svg$/, '')}-${label}-${at.t}`.replace(/[^a-z0-9.-]+/gi, '_');
+            const stem = `${svg.replace(/\.svg$/, '')}-${reduced ? 'reduced-' : ''}${at.hop ? 'hop' : 'loop'}-${at.t}`.replace(/[^a-z0-9.-]+/gi, '_');
             writeFileSync(join(OUT, `${stem}-old.png`), x);
             writeFileSync(join(OUT, `${stem}-new.png`), y);
             failures.push(`${svg}${reduced ? ' (reduced motion)' : ''}: ${at.why} at ${at.t} ms differs (${stem}-old.png, -new.png)`);
           }
-        };
-        for (const at of times) await compare(at, reduced ? 'reduced' : 'loop');
-        // The hop, started at the same instant on both pages (every animation's time is then the hop's).
-        const hops = oldSvg.includes('cbob');
-        if (hops) {
-          await a.evaluate(`document.querySelectorAll('.cbob').forEach((e) => e.classList.add('is-hopping')), 0`);
-          await b.evaluate(`document.querySelector('svg').setAttribute('data-play', 'hop'), 0`);
-          const hopAnims = [...(await a.evaluate('__timing()')), ...(await b.evaluate('__timing()'))];
-          for (let h = 0; h < 480; h += 40) {
-            const picked = cleanTime(h + 20, hopAnims, 5, 20);
-            await compare({ t: picked.t, why: `the hop at ${picked.t} ms`, margin: picked.margin }, reduced ? 'hop-reduced' : 'hop');
-          }
-        }
-        report.push(`- ${svg}${reduced ? ' (reduced motion)' : ''}: ${times.length + (hops ? 12 : 0)} frames compared${hops ? ', the hop included' : ''}`);
-        await a.send('Page.close');
-        await b.send('Page.close');
+        });
+        process.stderr.write(`${svg}${reduced ? ' (reduced motion)' : ''}: ${all.length} frames\n`);
+        // That the pages move at all: how many animations each plays, and how many different frames it showed.
+        const distinct = (/** @type {Buffer[]} */ shots) => new Set(shots.map((b) => b.toString('base64'))).size;
+        report.push(
+          `- ${svg}${reduced ? ' (reduced motion)' : ''}: ${all.length} frames compared${hops ? ', the hop included' : ''}; ` +
+            `old page ${oldTiming.length} animations, ${distinct(oldShots.shots)} different frames; new page ${newTiming.length} animations, ${distinct(newShots.shots)} different frames`,
+        );
+        await tab.send('Page.close');
       }
     } finally {
       await browser.close();
@@ -449,7 +478,7 @@ async function main() {
     '',
     '**Frames:**',
     ...report,
-    `- ${frames} frames in all; every sample time at least ${tightest === Infinity ? '∞' : tightest.toFixed(1)} ms from a step boundary on either page`,
+    `- ${frames} frames in all; every sample time after t = 0 at least ${tightest === Infinity ? '∞' : tightest.toFixed(1)} ms from a step boundary on either page`,
     '',
     failures.length ? `**${failures.length} frames differ:**\n${failures.map((f) => `- ${f}`).join('\n')}` : '**Every frame matches.**',
     '',
