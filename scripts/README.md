@@ -14,6 +14,7 @@ Everything that builds, installs, checks or documents Pixel Lab, run from the re
 | [`docs-cli.mjs`](#docs-climjs) | Regenerates `docs/cli.md` from the command registry |
 | [`docs-site/`](#docs-site) | Builds the developer docs site |
 | [`make-icon.mjs`](#make-iconmjs) | Renders the app icon with the engine |
+| [`fake-claude/`](#fake-claude) | A stand-in for the `claude` CLI, for the Agent chat's tests |
 
 ## build-app.sh
 
@@ -56,7 +57,7 @@ Starts the app with `PIXELLAB_SNAPSHOT`, which opens the doc, waits until it's r
 scripts/acceptance.sh [out-dir]
 ```
 
-The acceptance pass, end to end on a temp copy of the site (the real checkout is only copied, and sorted into depth order after it is copied, because the engine now draws by where items stand): scene edits, save and publish (six SVGs into the temp site), then object painting and save (`acceptance/scene-object.txt`); an agent over MCP saving two proposals through the bundled CLI (`acceptance/mcp-agent.mjs`); the Agent window ghosting, approving and rejecting them (`acceptance/agent.txt`); a doc with unsaved edits changed on disk by the CLI and merged, reloaded and kept, then another agent's proposal (`acceptance/stale-agent.mjs`) approved into an unsaved copy (`acceptance/stale.txt`); Save As to a copy, reopening it and publishing from it into a folder (`acceptance/document.txt`); scene layers, with the hero island's SVG byte-identical before and after they're saved (`acceptance/layers.txt`); the example documents' layers, on temp copies of `examples/` (`acceptance/examples-harbor.txt`, `examples-town.txt`); and depth, moving the pine behind the red house on a temp copy of the harbor and checking the wall's pixel (`acceptance/examples-depth.txt`). It needs `build/Pixel Lab.app`. Exits 0 only if every step passed, and leaves logs, snapshots and the temp site in `out-dir`.
+The acceptance pass, end to end on a temp copy of the site (the real checkout is only copied, and sorted into depth order after it is copied, because the engine now draws by where items stand): scene edits, save and publish (six SVGs into the temp site), then object painting and save (`acceptance/scene-object.txt`); an agent over MCP saving two proposals through the bundled CLI (`acceptance/mcp-agent.mjs`); the Agent window ghosting, approving and rejecting them (`acceptance/agent.txt`); a doc with unsaved edits changed on disk by the CLI and merged, reloaded and kept, then another agent's proposal (`acceptance/stale-agent.mjs`) approved into an unsaved copy (`acceptance/stale.txt`); Save As to a copy, reopening it and publishing from it into a folder (`acceptance/document.txt`); scene layers, with the hero island's SVG byte-identical before and after they're saved (`acceptance/layers.txt`); the example documents' layers, on temp copies of `examples/` (`acceptance/examples-harbor.txt`, `examples-town.txt`); depth, moving the pine behind the red house on a temp copy of the harbor and checking the wall's pixel (`acceptance/examples-depth.txt`); and the Agent chat against the fake Claude Code in `fake-claude/` (`acceptance/chat-setup.txt`, `chat.txt`, `chat-harbor.txt`), never the owner's Claude Code or plan. It needs `build/Pixel Lab.app`. Exits 0 only if every step passed, and leaves logs, snapshots and the temp site in `out-dir`.
 
 Its `expect` lines pin the site's art as it was on 2026-10-20 (15 scenes, 164 objects, the house at px -59,59). When the art changes, a failing `expect` means updating the scripts, not the app.
 
@@ -104,3 +105,7 @@ node scripts/make-icon.mjs [--document <path> | --site <path>] [--object house] 
 ```
 
 Renders the app icon with the engine: an object (the house) at a whole pixel scale on a 1024×1024 warm squircle with a faint iso grid. It reads the document and never writes to it. `build-app.sh` turns the PNG into the `.icns`.
+
+## fake-claude/
+
+A stand-in for the `claude` CLI, so the Agent chat is tested without the owner's Claude plan or the network ([its README](fake-claude/README.md)): `claude` answers `--version`, `auth status|login|logout` and headless turns in the real stream-json shapes, doing its tool calls through the real pixellab MCP server; `install.sh` is the fake installer. The script hook finds it through `PIXELLAB_CLAUDE_HOME` and `PIXELLAB_CLAUDE_INSTALLER`.

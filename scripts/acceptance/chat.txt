@@ -23,6 +23,9 @@ expect badge 1
 expect proposalsource Chat · Move these one tile east
 expect askedabout pine 83 and pine 84
 snapshot @OUT@/chat-proposal-dark.png
+appearance light
+snapshot @OUT@/chat-proposal-light.png
+appearance dark
 # R16: approve from the card: the document changes, the card and a note say so
 card approve
 expect cardstatus Applied

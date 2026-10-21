@@ -45,6 +45,9 @@ expect pinned 51
 expect contextline 1 group, 1 item · 1 pinned to this chat
 expect context item 51 object=rock at=tile 0,7,0 pinned
 snapshot @OUT@/chat-context-dark.png
+appearance light
+snapshot @OUT@/chat-context-light.png
+appearance dark
 chat new
 expect pinned none
 chat open 2

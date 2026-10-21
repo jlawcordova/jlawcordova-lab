@@ -14,6 +14,9 @@ setup check
 expect setupmessage Still not found in ~/.local/bin or on your PATH
 setup copy
 snapshot @OUT@/chat-setup-missing-dark.png
+appearance light
+snapshot @OUT@/chat-setup-missing-light.png
+appearance dark
 setup install
 expect setup installing
 setup wait signedout
@@ -21,12 +24,18 @@ expect installlog Installed claude to ~/.local/bin/claude
 expect installlog claude --version → 2.1.290 (Claude Code)
 expect claudeinfo Claude Code 2.1.290 · signed out
 snapshot @OUT@/chat-setup-signedout-dark.png
+appearance light
+snapshot @OUT@/chat-setup-signedout-light.png
+appearance dark
 # Sign in with browser, waiting, Cancel, again
 setup signin
 expect setup waiting
 expect loginurl https://claude.ai/oauth/authorize?code=true&fake=1
 setup open
 snapshot @OUT@/chat-setup-waiting-dark.png
+appearance light
+snapshot @OUT@/chat-setup-waiting-light.png
+appearance dark
 setup cancel
 expect setup signedout
 setup signin
@@ -52,6 +61,9 @@ snapshot @OUT@/chat-turn-dark.png
 details on
 steps expand 1
 snapshot @OUT@/chat-details-dark.png
+appearance light
+snapshot @OUT@/chat-details-light.png
+appearance dark
 details off
 # R14: a link in the reply selects it on the stage
 select none
@@ -64,6 +76,9 @@ chat send Make these taller
 chat wait
 expect chatquestion pine is used 3 times in harbor. Make every pine taller, or only these 2?
 snapshot @OUT@/chat-question-dark.png
+appearance light
+snapshot @OUT@/chat-question-light.png
+appearance dark
 choose 1
 chat wait
 expect chosen Only these 2
