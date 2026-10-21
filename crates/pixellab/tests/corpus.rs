@@ -146,7 +146,15 @@ fn every_read_command_gives_nodes_result() {
             };
             let node_gzip = GZIP.with(|g| std::mem::take(&mut *g.borrow_mut()));
             let got = match reg.call(&mut Ctx::new(&mut session), command, case["params"].clone(), false) {
-                Ok(v) => normalize(&v, &rust_roots, false),
+                Ok(mut v) => {
+                    // R4's change: art.sizes carries its warnings (tests/art_budget.rs checks them).
+                    if command == "art.sizes" {
+                        if let Some(o) = v.as_object_mut() {
+                            o.shift_remove("warnings");
+                        }
+                    }
+                    normalize(&v, &rust_roots, false)
+                }
                 Err(pixellab::errors::Error::Command(e)) => {
                     normalize(&serde_json::json!({ "error": { "code": e.code, "message": e.message } }), &rust_roots, false)
                 }
