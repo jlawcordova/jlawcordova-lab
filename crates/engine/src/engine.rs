@@ -797,7 +797,31 @@ fn extends_chain(sources: &Sources, name: &str) -> (Vec<String>, bool) {
 }
 
 const DEPTHS: [&str; 2] = ["front", "back"];
-const SCENE_PROPS: [&str; 7] = ["notes", "output", "viewBox", "origin", "layers", "items", "motion"];
+const SCENE_PROPS: [&str; 8] = ["notes", "output", "image", "viewBox", "origin", "layers", "items", "motion"];
+const IMAGE_PROPS: [&str; 2] = ["file", "scale"];
+
+/// `image: { file: "name.png", scale: 1..16 }` (R18, D5).
+fn validate_image(image: Option<&Value>, add: &mut dyn FnMut(String)) {
+    let Some(i) = image.and_then(Value::as_object) else {
+        return add("image must be { file: \"<name>.png\", scale: <1 to 16> }".into());
+    };
+    for key in keys(i) {
+        if !IMAGE_PROPS.contains(&key.as_str()) {
+            add(format!("image: unknown property {}", qs(key)));
+        }
+    }
+    let plain = |f: &str| {
+        f.strip_suffix(".png")
+            .is_some_and(|stem| !stem.is_empty() && stem.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+    };
+    if !i.get("file").and_then(Value::as_str).is_some_and(plain) {
+        add("image.file must be a plain file name ending in .png".into());
+    }
+    if has(i, "scale") && !i.get("scale").is_some_and(|v| is_int(v) && (1.0..=16.0).contains(&v.as_f64().unwrap_or(0.0))) {
+        add("image.scale must be a whole number from 1 to 16".into());
+    }
+}
+
 const LAYER_PROPS: [&str; 3] = ["id", "name", "parent"];
 
 /// A scene's layers: returns the ids of the valid ones.
@@ -883,6 +907,9 @@ fn validate_scene(sources: &Sources, name: &str, outputs: &mut HashMap<String, S
             },
             _ => add("output must be a kebab-case file name ending in .svg".into()),
         }
+    }
+    if has(s, "image") {
+        validate_image(s.get("image"), &mut add);
     }
     let vb = s.get("viewBox");
     if !is_whole(vb, 4) || num_at(vb.unwrap(), 2) <= 0.0 || num_at(vb.unwrap(), 3) <= 0.0 {
