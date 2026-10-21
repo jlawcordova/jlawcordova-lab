@@ -2,8 +2,8 @@
 appearance dark
 open scene:hero-island
 # 1. every scene and object is listed
-expect scenes 15
-expect objects 164
+expect scenes 28
+expect objects 204
 expect doc scene:hero-island
 # 2. crisp at 1x-4x and Fit
 zoom 1

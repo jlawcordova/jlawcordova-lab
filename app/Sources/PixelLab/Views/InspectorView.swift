@@ -27,6 +27,7 @@ struct InspectorView: View {
                         }
                     }
                     .layoutPriority(1)
+                    if !doc.selection.isEmpty { AskClaudeButton(count: doc.selection.count) }
                     if model.editor.tool == .place || model.editor.placeObject != nil {
                         PlaceInspector()
                     }
@@ -199,3 +200,25 @@ struct ChecksList: View {
     }
 }
 
+
+/// Ask Claude about this (docs/intents/2026-10-agent-chat/spec.md, R6): the Agent tab, with the
+/// selection as the chat's context and the focus in its input.
+struct AskClaudeButton: View {
+    @Environment(AppModel.self) private var model
+    var count: Int
+
+    var body: some View {
+        Button { model.showAgentTab(focusInput: true) } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkle").font(.system(size: 12))
+                Text(count > 1 ? "Ask Claude about these \(count)" : "Ask Claude about this").font(.system(size: 13, weight: .semibold))
+            }
+            .foregroundStyle(Theme.accent)
+            .frame(maxWidth: .infinity, minHeight: 32)
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.accent, lineWidth: 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Chat with Claude about the selection (⌥⌘A)")
+    }
+}

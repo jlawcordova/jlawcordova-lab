@@ -66,7 +66,7 @@ The app never reads or writes the art itself. It renders what the server sends (
 ```
 agent ── tools/call scene_place ──▶ serve --mcp (a session in 'propose' mode)
 agent ── tools/call doc_save ────▶ validate, then write proposals/<id>.json
-                                   { id, doc, baseHash, source, summary, createdAt, agent }
+                                   { id, number, doc, baseHash, source, summary, createdAt, agent, chat? }
                                    (nothing in the document changes)
        every tools/call ─────────▶ a line in activity.jsonl
 
@@ -79,6 +79,21 @@ Pixel Lab's serve --stdio watches the state dir ─▶ proposals.changed, activi
 agent's next tools/call ─▶ session.sync(): its proposal is gone, so the doc is
                            settled against the file (clean, reloaded or rebased)
 ```
+
+## The Agent chat: Claude Code in the app
+
+The Agent tab (`2026-10-agent-chat`) runs the owner's own `claude` CLI, one headless process per message, with the same MCP server an agent would use:
+
+```
+app ── claude -p --input-format stream-json --output-format stream-json --verbose
+          --mcp-config {pixellab: node <cli> serve --mcp --document <doc>, env PIXELLAB_STATE, PIXELLAB_CHAT, PIXELLAB_CHAT_TITLE}
+          --strict-mcp-config --tools "" --allowedTools mcp__pixellab__* --disallowedTools mcp__pixellab__document_new
+          --permission-prompts none --setting-sources "" --append-system-prompt <ChatPrompt> [--resume <session>]
+    stdin:  <selection …> block (chat.context) + the message
+    stdout: system/init, assistant text and tool_use, user tool_result, result ─▶ the transcript
+```
+
+The child runs in `<state dir>/chats/` (so `--resume` finds the session) with no `CLAUDE*` or `ANTHROPIC_*` variables, so it uses the CLI's own login. Its `serve --mcp` is in propose mode, so its saves are proposals like any agent's, with `chat: { id, title }` and a number (`proposal-numbers.log`); its activity lines carry `agent` and `chat`. Questions are a tool, `chat_ask`, that returns at once; the app shows its `tool_use` as buttons and sends the answer as the next message. Chats are `<state dir>/chats/<id>.json`. The tests run a fake `claude` (`scripts/fake-claude/`) that does its tool calls through the real MCP server.
 
 Agents can't approve, reject, publish or save a copy: those commands are left out of the MCP tools (`LEFT_OUT` in `cli/lib/server-mcp.mjs`). `serve --mcp --direct` lets an agent write the document directly; it's off by default.
 

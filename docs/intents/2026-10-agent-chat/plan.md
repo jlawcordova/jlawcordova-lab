@@ -53,7 +53,8 @@
 - `app/Tests/PixelLabTests/ChatTests.swift`: chips, suggestions, every-use picking, card status.
 - `scripts/acceptance/chat.txt` (new), `scripts/acceptance/chat-harbor.txt` (new), `scripts/acceptance.sh`: the chat end to end on the temp site and a temp harbor copy.
 - `scripts/fake-claude/turns.json`: the turns PR 3's scripts use.
-- Docs: `README.md`, `app/README.md`, `docs/architecture.md`, `docs/testing.md`, `CLAUDE.md`, `docs/screenshots/chat-*.png` (new), and this plan's "As built".
+- `scripts/acceptance/scene-object.txt`, `document.txt`, `scripts/acceptance.sh` (`sort.txt`'s document) (as built: the site's art moved on).
+- Docs: `README.md`, `app/README.md`, `docs/architecture.md`, `docs/testing.md`, `scripts/README.md`, `CLAUDE.md`, `docs/screenshots/chat-*.png` (new), and this plan's "As built".
 
 ## Order of work
 
@@ -99,6 +100,12 @@ Each slice branch is cut from `feat/agent-chat` in its own worktree (`../jlawcor
 19. `git fetch origin`, merge the latest `origin/main` into `feat/agent-chat`, re-run every check.
 20. A draft PR into `main`; an independent `verify-change` run on it in a fresh session; fix its blocking findings.
 21. The PR ready for the owner, with the verification output, the checks' output and the snapshots; hand over.
+
+**As built.**
+- PR 1 (#22): the numbers log is `proposal-numbers.log` beside `proposals/`, not inside it, so that folder holds only proposals (spec D7 says so). Three tests that pinned the old shapes (a proposal file's keys, an activity line's keys, the command list) take the new fields. `chat.context` refuses an unknown item or layer (`not_found`) rather than calling it unsaved.
+- PR 2 (#23): checking the real CLI showed that a `claude` started from inside a Claude Code session inherits its variables and fails auth, so the environment drops every `CLAUDE*` and `ANTHROPIC_*` variable (spec D1). The fake is a shell launcher plus `fake-claude.mjs`, so the Node the app finds (20.17 here, from the login shell) reads it as a module; every quick `claude` run gets the app's node on its PATH. A failed check after an install says what `claude --version` printed. The hook's chat answer is `choose` and its question check `expect chatquestion` (the Agent window already has `answer` and `expect question`); spec D15 lists the actions as built. Proposal cards follow the reply about them and are titled by their one edit or "2 edits to harbor". `scripts/acceptance.sh` runs `chat-setup.txt` in PR 2 (the plan had it in PR 3's runner changes).
+- PR 3: a new chat with a pin (and no message yet) is kept, so New chat doesn't drop its pins. The context is fetched again when the selection, the pins, the dirty state or the items change (not on every render). `chat.txt` runs on `closeup-front-trees`, which no other script edits, right after the terminal agent's scripts and sharing their state dir (so its proposals are #4 and #5); `chat-harbor.txt` gets its own state dir. The banner's title is `ProposalSummary.bannerTitle`, which the hook reads too.
+- The site's art moved on during the build (its depth-order merge, `f5d74e3`, and new scenes: 28 scenes and 204 objects): `scene-object.txt` and `document.txt` expect the new counts, and `sort.txt` runs on the site's document as it was before that merge (`6d19714`, read with `git archive`, never checked out), since the site's own document is now in depth order. `CLAUDE.md` and `docs/testing.md` say the scripts pin the art of 2026-10-21.
 
 ## Workflow and reviews
 

@@ -6,14 +6,14 @@ appearance dark
 open scene:hero-island
 expect document jlawcordova
 expect documentkind document
-expect scenes 15
-expect objects 164
+expect scenes 28
+expect objects 204
 # Save As: the copy is a .pixellab with the site's art and its manifest (so its name).
 saveas @OUT@/copy.pixellab
 expect document jlawcordova
 expect documentkind document
-expect scenes 15
-expect objects 164
+expect scenes 28
+expect objects 204
 open scene:hero-island
 expect at none
 # The copy's manifest publishes next to itself; the script publishes into its own folder instead.

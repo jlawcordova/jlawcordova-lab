@@ -80,7 +80,10 @@ import Foundation
 ///     details on|off   steps expand <n>   choose <answer n> [<question n>]   link <text…>
 ///     expect setup|righttab|chats|chattitle|messages|steps|steplabel|chatquestion|chosen|cards|cardstatus <value>
 ///     expect placeholder|draft|draftlines|running|claudeinfo|lastnote|loginurl|details <value>
-///     expect lastreply|setupmessage|installlog <text>   (contains)
+///     expect lastreply|setupmessage|installlog|context <text>   (contains)
+///     chip pin|unpin|remove <target>   savenow   card approve|reject|ghost|diff [<n>]   altclick <x> <y> [shift]
+///     selectuses   activity all|chats|errors   askclaude   agentwindow
+///     expect chips|pinned|unsaved|contextline|suggestion|ghostchat|activityrows|proposalsource|proposalnumber|banner|askedabout <value>
 ///
 /// Each action waits until renders, checks and edits settle. The app logs
 /// each step to stderr and quits at the end: exit 0 if every step and
@@ -508,7 +511,8 @@ final class ScriptRunner {
             return out.path
         case "agent", "proposal", "approve", "reject", "ghost", "answer", "menus", "agentkey":
             return try await performAgent(words, model: model)
-        case "righttab", "setup", "chat", "chatkey", "details", "steps", "choose", "link":
+        case "righttab", "setup", "chat", "chatkey", "details", "steps", "choose", "link", "chip", "savenow", "card", "altclick", "selectuses",
+             "activity", "askclaude", "agentwindow":
             return try await performChat(words, model: model)
         case "dblclick", "pointer", "rightclick", "menu", "group", "ungroup", "inside", "crumb", "hide", "show", "lock", "unlock",
              "expand", "collapse", "rename", "movedby", "layernudge", "placeinto", "layerskey":
@@ -944,6 +948,61 @@ final class ScriptRunner {
             guard let q, let options = q.options, options.indices.contains(option - 1) else { throw Failure("no answer \(option) to choose") }
             await chat.answer(q.id, options[option - 1])
             return options[option - 1]
+        case "chip":
+            guard let t = LayerTarget(spec: try arg(words, 2)) else { throw Failure("chip pin|unpin|remove layer:<id>|<path>") }
+            switch try arg(words, 1) {
+            case "pin": if !chat.pins.contains(t) { chat.togglePin(t) }
+            case "unpin": if chat.pins.contains(t) { chat.togglePin(t) }
+            case "remove": chat.removeChip(t)
+            default: throw Failure("chip pin|unpin|remove <target>")
+            }
+            await chat.refreshContext(force: true)
+            return chat.chips.map { "\($0.label) \($0.sub)\($0.pinned ? " (pinned)" : "")" }.joined(separator: ", ")
+        case "savenow":
+            await chat.saveNow()
+            return chat.context.map { "unsaved: \($0.unsaved.isEmpty ? "none" : $0.unsaved.joined(separator: ","))" }
+        case "card":
+            let cards = (chat.current?.messages ?? []).filter { $0.kind == .proposal }
+            let card = words.count > 2 ? cards[safe: (try int(words, 2)) - 1] : cards.last
+            guard let card else { throw Failure("no proposal card") }
+            switch try arg(words, 1) {
+            case "approve": await chat.approve(card)
+            case "reject": await chat.reject(card)
+            case "ghost": await chat.toggleGhost(card)
+            case "diff":
+                await chat.showDiff(card)
+                let started = Date()
+                while model.agent.window?.isVisible != true, Date().timeIntervalSince(started) < 5 { try? await Task.sleep(for: .milliseconds(50)) }
+            default: throw Failure("card approve|reject|ghost|diff [<n>]")
+            }
+            let now = chat.current?.messages.first { $0.id == card.id }
+            return "#\(card.number ?? 0): \(now.map(chat.statusText) ?? "?")\(chat.ghostOn(card) ? ", on stage" : "")"
+        case "altclick":
+            // A real ⌥-click through the stage: mouse down and up without moving (D6).
+            guard let view = model.editor.stageView as? StageInputView, let geometry = view.geometry else { throw Failure("no stage") }
+            if let render = model.document?.render { for item in render.items { _ = await model.thumbnails.art(item.pose ?? item.object) } }
+            let p = geometry.viewPoint(fromScene: CGPoint(x: Double(try int(words, 1)) + 0.5, y: Double(try int(words, 2)) + 0.5))
+            model.editor.mouseDown(p, geometry: geometry, option: true, shift: words.dropFirst(3).contains("shift"), clickCount: 1)
+            model.editor.mouseUp()
+            return model.document?.selection.map(\.description).joined(separator: ",")
+        case "selectuses":
+            guard let o = model.document?.selectedItem?.object else { throw Failure("select one item first") }
+            model.layers.selectEveryUse(of: o, add: false)
+            return model.document?.selection.map(\.description).joined(separator: ",")
+        case "activity":
+            guard let f = AgentModel.ActivityFilter(rawValue: try arg(words, 1)) else { throw Failure("activity all|chats|errors") }
+            model.agent.filter = f
+            return "\(model.agent.visibleActivity.count) rows"
+        case "askclaude":
+            guard let doc = model.document, !doc.selection.isEmpty else { throw Failure("nothing selected: the button isn't there") }
+            model.showAgentTab(focusInput: true)
+            try await waitFor("the setup check", seconds: 20) { chat.setup != .checking }
+            return nil
+        case "agentwindow":
+            model.agent.showWindow()
+            let started = Date()
+            while model.agent.window?.isVisible != true, Date().timeIntervalSince(started) < 5 { try? await Task.sleep(for: .milliseconds(50)) }
+            return nil
         case "link":
             let text = words.dropFirst().joined(separator: " ")
             guard let reply = chat.current?.messages.last(where: { $0.kind == .claude })?.text,
@@ -981,6 +1040,22 @@ final class ScriptRunner {
         case "lastnote": return messages.last(where: { $0.kind == .note })?.text ?? "none"
         case "loginurl": return chat.loginURL?.absoluteString ?? "none"
         case "details": return chat.details ? "on" : "off"
+        case "chips": return chat.chips.isEmpty ? "none" : chat.chips.map { "\($0.label) \($0.sub)" }.joined(separator: ",")
+        case "pinned": return chat.pins.isEmpty ? "none" : chat.pins.map(\.description).joined(separator: ",")
+        case "unsavedcount": return String(chat.context?.unsaved.count ?? 0)
+        case "unsaved": return (chat.context?.unsaved ?? []).isEmpty ? "none" : (chat.context?.unsaved ?? []).joined(separator: ",")
+        case "contextline": return chat.contextSummary
+        case "suggestion": return chat.suggestion ?? "none"
+        case "ghostchat":
+            guard let g = model.agent.visibleGhost, let p = model.agent.proposals.first(where: { $0.id == g.proposalID }) else { return "off" }
+            return p.chat?.title ?? "terminal"
+        case "activityrows": return String(model.agent.visibleActivity.count)
+        case "proposalsource": return model.agent.selected?.source ?? "none"
+        case "proposalnumber": return model.agent.selected?.number.map(String.init) ?? "none"
+        case "banner":
+            guard let p = model.agent.selected, model.agent.visibleGhost != nil else { return "none" }
+            return p.bannerTitle
+        case "askedabout": return model.agent.selected.flatMap { chat.askedAbout($0.id) } ?? "none"
         default: return nil
         }
     }
@@ -1174,10 +1249,11 @@ final class ScriptRunner {
         case "document": got = model.sessionInfo?.document?.name ?? "none"
         case "documentkind": got = model.sessionInfo?.document?.kind ?? "none"
         case _ where expectLayers(what, model: model) != nil: got = expectLayers(what, model: model) ?? ""
-        case "lastreply", "setupmessage", "installlog":
+        case "lastreply", "setupmessage", "installlog", "context":
             let text: String = switch what {
             case "lastreply": model.chat.current?.messages.last(where: { $0.kind == .claude })?.text ?? ""
             case "setupmessage": model.chat.setupMessage ?? ""
+            case "context": model.chat.context?.text ?? ""
             default: model.chat.installLog.joined(separator: "\n")
             }
             guard text.contains(want) else { throw Failure("expected \(what) to contain \"\(want)\", got \"\(text.suffix(300))\"") }

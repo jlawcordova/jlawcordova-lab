@@ -281,7 +281,7 @@ struct ChatView: View {
             conversation
             Divider().overlay(Theme.border)
             VStack(alignment: .leading, spacing: 8) {
-                ChatContextArea(chat: chat)
+                ChatContextBar(chat: chat)
                 ChatInputBar(chat: chat)
             }
             .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 14)

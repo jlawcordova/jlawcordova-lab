@@ -87,6 +87,9 @@ struct PixelLabCommands: Commands {
                 .disabled(model.document?.selectedItem?.at.isTile ?? true)
             Button("Select None") { model.layers.select([]) }
                 .disabled(!(model.mode == .scene && !(model.document?.selection.isEmpty ?? true)))
+            // ⌥-click's keyboard way (docs/intents/2026-10-agent-chat/spec.md, D6).
+            Button("Select Every Use") { if let o = model.document?.selectedItem?.object { model.layers.selectEveryUse(of: o, add: false) } }
+                .disabled(!(model.mode == .scene && model.document?.selectedItem != nil))
             Divider()
             // Scene layers (docs/intents/2026-10-scene-layers/spec.md, D9, D10).
             Button("Group") { Task { await model.layers.group() } }

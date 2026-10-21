@@ -7,6 +7,7 @@ It's built CLI first: every action is a command in one registry, reachable three
 - **Pixel Lab.app**: a SwiftUI app (board 03, "Field notebook", night and day).
 - **`pixellab`**: a zero-dependency Node CLI (`pixellab scene place hero-island pine --at 14,6,1`), which is also the pixel-art engine and compiler, exported as the `pixellab` package.
 - **`pixellab serve --mcp`**: an MCP server for Claude Code and other agents. Agents' saves become **proposals** you approve in the app.
+- **The Agent chat**: Claude, in a tab beside the inspector, running on your own Claude Code install and plan, with what you select on the stage going along with your message.
 
 The document is the source of truth: the engine in this repo validates and serializes every write into the document's `.mjs` sources, and nothing touches a site until you publish. The site keeps its document next to the SVGs it compiles to, and installs this package to check its art.
 
@@ -18,6 +19,7 @@ The document is the source of truth: the engine in this repo validates and seria
 - Node.js 22 or later (`node` on your shell's PATH, in `/opt/homebrew/bin` or `/usr/local/bin`, or set in Settings). The app runs its CLI with it; you never type `npm`.
 - A `.pixellab` document. With none chosen, Pixel Lab opens the one in `~/Projects/jlawcordova.github.io` when that checkout is there (or its older `source/` folder); File › New Document… makes one anywhere.
 - To build: the Xcode Command Line Tools (Swift 6). Full Xcode isn't needed.
+- For the Agent chat (optional): [Claude Code](https://claude.com/claude-code), signed in with your Claude plan. The Agent tab can install it and sign you in.
 
 ## Install
 
@@ -84,7 +86,19 @@ It reopens the last scene or object you had open, else the hero island. The wind
 
 ![The Publish sheet](docs/screenshots/document-publish-dark.png)
 
-**Agent window.** Window › Agent or View › Show Agent (⌥⌘A). It shows the `claude mcp add` command to copy, the live activity feed of every MCP tool call ("listed 15 scenes", "rendered hero-island at 2×", "pine placed at x -48, y 92"), and the agents' **proposals**. Select one to see its edits and a diff against the file as it is now, ghosted on the stage (added and moved items outlined in gold, following the timeline when it plays). Approve (⌘↩) writes it, and merges it into your open copy if it has unsaved edits; Reject (⌫) deletes it. The Dock icon and the toolbar's sparkle show how many proposals wait.
+**The Agent chat.** The right column has two tabs, **Inspector** and **✦ Agent**; the toolbar's sparkle, Window › Agent (⌥⌘A) and the Inspector's **Ask Claude about this** open the Agent tab. It runs the Claude Code installed on your Mac, signed in the way it already is, so it uses your Claude plan (Pixel Lab adds no API key and bundles none of Claude Code). Claude can only use Pixel Lab's tools on the open document: no shell, no file edits, none of your own Claude Code settings, hooks or other MCP servers.
+
+- **Setup.** The first time, the tab finds `claude` in `~/.local/bin`, Homebrew or your shell's PATH. If it isn't there, **Install Claude Code** runs Anthropic's installer (`curl -fsSL https://claude.ai/install.sh | bash`, shown before it runs; or copy it for Terminal, or choose the `claude` command yourself). **Sign in with browser** runs Claude Code's own sign-in (`claude auth login`) and waits until `claude auth status` says you're in. Sign out (the Chats list, the Agent window) signs Claude Code out on this Mac, Terminal included.
+- **Context.** What you select comes with your message: a click on the stage picks a layer first, a double-click goes inside it, ⇧-click adds, and ⌥-click selects every use of the object under the pointer (Edit › Select Every Use does it for the selected item). Each layer or item shows as a chip above the input, a layer with its item count; ✕ removes it and the pin keeps it in this chat while you select something else. **What Claude receives** shows the `<selection>` block sent with the message: the document, the scene and the saved file's version, each group with its items, each item with its object, position and group. Claude reads the saved document, so anything you haven't saved is left out: its chip turns dashed gold, and **Save now** saves it.
+- **Asking.** The placeholder suggests something that fits the selection ("Raise them a level", "Make these taller", "What are these?"); Tab takes it while the input is empty. Return sends, ⇧Return adds a line, Stop (or Esc) ends a turn. Claude's tool calls read as sentences ("Moved pine 14.0 one tile down-right"), folded into one line you can open; **Details** shows the raw call under each. Item and group names in its replies are links that select them. When it needs you to choose, it asks with buttons.
+- **Proposals.** What Claude changes is a proposal, never a write. It shows as a card in the chat (Approve, Reject, Show/Hide on stage, Diff in the Agent window), ghosts on the stage with a banner ("Previewing proposal #3 from the chat …") and waits in the Agent window with the rest. Ghosts show for the chat you're in.
+- **Chats.** ‹ Chats lists them, newest first, with their last message, pins and waiting proposals; each keeps its own Claude conversation, pins and history in the state folder (`chats/`), across launches, per document. New chat starts another; a chat is titled by its first message.
+
+![The Agent tab: a chat with steps, a proposal card and the context](docs/screenshots/chat-turn-dark.png)
+
+![The context: a group chip, a pinned item, and what Claude receives](docs/screenshots/chat-context-dark.png)
+
+**Agent window.** Window › Agent Window (⇧⌥⌘A), or the links in the Agent tab. It shows Claude Code's status (version, signed in, how many chats, Open chats, Sign out), the `claude mcp add` command to connect an agent from a terminal, the live activity feed of every MCP tool call ("listed 15 scenes", "rendered hero-island at 2×", "pine placed at x -48, y 92"), filtered by All, Chats or Errors, and every **proposal**, numbered (#3) and marked with where it came from: a chat (with "From the chat … asked about …" and Open the chat) or the terminal agent. Select one to see its edits and a diff against the file as it is now, ghosted on the stage (added and moved items outlined in gold, following the timeline when it plays). Approve (⌘↩) writes it, and merges it into your open copy if it has unsaved edits; Reject (⌫) deletes it. The Dock icon and the toolbar's sparkle show how many proposals wait.
 
 ![The Agent window](docs/screenshots/final-agent-dark.png)
 
@@ -117,7 +131,10 @@ It reopens the last scene or object you had open, else the hero island. The wind
 | ⌘N / ⇧⌘N | New Scene / New Object |
 | ⌥⌘N / ⌘O | New Document… / Open Document… |
 | ⌥⌘I | Show or hide the inspector |
-| ⌥⌘A | Show the Agent window |
+| ⌥⌘A | The Agent tab (the chat) |
+| ⇧⌥⌘A | The Agent window (proposals and activity) |
+| ⌥-click (stage) | Select every use of the object under the pointer (⇧⌥ adds them) |
+| Tab, Return, ⇧Return, Esc | Agent tab input: take the suggestion (while empty), send, add a line, stop |
 | ↑ / ↓, ⌘↩, ⌫, Esc | Agent window: previous / next proposal, Approve, Reject, hide the ghost |
 
 ## The CLI
@@ -164,6 +181,12 @@ Tools are the commands with `.` → `_` (`scene_place`, `object_paint`, `scene_r
 
 Every tool call is logged to `activity.jsonl` in the same folder and shown in the Agent window. `PIXELLAB_STATE` moves the state folder.
 
+## The Agent chat and Claude Code
+
+**Your Claude plan and its terms.** The Agent chat is for your own use of your own Claude Code install: Pixel Lab starts `claude` the way a terminal would, signed in with your account, and every message counts toward your plan's limits. If Pixel Lab is ever shipped to others, each person needs their own Claude Code install and login, and Anthropic's current terms (the Consumer Terms, the Usage Policy, and its guidance on using Claude subscriptions in other products) should be checked again first.
+
+**Verify the chat with your real Claude Code.** The tests use a stand-in (`scripts/fake-claude/`), so after installing, open the Agent tab once with your own Claude Code: sign in if it asks, select two items and send "What are these?". A reply with the item names as links, and its steps above it, means the real CLI's stream reads the way the app expects.
+
 ## Troubleshooting
 
 - **"Pixel Lab needs Node.js 22…" / node not found.** The app looks in Settings, then your login shell's `command -v node`, then `/opt/homebrew/bin` and `/usr/local/bin`. Install Node 22+ (e.g. `brew install node`), or set its path in Settings › Node.js and Try Again.
@@ -171,6 +194,7 @@ Every tool call is logged to `activity.jsonl` in the same folder and shown in th
 - **Publish fails or is refused.** Nothing is written when a source has a problem: the sheet lists them (so does the Checks panel), fix them and publish again. An output over its budget is written and flagged; make the art smaller or raise its budget in `manifest.json`. A document whose manifest names no publish folder asks for one. Unsaved docs aren't in a publish; save first.
 - **"The file changed on disk" when saving.** Someone (git, another editor, an approved proposal) changed the source while you had unsaved edits, and you chose Keep Mine (or hadn't seen the bar). Merge brings the file's change into your copy and keeps your edits; Revert loads the file; Save Anyway overwrites it.
 - **A proposal's base changed.** The file changed since the agent opened it. Approve asks whether to apply anyway (overwriting those changes) or reject; the diff shows what would change against the file as it is now.
+- **The Agent tab says Claude Code isn't installed, or keeps asking to sign in.** It looks in `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and your login shell's PATH; choose the command if it's elsewhere. Check `claude auth status` in Terminal: the chat uses the same login. If the browser sign-in doesn't finish (Claude Code asks for a code in the terminal), run `claude auth login` in Terminal and press Check again. A turn that stops with "Pixel Lab's tools didn't start" means the bundled CLI couldn't run: check Node.js in Settings.
 - **The app won't open the first time.** It's ad-hoc signed; Control-click › Open, or allow it in System Settings › Privacy & Security (Open Anyway, which a downloaded release always needs).
 
 ## Development

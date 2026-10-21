@@ -363,14 +363,18 @@ final class ChatModel {
         chatSwitched()
     }
 
-    /// Ghosts show only for the chat you're in (D7); PR 3 hides another chat's.
-    func chatSwitched() {}
+    /// Ghosts show only for the chat you're in (D7): another chat's ghost goes when you switch.
+    func chatSwitched() {
+        guard let agent = app?.agent, let p = agent.selected, let from = p.chat else { return }
+        if showingList || from.id != currentID { agent.setGhostShown(false) }
+    }
 
     /// Changes a chat (the draft or a saved one) and saves it; a draft with a message becomes a saved chat.
     func update(_ id: String, save: Bool = true, _ change: (inout Chat) -> Void) {
         if var d = draftChat, d.id == id {
             change(&d)
-            if d.messages.isEmpty {
+            // A new chat is kept once it has a message or a pin.
+            if d.messages.isEmpty, d.pins.isEmpty {
                 draftChat = d
                 return
             }
@@ -422,33 +426,132 @@ final class ChatModel {
         startTurn(chatID: id, text: text, block: context.block)
     }
 
-    /// The selection block and the chips the message shows (D5). PR 3 adds pins and the unsaved chips.
+    /// The selection block and the chips the message shows (D5): fetched fresh, so it's what's selected now.
     func messageContext() async -> (block: String, chips: [String]) {
-        guard let app, let doc = app.document, let connection = app.connection else { return ("", []) }
-        if doc.ref.kind == .object {
-            let r: ChatContextResult? = try? await connection.call("chat.context", ["object": .string(doc.ref.name)])
-            return (r?.text ?? "", [])
-        }
-        let targets = doc.selection
-        let params: [String: JSONValue] = [
-            "name": .string(doc.ref.name),
-            "layers": .array(targets.compactMap(\.layerID).map { .string($0) }),
-            "items": .array(targets.compactMap(\.itemPath).map { .string($0) }),
-        ]
-        let r: ChatContextResult? = try? await connection.call("chat.context", params)
-        let unsaved = Set(r?.unsaved ?? [])
-        let chips = targets.map { t in chipLabel(t, doc: doc) + (unsaved.contains(t.description) ? " (not sent)" : "") }
-        return (r?.text ?? "", chips)
+        await refreshContext(force: true)
+        return (context?.text ?? "", chips.map(ChatContext.messageLabel))
     }
 
-    /// "pine 14.0", "Boats · 12 items".
-    func chipLabel(_ t: LayerTarget, doc: DocumentModel) -> String {
-        switch t {
-        case .layer(let id):
-            let n = doc.layerTree.paths(of: t).count
-            return "\(doc.layerTree.name(of: id)) · \(n) item\(n == 1 ? "" : "s")"
-        case .item(let p):
-            return "\(doc.itemsByPath[p]?.object ?? "item") \(p)"
+    // MARK: Context: chips, pins and the block (D5)
+
+    /// The last `chat.context` for what's selected and pinned, and what it was asked for.
+    var context: ChatContextResult?
+    @ObservationIgnored private var contextKey: String?
+    @ObservationIgnored private var contextLoading = false
+    @ObservationIgnored private var contextAgain = false
+
+    /// The open chat's pins on the open scene.
+    var pins: [LayerTarget] {
+        guard let doc = app?.document, doc.ref.kind == .scene else { return [] }
+        return (current?.pins ?? []).filter { $0.doc == doc.ref.id }.compactMap { LayerTarget(spec: $0.target) }
+    }
+
+    /// The chips: pins, then the selection.
+    var chips: [ChatChip] {
+        guard let doc = app?.document, doc.ref.kind == .scene else { return [] }
+        return ChatContext.chips(selection: doc.selection, pins: pins, tree: doc.layerTree, items: doc.itemsByPath, unsaved: Set(context?.unsaved ?? []))
+    }
+
+    /// What `chat.context` should be asked for now; a change means fetching it again.
+    var wantedContextKey: String {
+        guard let doc = app?.document else { return "" }
+        if doc.ref.kind == .object { return "object:\(doc.ref.name)|\(doc.isDirty)" }
+        let targets = pins + doc.selection.filter { !pins.contains($0) }
+        return "\(doc.ref.id)|\(targets.map(\.description).joined(separator: ","))|\(pins.map(\.description).joined(separator: ","))|\(doc.isDirty)|\(doc.items.hashValue)"
+    }
+
+    /// Fetches the block again when what it's for changed (coalesced, like the stage's render).
+    func refreshContext(force: Bool = false) async {
+        guard let app, let doc = app.document, let connection = app.connection else { context = nil; return }
+        let key = wantedContextKey
+        if !force, key == contextKey { return }
+        if contextLoading, !force {
+            contextAgain = true
+            return
+        }
+        contextLoading = true
+        defer { contextLoading = false }
+        repeat {
+            contextAgain = false
+            let key = wantedContextKey
+            var params: [String: JSONValue]
+            if doc.ref.kind == .object {
+                params = ["object": .string(doc.ref.name)]
+            } else {
+                let pinned = pins
+                let targets = pinned + doc.selection.filter { !pinned.contains($0) }
+                params = [
+                    "name": .string(doc.ref.name),
+                    "layers": .array(targets.compactMap(\.layerID).filter { doc.layerTree.byID[$0] != nil }.map { .string($0) }),
+                    "items": .array(targets.compactMap(\.itemPath).filter { doc.itemsByPath[$0] != nil }.map { .string($0) }),
+                    "pinned": .array(pinned.map { .string($0.description) }),
+                ]
+            }
+            if let r: ChatContextResult = try? await connection.call("chat.context", params), app.document === doc {
+                context = r
+                contextKey = key
+            }
+        } while contextAgain && app.document === doc
+    }
+
+    /// The chips left out of the block, as "pine 216.0" and "Boats".
+    var unsavedNames: [String] {
+        chips.filter(\.unsaved).map { $0.target.layerID != nil ? $0.label : "\($0.label) \($0.target.description)" }
+    }
+
+    /// The pin button: pins a selected target to the open chat, or unpins it.
+    func togglePin(_ t: LayerTarget) {
+        guard let id = currentID, let doc = app?.document, doc.ref.kind == .scene else { return }
+        let spec = t.description
+        update(id) { c in
+            if let i = c.pins.firstIndex(where: { $0.doc == doc.ref.id && $0.target == spec }) {
+                c.pins.remove(at: i)
+            } else {
+                c.pins.append(ChatPin(doc: doc.ref.id, target: spec, object: t.itemPath.flatMap { doc.itemsByPath[$0]?.object }))
+            }
+        }
+        app?.editor.announce(pins.contains(t) ? "Pinned to this chat" : "Unpinned")
+    }
+
+    /// The remove button: unpins it and takes it out of the selection.
+    func removeChip(_ t: LayerTarget) {
+        if pins.contains(t) { togglePin(t) }
+        guard let app, let doc = app.document, doc.selection.contains(t) else { return }
+        app.layers.select(doc.selection.filter { $0 != t }, reveal: false)
+    }
+
+    /// Save now (the unsaved warning): saves the open doc, so the block can name what was left out.
+    func saveNow() async {
+        guard let app else { return }
+        if await app.save() { note(app.lastEdit ?? "Saved") }
+        await refreshContext(force: true)
+    }
+
+    /// An edit put the items in depth order and moved some (old path → new): pins follow their items.
+    func followSort(_ reordered: [String: String]) {
+        guard let ref = app?.document?.ref.id, !reordered.isEmpty else { return }
+        for c in chats where c.pins.contains(where: { $0.doc == ref && reordered[$0.target] != nil }) {
+            update(c.id) { chat in
+                for i in chat.pins.indices where chat.pins[i].doc == ref {
+                    if let to = reordered[chat.pins[i].target] { chat.pins[i].target = to }
+                }
+            }
+        }
+    }
+
+    /// The scene's items came back: a pinned item whose path now holds another object, or nothing, is unpinned.
+    func itemsChanged() {
+        guard let app, let doc = app.document, doc.ref.kind == .scene, doc.itemsLoaded, app.layers.itemsCurrent else { return }
+        let ref = doc.ref.id
+        for c in chats {
+            let gone = c.pins.filter { p in
+                guard p.doc == ref else { return false }
+                if let t = LayerTarget(spec: p.target), case .layer(let id) = t { return doc.layerTree.byID[id] == nil }
+                return doc.itemsByPath[p.target]?.object != p.object
+            }
+            guard !gone.isEmpty else { continue }
+            update(c.id) { chat in chat.pins.removeAll { gone.contains($0) } }
+            for p in gone { note("Unpinned \(p.object.map { "\($0) " } ?? "")\(p.target): it moved or was removed", in: c.id) }
         }
     }
 
@@ -612,8 +715,106 @@ final class ChatModel {
         return m
     }
 
-    /// A turn made a proposal: PR 3 selects it with its ghost in the open chat.
-    func proposalMade(_ m: ChatMessage, chatID: String) {}
+    /// A turn made a proposal: in the open chat, it's selected with its ghost on (D7).
+    func proposalMade(_ m: ChatMessage, chatID: String) {
+        guard let id = m.proposal, let agent = app?.agent else { return }
+        Task {
+            await agent.refreshList()
+            guard chatID == currentID, !showingList, agent.proposals.contains(where: { $0.id == id }) else { return }
+            agent.select(id)
+            agent.setGhostShown(true)
+        }
+    }
+
+    /// The proposals listed now: a card whose proposal was listed and is gone was settled elsewhere.
+    @ObservationIgnored private var seenProposals = Set<String>()
+
+    func proposalsListed(_ ids: [String]) {
+        let now = Set(ids)
+        let gone = seenProposals.subtracting(now)
+        seenProposals.formUnion(now)
+        guard !gone.isEmpty else { return }
+        for c in chats where c.messages.contains(where: { $0.kind == .proposal && $0.outcome == nil && gone.contains($0.proposal ?? "") }) {
+            update(c.id) { chat in
+                for i in chat.messages.indices where chat.messages[i].kind == .proposal && chat.messages[i].outcome == nil && gone.contains(chat.messages[i].proposal ?? "") {
+                    chat.messages[i].outcome = "elsewhere"
+                }
+            }
+        }
+        seenProposals.subtract(gone)
+    }
+
+    /// Approved or rejected here (a card, the banner or the Agent window): the card says so, with a note.
+    func proposalSettled(_ id: String, applied: Bool, detail: String) {
+        seenProposals.remove(id)
+        for c in chats {
+            guard let m = c.messages.first(where: { $0.kind == .proposal && $0.proposal == id }) else { continue }
+            update(c.id) { chat in
+                if let i = chat.messages.firstIndex(where: { $0.id == m.id }) { chat.messages[i].outcome = applied ? "applied" : "rejected" }
+            }
+            note("You \(applied ? "approved" : "rejected") \(m.number.map { "#\($0)" } ?? "the proposal") · \(detail)", in: c.id)
+        }
+    }
+
+    // MARK: Card actions (R16)
+
+    /// Whether a card's proposal is the one ghosted on the stage.
+    func ghostOn(_ m: ChatMessage) -> Bool { app?.agent.visibleGhost?.proposalID == m.proposal && m.proposal != nil }
+
+    /// Selects a card's proposal in the Agent model (as the Agent window would).
+    private func selectProposal(_ m: ChatMessage) async -> Bool {
+        guard let id = m.proposal, let agent = app?.agent else { return false }
+        if !agent.proposals.contains(where: { $0.id == id }) { await agent.refreshList() }
+        guard agent.proposals.contains(where: { $0.id == id }) else { return false }
+        agent.select(id)
+        return true
+    }
+
+    func approve(_ m: ChatMessage) async {
+        guard await selectProposal(m) else { return }
+        await app?.agent.approve()
+    }
+
+    func reject(_ m: ChatMessage) async {
+        guard await selectProposal(m) else { return }
+        await app?.agent.reject()
+    }
+
+    /// Show on stage / Hide on stage.
+    func toggleGhost(_ m: ChatMessage) async {
+        guard let agent = app?.agent else { return }
+        if ghostOn(m) {
+            agent.setGhostShown(false)
+            return
+        }
+        guard await selectProposal(m) else { return }
+        if let ref = agent.selected?.ref, app?.document?.ref != ref { await agent.openInEditor() } else { agent.setGhostShown(true) }
+    }
+
+    /// Diff in the Agent window.
+    func showDiff(_ m: ChatMessage) async {
+        _ = await selectProposal(m)
+        app?.agent.showWindow()
+    }
+
+    /// The Agent window's Open the chat: the chat a proposal came from, in the Agent tab.
+    func openChat(forProposal p: ProposalSummary) {
+        guard let id = p.chat?.id, chats.contains(where: { $0.id == id }) else { return }
+        app?.showAgentTab()
+        open(id)
+        app?.mainWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    /// What the owner had selected when they asked for a proposal: the chips of the message before its card.
+    func askedAbout(_ proposalID: String) -> String? {
+        for c in chats {
+            guard let i = c.messages.firstIndex(where: { $0.kind == .proposal && $0.proposal == proposalID }) else { continue }
+            let chips = c.messages[..<i].last(where: { $0.kind == .user })?.chips ?? []
+            guard !chips.isEmpty else { return nil }
+            return chips.count <= 2 ? chips.joined(separator: " and ") : chips.prefix(2).joined(separator: ", ") + " and \(chips.count - 2) more"
+        }
+        return nil
+    }
 
     private func finish(status: Int32) {
         flushCards()
@@ -660,8 +861,17 @@ final class ChatModel {
         return url.path.hasPrefix(home) ? "~/" + url.path.dropFirst(home.count) : url.path
     }
 
-    /// The suggestion in the placeholder (R18); PR 3 makes it fit the selection.
-    var suggestion: String? { nil }
+    /// The suggestion in the placeholder (R18): it fits the saved chips, and skips what this chat already asked.
+    var suggestion: String? {
+        guard let app, let doc = app.document, doc.ref.kind == .scene else { return nil }
+        var objects: [String] = []
+        for c in chips where !c.unsaved {
+            objects += doc.layerTree.paths(of: c.target).compactMap { doc.itemsByPath[$0]?.object }
+        }
+        let blocks = Set(app.objects.filter { $0.kind == "block" }.map(\.name))
+        let asked = (current?.messages ?? []).filter { $0.kind == .user }.compactMap(\.text)
+        return ChatContext.suggestion(objects: objects, isBlock: { blocks.contains($0) }, asked: asked)
+    }
 
     /// What the empty input shows: the suggestion, else why it can't send, else a hint.
     var placeholder: String {
@@ -674,8 +884,7 @@ final class ChatModel {
     var contextSummary: String {
         guard let doc = app?.document else { return "" }
         if doc.ref.kind == .object { return "The whole object" }
-        let n = doc.selection.count
-        return n == 0 ? "The whole scene" : "\(n) selected"
+        return ChatContext.countLine(chips)
     }
 
     /// The document a chat belongs to, by name (its folder's, without .pixellab).
@@ -711,7 +920,7 @@ final class ChatModel {
         case "applied": return "Applied"
         case "rejected": return "Rejected"
         case "elsewhere": return "Settled elsewhere"
-        default: return (app?.agent.proposals.contains { $0.id == m.proposal } ?? false) ? "Waiting for you" : "Settled elsewhere"
+        default: return "Waiting for you"
         }
     }
 

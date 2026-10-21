@@ -199,6 +199,14 @@ struct LayerTree: Sendable, Equatable {
         return !chain[from...].contains { locked.contains($0) }
     }
 
+    /// Every use of an object that a click could reach where you are, as items
+    /// (docs/intents/2026-10-agent-chat/spec.md, D6): within the layer you're
+    /// in, drawn, and in no locked layer below it; even where a click would pick
+    /// their layer, since "every use" is about items. In paint order.
+    func everyUse(of object: String, items: [SceneItemInfo], inside: String?, hidden: Set<String>, locked: Set<String>) -> [String] {
+        items.filter { $0.object == object && pickable($0.path, inside: inside, locked: locked) && !isHidden($0.path, hidden: hidden) }.map(\.path)
+    }
+
     /// Whether an item draws: no layer holding it is hidden.
     func isHidden(_ path: String, hidden: Set<String>) -> Bool {
         chain(ofItem: path).contains { hidden.contains($0) }

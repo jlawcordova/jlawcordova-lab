@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// The Agent window (Window › Agent, View › Show Agent, ⌥⌘A): how to connect
+/// The Agent window (Window › Agent Window, ⇧⌥⌘A): Claude Code's status (the Agent tab's chat), how to connect
 /// an agent over MCP, the PROPOSALS it saved (the edits, a diff, Approve and
 /// Reject, the ghost on the main window's stage) and the live ACTIVITY feed
 /// of its tool calls. Board 03, night and day.
@@ -76,6 +76,7 @@ struct AgentHeader: View {
                 }
             }
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+                ClaudeCodeRow()
                 GridRow {
                     SectionLabel(title: "Connect").gridColumnAlignment(.leading)
                     CodeChip(text: agent.mcpCommand)
@@ -101,7 +102,7 @@ struct AgentHeader: View {
                     .accessibilityLabel("Reveal the state folder in the Finder")
                 }
             }
-            Text("Agents edit in their own session. Their saves land here as proposals; the site changes only when you approve.")
+            Text("Chats in the main window and agents you connect from a terminal both save here as proposals. The document changes only when you approve.")
                 .font(.callout)
                 .foregroundStyle(Theme.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -109,6 +110,42 @@ struct AgentHeader: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
         .background(Theme.hero)
+    }
+}
+
+/// CLAUDE CODE (docs/intents/2026-10-agent-chat/spec.md, R20): its version and sign-in, how many
+/// chats, Open chats and Sign out (or Set up).
+struct ClaudeCodeRow: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let chat = model.chat
+        let n = chat.documentChats.filter { !$0.messages.isEmpty }.count
+        GridRow {
+            SectionLabel(title: "Claude Code")
+            HStack(spacing: 8) {
+                Circle().fill(chat.setup == .ready ? Theme.accent : Theme.gold).frame(width: 7, height: 7).accessibilityHidden(true)
+                Text(chat.setup == .ready ? "\(chat.install?.version ?? "") · signed in with your plan · \(n) chat\(n == 1 ? "" : "s")" : chat.statusLine)
+                    .font(.system(size: 12)).foregroundStyle(Theme.ink).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+            .accessibilityElement(children: .combine)
+            HStack(spacing: 6) {
+                Button(chat.setup == .ready ? "Open chats" : "Set up") {
+                    model.showAgentTab()
+                    if chat.setup == .ready { chat.showList() }
+                }
+                .help("The Agent tab in the main window (⌥⌘A)")
+                if chat.setup == .ready {
+                    Button("Sign out") { Task { await chat.signOut() } }
+                }
+            }
+        }
+        .onAppear { chat.start() }
     }
 }
 
@@ -206,9 +243,15 @@ struct ProposalRow: View {
                     .frame(width: 18)
                     .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(proposal.ref?.name ?? proposal.doc).font(Theme.nameFont(13)).foregroundStyle(Theme.ink).lineLimit(1)
-                    Text("\(proposal.agentName) · \(proposal.editsLabel)")
-                        .font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(1)
+                    HStack(spacing: 5) {
+                        if proposal.number != nil { Text(proposal.numberLabel).font(Theme.monoFont(11)).foregroundStyle(Theme.inkMuted) }
+                        Text(proposal.ref?.name ?? proposal.doc).font(Theme.nameFont(13)).foregroundStyle(Theme.ink).lineLimit(1)
+                    }
+                    HStack(spacing: 5) {
+                        if proposal.chat != nil { ClaudeAvatar(size: 14) }
+                        Text(proposal.source).font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(1)
+                    }
+                    Text(proposal.editsLabel).font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(1)
                 }
                 Spacer(minLength: 4)
                 VStack(alignment: .trailing, spacing: 3) {
@@ -226,7 +269,7 @@ struct ProposalRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(proposal.ref?.kind.rawValue ?? "doc") \(proposal.ref?.name ?? proposal.doc), from \(proposal.agentName), \(proposal.editsLabel), \(AgentTime.short(proposal.createdAt))\(proposal.baseMatches ? "" : ", the file changed since")")
+        .accessibilityLabel("\(proposal.numberLabel) \(proposal.ref?.kind.rawValue ?? "doc") \(proposal.ref?.name ?? proposal.doc), from \(proposal.source), \(proposal.editsLabel), \(AgentTime.short(proposal.createdAt))\(proposal.baseMatches ? "" : ", the file changed since")")
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 }
@@ -243,8 +286,9 @@ struct ProposalDetailView: View {
                     Text(p.ref?.name ?? p.doc).font(Theme.nameFont(16)).lineLimit(1)
                     Text(p.ref?.kind.rawValue ?? "").font(.callout).foregroundStyle(Theme.inkMuted)
                     Spacer()
-                    Text("\(p.agentName) · \(AgentTime.short(p.createdAt))").font(.callout).foregroundStyle(Theme.inkMuted).lineLimit(1)
+                    Text("\(p.numberLabel.isEmpty ? "" : "\(p.numberLabel) · ")\(p.source) · \(AgentTime.short(p.createdAt))").font(.callout).foregroundStyle(Theme.inkMuted).lineLimit(1)
                 }
+                if let c = p.chat { chatLine(p, c) }
                 baseStatus(p)
                 VStack(alignment: .leading, spacing: 5) {
                     SectionLabel(title: "Edits")
@@ -294,6 +338,22 @@ struct ProposalDetailView: View {
             }
             .foregroundStyle(Theme.ink)
         }
+    }
+
+    /// From the chat “…”, asked about …. Open the chat (spec R21).
+    private func chatLine(_ p: ProposalSummary, _ c: ProposalChat) -> some View {
+        HStack(spacing: 6) {
+            ClaudeAvatar(size: 16)
+            (Text("From the chat ") + Text("“\(c.title)”").bold() + Text(model.chat.askedAbout(p.id).map { ", asked about \($0)." } ?? "."))
+                .font(.system(size: 12)).foregroundStyle(Theme.ink).lineLimit(2)
+            Spacer(minLength: 4)
+            Button("Open the chat") { model.chat.openChat(forProposal: p) }
+                .buttonStyle(AccentLinkStyle())
+                .disabled(!model.chat.chats.contains { $0.id == c.id })
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityElement(children: .contain)
     }
 
     private func baseStatus(_ p: ProposalSummary) -> some View {
@@ -449,14 +509,15 @@ struct ActivitySection: View {
                 SectionLabel(title: "Activity")
                 Text("\(rows.count)").font(Theme.monoFont(11)).foregroundStyle(Theme.inkMuted)
                 Spacer()
-                Picker("Show", selection: Binding(get: { agent.errorsOnly }, set: { agent.errorsOnly = $0 })) {
-                    Text("All").tag(false)
-                    Text("Errors").tag(true)
+                Picker("Show", selection: Binding(get: { agent.filter }, set: { agent.filter = $0 })) {
+                    Text("All").tag(AgentModel.ActivityFilter.all)
+                    Text("Chats").tag(AgentModel.ActivityFilter.chats)
+                    Text("Errors").tag(AgentModel.ActivityFilter.errors)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 140)
-                .help("Show every tool call, or only the ones that failed")
+                .frame(width: 200)
+                .help("Show every tool call, the Agent chat's, or only the ones that failed")
                 Button {
                     agent.clearActivity()
                 } label: {
@@ -468,7 +529,7 @@ struct ActivitySection: View {
             .padding(.horizontal, 14)
             .padding(.top, 10)
             if rows.isEmpty {
-                Text(agent.errorsOnly ? "No failed tool calls." : "No tool calls yet. Every MCP tool call an agent makes shows here as it happens.")
+                Text(agent.filter == .errors ? "No failed tool calls." : agent.filter == .chats ? "No tool calls from chats yet." : "No tool calls yet. Every MCP tool call an agent makes shows here as it happens.")
                     .font(.callout)
                     .foregroundStyle(Theme.inkMuted)
                     .padding(.horizontal, 14)
@@ -505,7 +566,8 @@ struct ActivityRowView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(e.ok ? Theme.inkMuted : Theme.gold)
                 .frame(width: 14)
-            Text(e.tool).font(Theme.monoFont(11)).foregroundStyle(Theme.ink).lineLimit(1).frame(width: 150, alignment: .leading)
+            Text(e.tool).font(Theme.monoFont(11)).foregroundStyle(Theme.ink).lineLimit(1).frame(width: 130, alignment: .leading)
+            Text(e.who).font(.system(size: 12)).foregroundStyle(Theme.inkMuted).lineLimit(1).truncationMode(.tail).frame(width: 150, alignment: .leading)
             Text(e.summary ?? "").font(.system(size: 12)).foregroundStyle(e.ok ? Theme.inkMuted : Theme.ink).lineLimit(1).truncationMode(.tail)
             Spacer(minLength: 0)
         }
@@ -513,6 +575,6 @@ struct ActivityRowView: View {
         .padding(.vertical, 4)
         .help(e.summary ?? "")
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(row.clock), \(e.tool), \(e.ok ? "ok" : "failed"): \(e.summary ?? "")")
+        .accessibilityLabel("\(row.clock), \(e.tool)\(e.who.isEmpty ? "" : " by \(e.who)"), \(e.ok ? "ok" : "failed"): \(e.summary ?? "")")
     }
 }
