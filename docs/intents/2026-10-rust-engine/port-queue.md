@@ -23,7 +23,7 @@ A unit's checks: `cargo fmt --check`, `cargo test` for its crate, its ported sui
 | U13 | `document.mjs` → `document.rs` (resolution, manifest, R9's problem) | `document.test.mjs` | U10 | S | merged |
 | U14 | `session.mjs`, `open-docs.mjs`, `context.mjs` | `sync.test.mjs` | U3, U6, U12, U13 | O | waiting |
 | U15 | `merge.mjs`, `diff.mjs` | `merge.test.mjs` | U3 | O | merged |
-| U16 | `watch.mjs` → `watch.rs` (polling, D2) | its cases in `sync.test.mjs` | U13 | S | waiting |
+| U16 | `watch.mjs` → `watch.rs` (polling, D2) | its cases in `sync.test.mjs` | U13 | S | merged |
 | U17 | `scene-ops.mjs` | `scene-ops.test.mjs`, `groups.test.mjs` | U3, U4 | S | waiting |
 | U18 | `layer-ops.mjs` | `layers.test.mjs` | U17 | S | waiting |
 | U19 | `motion-ops.mjs` | `motion-commands.test.mjs` | U5 | S | merged |
