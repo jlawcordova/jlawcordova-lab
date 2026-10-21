@@ -21,6 +21,7 @@ import Foundation
 ///     undo redo save [force] revert publish [<dir>] done   saveas <path.pixellab>
 ///     time <ms>  play  pause  tracks on|off   zoom fit|1-4   sidebar library|items
 ///     search <text>   wait <ms>   snapshot <file.png>   log <text>
+///     settings open|close   snapshot settings <file.png>   (the Settings window)
 ///     cli <args…>  (the bundled program on the script's document: an outside edit to the files)
 ///     stale merge|reload|keep     (the changed-on-disk banner's buttons)
 ///     expect dirty|selected|object|at|items|problems|build|outputs|publishdir|document|tool|time <value>
@@ -514,12 +515,30 @@ final class ScriptRunner {
             return nil
         case "log":
             return words.dropFirst().joined(separator: " ")
+        case "settings":
+            // The Settings window (⌘,): `settings open` shows it, `settings close` hides it.
+            switch try arg(words, 1) {
+            case "open":
+                // The app menu's Settings… item (⌘,), as a click would.
+                let item = NSApp.mainMenu?.items.first?.submenu?.items.first { $0.keyEquivalent == "," }
+                if let item, let action = item.action { NSApp.sendAction(action, to: item.target, from: item) }
+                try? await Task.sleep(for: .milliseconds(500))
+                guard Self.settingsWindow() != nil else {
+                    throw Failure("the Settings window didn't open (windows: \(NSApp.windows.map { "\($0.title)|\($0.identifier?.rawValue ?? "")|\($0.isVisible)" }.joined(separator: ", ")))")
+                }
+            case "close": Self.settingsWindow()?.close()
+            default: throw Failure("settings open|close")
+            }
+            return nil
         case "snapshot":
             let agentWindow = words.count > 2 && words[1] == "agent"
-            let out = URL(fileURLWithPath: NSString(string: try arg(words, agentWindow ? 2 : 1)).expandingTildeInPath)
+            let settingsWindow = words.count > 2 && words[1] == "settings"
+            let out = URL(fileURLWithPath: NSString(string: try arg(words, agentWindow || settingsWindow ? 2 : 1)).expandingTildeInPath)
             try? await Task.sleep(for: .milliseconds(300))
-            let window = agentWindow ? model.agent.window.flatMap { $0.isVisible ? $0 : nil } : Snapshotter.mainWindow()
-            guard let window, Snapshotter.capture(window, to: out) else { throw Failure(agentWindow ? "no Agent window (agent open first)" : "couldn't capture") }
+            let window = agentWindow ? model.agent.window.flatMap { $0.isVisible ? $0 : nil } : settingsWindow ? Self.settingsWindow() : Snapshotter.mainWindow()
+            guard let window, Snapshotter.capture(window, to: out) else {
+                throw Failure(agentWindow ? "no Agent window (agent open first)" : settingsWindow ? "no Settings window (settings open first)" : "couldn't capture")
+            }
             return out.path
         case "migrate":
             // The setup screen's Migrate… button: the alert comes up (`answer migrate|cancel` settles it).
@@ -1181,6 +1200,11 @@ final class ScriptRunner {
         default:
             throw Failure("unknown action \(words[0])")
         }
+    }
+
+    /// The Settings window, when it is up.
+    static func settingsWindow() -> NSWindow? {
+        NSApp.windows.first { $0.isVisible && ($0.identifier?.rawValue.lowercased().contains("settings") == true || $0.title == "Settings" || $0.title.hasSuffix(" Settings")) }
     }
 
     /// Waits for a stroke's paint calls to be answered (at most 10 s).

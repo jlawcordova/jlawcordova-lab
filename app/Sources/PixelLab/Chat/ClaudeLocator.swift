@@ -88,7 +88,9 @@ enum ClaudeLocator {
     /// `claude`'s folder, then the login shell's PATH (so an npm-installed
     /// `claude`, a Node script, finds its `node` without Pixel Lab looking
     /// for one), then the system's. `loginPath` is for tests; nil resolves it
-    /// (once) unless the search is the script hook's.
+    /// (once), or, under the script hook, takes the launching shell's PATH (a
+    /// test double like scripts/fake-claude needs its own tools, and the
+    /// owner's login shell is never asked).
     static func environment(base: [String: String], claude: URL?, search: Search, loginPath: [String]? = nil) -> [String: String] {
         var env = base.filter { key, _ in !(key.hasPrefix("CLAUDE") || key.hasPrefix("ANTHROPIC_")) }
         if !search.useSystem { env["HOME"] = search.home }
@@ -96,7 +98,7 @@ enum ClaudeLocator {
         for dir in [claude?.deletingLastPathComponent().path].compactMap({ $0 }) where !path.contains(dir) {
             path.append(dir)
         }
-        for dir in (loginPath ?? (search.useSystem ? loginShellPath : [])) + ["/usr/bin", "/bin", "/usr/sbin", "/sbin"] where !dir.isEmpty && !path.contains(dir) {
+        for dir in (loginPath ?? (search.useSystem ? loginShellPath : parsePath(base["PATH"]))) + ["/usr/bin", "/bin", "/usr/sbin", "/sbin"] where !dir.isEmpty && !path.contains(dir) {
             path.append(dir)
         }
         env["PATH"] = path.joined(separator: ":")
