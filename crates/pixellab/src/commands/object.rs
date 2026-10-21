@@ -80,12 +80,20 @@ fn show_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let sources = &loaded.sources;
     let (rest, resolved) = summary(sources, &name);
     let Some(resolved) = resolved else {
-        return Err(CommandError::new(format!("object {name} doesn't resolve: {}; run pixellab check {name}", str_of(rest.get("error"))), "resolve_error").into());
+        return Err(CommandError::new(
+            format!("object {name} doesn't resolve: {}; run pixellab check {name}", str_of(rest.get("error"))),
+            "resolve_error",
+        )
+        .into());
     };
     let used: std::collections::HashSet<String> = used_keys(&resolved).into_iter().collect();
     let color = |name: &str| -> Map<String, Value> {
         let c = sources.colors.get(name);
-        obj(vec![("name", json!(name)), ("hex", c.map_or(Value::Null, |c| json!(c.hex))), ("tier", c.map_or(Value::Null, |c| json!(c.tier)))])
+        obj(vec![
+            ("name", json!(name)),
+            ("hex", c.map_or(Value::Null, |c| json!(c.hex))),
+            ("tier", c.map_or(Value::Null, |c| json!(c.tier))),
+        ])
     };
     let keys: Vec<Value> = resolved
         .keys
@@ -163,7 +171,11 @@ fn show_format(r: &Value, _: &Params) -> String {
             r.get("extends").map(|e| format!(", extends {}", str_of(Some(e)))).unwrap_or_default(),
             if r["character"] == json!(true) { ", character" } else { "" }
         ),
-        format!("size      {}{}", join(r.get("size"), "×"), r.get("block").map(|b| format!(" (block {})", join(b.get("size"), "×"))).unwrap_or_default()),
+        format!(
+            "size      {}{}",
+            join(r.get("size"), "×"),
+            r.get("block").map(|b| format!(" (block {})", join(b.get("size"), "×"))).unwrap_or_default()
+        ),
         format!("anchor    {}", join(r.get("anchor"), ", ")),
     ];
     if let Some(fp) = r.get("footprint") {
@@ -190,14 +202,24 @@ fn show_format(r: &Value, _: &Params) -> String {
         }
         let frames = l["frames"].as_f64().unwrap_or(0.0);
         let what = if what.is_empty() { String::new() } else { format!(", {}", what.join(", ")) };
-        lines.push(format!("layer {}   {} frame{}{what}", str_of(l.get("index")), str_of(l.get("frames")), if frames == 1.0 { "" } else { "s" }));
+        lines.push(format!(
+            "layer {}   {} frame{}{what}",
+            str_of(l.get("index")),
+            str_of(l.get("frames")),
+            if frames == 1.0 { "" } else { "s" }
+        ));
     }
     let keys = r["keys"].as_array().cloned().unwrap_or_default();
     if !keys.is_empty() {
         lines.push(format!(
             "keys      {}",
             keys.iter()
-                .map(|k| format!("{} {}{}", str_of(k.get("key")), str_of(k.get("name")), if k["used"] == json!(true) { "" } else { " (unused)" }))
+                .map(|k| format!(
+                    "{} {}{}",
+                    str_of(k.get("key")),
+                    str_of(k.get("name")),
+                    if k["used"] == json!(true) { "" } else { " (unused)" }
+                ))
                 .collect::<Vec<_>>()
                 .join(", ")
         ));
