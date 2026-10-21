@@ -41,6 +41,7 @@ fn rendered(view_box: Value, style: Option<&str>, children: Vec<Child>) -> Rende
         view_box: view_box.as_array().unwrap().clone(),
         root: Group { children, ..Group::default() },
         style: style.map(str::to_string),
+        scope: None,
     }
 }
 

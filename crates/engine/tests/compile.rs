@@ -176,7 +176,7 @@ fn r7_compiles_a_scene_to_one_path_per_color_lossless_with_the_engine_budget_unl
     let sources = sample();
     let r = compile_scene(&sources, "sample", &Budgets::new(), Order::Depth).unwrap();
     assert!(
-        r.output.starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\" aria-hidden=\"true\" viewBox=\"-16 -16 64 48\" shape-rendering=\"crispEdges\"><path fill=\"#"),
+        r.output.starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\" aria-hidden=\"true\" viewBox=\"-16 -16 64 48\" shape-rendering=\"crispEdges\" data-pixellab=\"sample\"><path fill=\"#"),
         "{}",
         r.output
     );

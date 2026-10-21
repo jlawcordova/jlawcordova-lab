@@ -1372,6 +1372,9 @@ pub struct Group {
     pub frames: Option<usize>,
     pub hidden: bool,
     pub children: Vec<Child>,
+    /// A group the engine made to play motion (a moving item, a pose, a
+    /// copy): a compiled SVG scopes its class to the scene (spec R15).
+    pub generated: bool,
 }
 
 /// A group's child: paint, or a group.
@@ -1382,11 +1385,14 @@ pub enum Child {
 }
 
 /// A rendered scene: its viewBox, its tree, and its motion's CSS.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Rendered {
     pub view_box: Vec<Value>,
     pub root: Group,
     pub style: Option<String>,
+    /// The scene a compiled SVG is scoped to (`data-pixellab`, spec D7), or
+    /// None for the unscoped output (`render_scene`).
+    pub scope: Option<String>,
 }
 
 /// The order a scene's items paint in: depth order, or as the file lists
@@ -1473,6 +1479,7 @@ fn frame_group(loop_name: &str, prefix: &str, i: usize, count: usize, layer: Lay
         frames: Some(count),
         hidden: false,
         children: vec![Child::Layer(layer)],
+        generated: false,
     })
 }
 
@@ -2011,6 +2018,13 @@ fn items_of(scene: &Value) -> Vec<Value> {
 /// frame loops (`renderScene`). Every list of items paints in depth order,
 /// back to front; a scene with motion also returns the CSS that plays it.
 pub fn render_scene(sources: &Sources, name: &str, order: Order) -> Result<Rendered> {
+    render_scene_with(sources, name, order, None)
+}
+
+/// `render_scene`, scoped to `scope` for a compiled SVG (spec D7): the
+/// style plays the motion and the frame loops under `[data-pixellab]`, with
+/// generated names `<scope>--…`, and a scene with nothing to play has none.
+pub fn render_scene_with(sources: &Sources, name: &str, order: Order, scope: Option<&str>) -> Result<Rendered> {
     let scene = scene_or_err(sources, name)?;
     let mut root = Group::default();
     let tracks = tracks_of(scene);
@@ -2030,12 +2044,39 @@ pub fn render_scene(sources: &Sources, name: &str, order: Order) -> Result<Rende
     let mut names = Names::default();
     place_items(sources, &list, &mut root, origin, &tracks, &mut names)?;
     let view_box = scene.get("viewBox").and_then(Value::as_array).cloned().unwrap_or_default();
-    if tracks.is_empty() {
-        return Ok(Rendered { view_box, root, style: None });
-    }
     let ids = motion::items_by_id(scene.get("items").unwrap_or(&Value::Null));
-    let style = motion::motion_css(scene.get("motion").unwrap_or(&Value::Null), &ids, &copies);
-    Ok(Rendered { view_box, root, style: Some(style) })
+    let motion = scene.get("motion").unwrap_or(&Value::Null);
+    if let Some(scope) = scope {
+        let mut loops = Vec::new();
+        frame_loops(&root, &mut loops);
+        let style = motion::scene_css(scope, if tracks.is_empty() { None } else { Some((motion, &ids, &copies)) }, &loops);
+        return Ok(Rendered { view_box, root, style: Some(style).filter(|s| !s.is_empty()), scope: Some(scope.to_string()) });
+    }
+    if tracks.is_empty() {
+        return Ok(Rendered { view_box, root, style: None, scope: None });
+    }
+    let style = motion::motion_css(motion, &ids, &copies);
+    Ok(Rendered { view_box, root, style: Some(style), scope: None })
+}
+
+/// The frame loops a tree plays, in the order they first appear: (loop, frame class prefix, frame count).
+fn frame_loops(group: &Group, out: &mut Vec<motion::FrameLoop>) {
+    for child in &group.children {
+        if let Child::Group(g) = child {
+            if let (Some(frame), Some(count)) = (g.frame, g.frames) {
+                let class = g.attrs.iter().find(|(k, _)| k == "class").map(|(_, v)| v.as_str()).unwrap_or("");
+                let mut words = class.split(' ');
+                let name = words.next().unwrap_or("").to_string();
+                let word = words.next().unwrap_or("");
+                let prefix = word.strip_suffix(frame.to_string().as_str()).unwrap_or(word).to_string();
+                match out.iter_mut().find(|l| l.name == name) {
+                    Some(l) => l.frames = l.frames.max(count),
+                    None => out.push(motion::FrameLoop { name, prefix, frames: count }),
+                }
+            }
+            frame_loops(g, out);
+        }
+    }
 }
 
 /// Every item that moves among others into several places of the depth
@@ -2157,7 +2198,7 @@ fn place_items(
     for e in list {
         match e {
             Entry::Copy(class, inner) => {
-                let mut copy = class_group(class.clone());
+                let mut copy = Group { generated: true, ..class_group(class.clone()) };
                 place_items(sources, std::slice::from_ref(inner), &mut copy, origin, tracks, names)?;
                 group.children.push(Child::Group(copy));
             }
@@ -2205,14 +2246,19 @@ fn place_item(
     let rest = motion::filled_keys(track, &object).into_iter().next().ok_or_else(|| EngineError("a track has no keys".into()))?;
     x += rest.moved[0];
     y += rest.moved[1];
-    let mut moving = Group { attrs: vec![("class".into(), motion::motion_class(&id))], hidden: !rest.show, ..Group::default() };
+    let mut moving =
+        Group { attrs: vec![("class".into(), motion::motion_class(&id))], hidden: !rest.show, generated: true, ..Group::default() };
     let poses = motion::poses_of(track, &object);
     if poses.len() == 1 {
         draw_into(&object, &mut moving, x, y, names)?;
     } else {
         for (k, pose) in poses.iter().enumerate() {
-            let mut posed =
-                Group { attrs: vec![("class".into(), motion::pose_class(&id, k))], hidden: *pose != rest.pose, ..Group::default() };
+            let mut posed = Group {
+                attrs: vec![("class".into(), motion::pose_class(&id, k))],
+                hidden: *pose != rest.pose,
+                generated: true,
+                ..Group::default()
+            };
             draw_into(pose, &mut posed, x, y, names)?;
             moving.children.push(Child::Group(posed));
         }

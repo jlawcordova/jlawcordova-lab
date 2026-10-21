@@ -225,6 +225,8 @@ fn r8_a_migrated_document_builds_every_scene_byte_identical_to_the_node_clis_bui
         eprintln!("skipped (set PIXELLAB_GOLDENS)");
         return;
     };
+    // Node's SVGs are today's, before spec R11–R15 (plan.md, "Departures").
+    std::env::set_var("PIXELLAB_LEGACY_SVG", "1");
     let corpus: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("corpus.json")).unwrap()).unwrap();
     let mut scenes = 0;
     for d in corpus["docs"].as_array().unwrap() {

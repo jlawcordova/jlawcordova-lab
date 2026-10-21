@@ -67,7 +67,9 @@ const note = (/** @type {string} */ text) => {
 
 /** A clean env: a temp HOME and state dir, no document from the environment. */
 const envFor = (/** @type {string} */ base) => {
-  const env = { ...process.env, HOME: join(base, 'home'), PIXELLAB_STATE: join(base, 'state') };
+  // PIXELLAB_LEGACY_SVG=1: the program writes today's SVGs, before spec R11–R15, so R3 still compares them
+  // (plan.md, "Departures"). The Node CLI ignores it.
+  const env = { ...process.env, HOME: join(base, 'home'), PIXELLAB_STATE: join(base, 'state'), PIXELLAB_LEGACY_SVG: '1' };
   delete env.PIXELLAB_DOC;
   delete env.PIXELLAB_SITE;
   mkdirSync(env.HOME, { recursive: true });

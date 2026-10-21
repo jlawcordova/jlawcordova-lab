@@ -104,6 +104,8 @@ fn png_summary(b64: &str) -> String {
 #[test]
 fn every_read_command_gives_nodes_result() {
     let Some(dir) = goldens() else { return };
+    // Node's SVGs are today's, before spec R11–R15 (plan.md, "Departures").
+    std::env::set_var("PIXELLAB_LEGACY_SVG", "1");
     let corpus: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("corpus.json")).unwrap()).unwrap();
     let reg = registry();
     let (mut compared, mut skipped) = (0, std::collections::BTreeMap::<String, usize>::new());
