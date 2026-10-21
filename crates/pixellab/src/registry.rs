@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 
 use crate::commands;
 use crate::context::Ctx;
-use crate::errors::{CommandError, Result};
+use crate::errors::{CommandError, Error, Result};
 use crate::params::{check_params, suggest};
 
 /// A command's params, checked and with defaults filled in.
@@ -160,7 +160,20 @@ impl Registry {
             return Err(CommandError::not_found(format!("no command {name}{}", suggest(name, &names))).into());
         };
         let checked = check_params(&cmd.params, &params, coerce, Some(name))?;
-        (cmd.run)(ctx, checked)
+        // A panic (a bug, or a document the checks let through) is an internal
+        // error for this call, as a thrown `Error` was in Node: the servers keep
+        // running and keep the docs open in them.
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (cmd.run)(ctx, checked))) {
+            Ok(result) => result,
+            Err(payload) => {
+                let what = payload
+                    .downcast_ref::<&str>()
+                    .map(|s| s.to_string())
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "a panic".to_string());
+                Err(Error::Internal(format!("{name} failed: {what}")))
+            }
+        }
     }
 }
 

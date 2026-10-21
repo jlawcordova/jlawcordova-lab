@@ -342,6 +342,19 @@ fn serve_stdio_errors_unknown_method_bad_params_a_failed_command_a_line_that_is_
 }
 
 #[test]
+fn serve_stdio_a_command_that_panics_on_a_malformed_object_is_an_internal_error_and_the_server_keeps_its_open_docs() {
+    let mut f = stdio_fixture();
+    f.server.request("scene.place", json!({ "name": "sample", "object": "pebble", "at": [1, 0, 0] }));
+    let broken = r#"{ "kind": "sprite", "anchor": [0, 0], "keys": { "a": "ink" }, "layers": "" }"#;
+    fs::write(f.site.document.join("objects/broken.json"), broken).unwrap();
+    let failed = f.server.request("object.layer.add", json!({ "name": "broken" }));
+    assert_eq!(failed["error"]["code"], -32603, "{failed}");
+    let status = f.server.request("doc.status", json!({ "doc": "scene:sample" }));
+    assert_eq!(status["result"]["dirty"], true, "the unsaved place is still there: {status}");
+    assert_eq!(status["result"]["edits"], json!(["pebble placed at column 1, row 0, level 0"]));
+}
+
+#[test]
 fn serve_stdio_files_changed_when_a_source_changes_on_disk_and_a_clean_open_doc_reloads() {
     let mut f = stdio_fixture();
     f.server.request("doc.open", json!({ "doc": "object:pebble" }));
@@ -450,6 +463,19 @@ fn serve_mcp_initialize_notifications_initialized_ping() {
     server.notify("notifications/initialized");
     assert_eq!(server.request("ping", json!({}))["result"], json!({}));
     assert_eq!(server.lines().len(), count + 1, "no response to a notification");
+}
+
+#[test]
+fn serve_mcp_a_tool_that_panics_on_a_malformed_object_is_an_internal_error_and_the_server_keeps_running() {
+    let mut m = mcp_initialized();
+    call(&mut m.server, "scene_place", json!({ "name": "sample", "object": "pebble", "at": [1, 0, 0] }));
+    let broken = r#"{ "kind": "sprite", "anchor": [0, 0], "keys": { "a": "ink" }, "layers": "" }"#;
+    fs::write(m.site.document.join("objects/broken.json"), broken).unwrap();
+    let failed = call(&mut m.server, "object_layer_add", json!({ "name": "broken" }));
+    assert_eq!(failed["isError"], true, "{failed}");
+    assert_eq!(failed["structuredContent"]["error"]["code"], "internal");
+    let status = call(&mut m.server, "doc_status", json!({ "doc": "scene:sample" }));
+    assert_eq!(status["structuredContent"]["dirty"], true, "{status}");
 }
 
 #[test]
