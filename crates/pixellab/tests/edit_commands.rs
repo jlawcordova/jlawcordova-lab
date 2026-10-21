@@ -56,7 +56,7 @@ fn place(s: &mut Session, col: i64) -> Value {
 }
 
 #[test]
-fn undo_and_redo_with_statuses_and_nothing_written_until_save() {
+fn undo_and_redo_with_doc_changed_statuses_and_nothing_written_until_save() {
     let doc = make_document();
     let mut s = session(&doc, Mode::Direct);
     let disk = fs::read_to_string(doc.root.join("scenes/sample.json")).unwrap();
@@ -237,7 +237,7 @@ fn a_failed_edit_leaves_the_working_copy_as_it_was() {
 /// R20: no site checkout. The subject is generic (the engine serializer is the authority for
 /// every source), so it runs over the fixture and format-2 copies of the two examples.
 #[test]
-fn every_scene_and_object_serializes_to_its_file_byte_for_byte_and_saves_unchanged() {
+fn every_real_scene_and_object_serializes_to_its_file_byte_for_byte_and_saves_unchanged() {
     let base = common::temp_dir("pixellab-roundtrip-");
     let docs = vec![common::fixture(), bootstrap::example(&base, "harbor"), bootstrap::example(&base, "town")];
     let mut n = 0;
@@ -266,4 +266,145 @@ fn every_scene_and_object_serializes_to_its_file_byte_for_byte_and_saves_unchang
     }
     assert!(n > 10, "{n} docs");
     let _ = fs::remove_dir_all(base);
+}
+
+// ---------------------------------------------------------------- one-shot command lines
+
+/// `pixellab <args>` as a process, with HOME and the state dir set (code, stdout, stderr).
+fn cli(doc: &TempDocument, args: &[&str]) -> (i32, String, String) {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_pixellab"))
+        .args(args)
+        .envs(doc.env())
+        .env("PIXELLAB_STATE", doc.base.join("state"))
+        .current_dir(&doc.base)
+        .output()
+        .unwrap();
+    (out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned())
+}
+
+fn doc_arg(doc: &TempDocument) -> String {
+    doc.root.to_string_lossy().into_owned()
+}
+
+fn read_json(path: &std::path::Path) -> Value {
+    serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+}
+
+#[test]
+fn validation_refusal_a_doc_with_problems_is_not_written_unless_force() {
+    let doc = make_document();
+    let file = "scenes/zz-broken.json";
+    doc.write(
+        file,
+        "{\n  \"viewBox\": [0, 0, 64, 64],\n  \"items\": [\n    { \"object\": \"block\", \"at\": { \"tile\": [0, 0, 0] } },\n    { \"object\": \"no-such-object\", \"at\": { \"tile\": [1, 0, 0] } }\n  ]\n}\n",
+    );
+    let before = fs::read_to_string(doc.root.join(file)).unwrap();
+    let d = doc_arg(&doc);
+    let (code, _, stderr) = cli(&doc, &["scene", "move", "zz-broken", "0", "--by", "1,0", "--json", "--document", &d]);
+    assert_eq!(code, 1, "{stderr}");
+    let err: Value = serde_json::from_str(&stderr).unwrap();
+    assert_eq!(err["error"]["code"], "invalid");
+    assert!(err["error"]["details"][0].as_str().unwrap().starts_with("scenes/zz-broken.json: items[1]"), "{err}");
+    assert_eq!(fs::read_to_string(doc.root.join(file)).unwrap(), before);
+    let (_, dry, _) = cli(&doc, &["scene", "move", "zz-broken", "0", "--by", "1,0", "--dry-run", "--document", &d]);
+    assert!(dry.contains("saving it would be refused"), "{dry}");
+    let (code, forced, stderr) = cli(&doc, &["scene", "move", "zz-broken", "0", "--by", "1,0", "--force", "--document", &d]);
+    assert_eq!(code, 0, "{stderr}");
+    assert!(forced.contains("forced: 1 problem written"), "{forced}");
+    assert_eq!(read_json(&doc.root.join(file))["items"][0]["at"], json!({ "tile": [1, 0, 0] }));
+}
+
+#[test]
+fn dry_run_and_force_only_go_with_edit_commands_doc_needs_a_session() {
+    let doc = make_document();
+    let d = doc_arg(&doc);
+    assert_eq!(cli(&doc, &["scene", "list", "--dry-run", "--document", &d]).0, 2);
+    assert_eq!(cli(&doc, &["scene", "list", "--force", "--document", &d]).0, 2);
+    let (code, _, stderr) = cli(&doc, &["doc", "undo", "scene:sample", "--document", &d]);
+    assert_eq!(code, 2);
+    assert!(stderr.contains("pixellab serve"), "{stderr}");
+}
+
+// ---------------------------------------------------------------- art.build (spec R7)
+
+/// The sample document with a scene that has no `output`, so it is preview-only.
+fn publishable() -> TempDocument {
+    let doc = make_document();
+    doc.write("scenes/meadow.json", "{ \"viewBox\": [0, 0, 8, 8], \"items\": [] }\n");
+    doc
+}
+
+#[test]
+fn r7_publishes_the_sites_art_into_the_legacy_publish_folder_the_committed_svgs_or_the_same_elements_in_depth_order() {
+    let doc = publishable();
+    let d = doc_arg(&doc);
+    let (code, stdout, stderr) = cli(&doc, &["art", "build", "--json", "--document", &d]);
+    assert_eq!(code, 0, "{stderr}");
+    let out: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(out["ok"], true);
+    let publish = doc.base.join("sample-out");
+    assert_eq!(out["publishDir"], publish.to_string_lossy().as_ref());
+    assert_eq!(out["problems"], json!([]));
+    assert_eq!(out["unsaved"], json!([]));
+    let files: Vec<&str> = out["outputs"].as_array().unwrap().iter().map(|o| o["file"].as_str().unwrap()).collect();
+    assert_eq!(files, ["sample.svg"]);
+    for o in out["outputs"].as_array().unwrap() {
+        assert!(o["report"].as_str().unwrap().ends_with("lossless") && o["over"] == false, "{o}");
+    }
+    assert!(!out["previewOnly"].as_array().unwrap().is_empty(), "preview-only scenes are compiled and reported, not written");
+    let built = fs::read(publish.join("sample.svg")).unwrap();
+    assert!(built.starts_with(b"<svg"));
+    assert!(!publish.join("meadow.svg").exists());
+    fs::remove_file(publish.join("sample.svg")).unwrap();
+    assert_eq!(cli(&doc, &["art", "build", "--document", &d]).0, 0);
+    assert_eq!(fs::read(publish.join("sample.svg")).unwrap(), built);
+}
+
+#[test]
+fn r7_dir_publishes_elsewhere_and_a_document_without_a_publish_folder_refuses_without_it() {
+    let doc = publishable();
+    let d = doc_arg(&doc);
+    let out = doc.base.join("elsewhere");
+    let (code, stdout, stderr) = cli(&doc, &["art", "build", "--dir", out.to_str().unwrap(), "--json", "--document", &d]);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(serde_json::from_str::<Value>(&stdout).unwrap()["publishDir"], out.to_string_lossy().as_ref());
+    assert!(fs::metadata(out.join("sample.svg")).unwrap().len() > 0);
+    // The same sources as a document whose manifest names no publish folder.
+    let manifest = |m: Value| doc.write("manifest.json", &format!("{m}\n"));
+    manifest(json!({ "format": 2 }));
+    let (code, _, stderr) = cli(&doc, &["art", "build", "--json", "--document", &d]);
+    assert_eq!(code, 1);
+    assert_eq!(serde_json::from_str::<Value>(&stderr).unwrap()["error"]["code"], "no_publish_dir");
+    // With a budget the scene exceeds, it is over, and still written.
+    let bare = doc.base.join("bare-out");
+    let budgets = json!({ "sample.svg": { "raw": 100, "gzip": 50 } });
+    manifest(json!({ "format": 2, "publish": { "budgets": budgets } }));
+    let (code, stdout, _) = cli(&doc, &["art", "build", "--dir", bare.to_str().unwrap(), "--json", "--document", &d]);
+    assert_eq!(code, 1);
+    let res: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(res["ok"], false);
+    assert_eq!(res["outputs"][0]["over"], true);
+    assert!(fs::metadata(bare.join("sample.svg")).unwrap().len() > 0);
+    let budgets = json!({ "sample.svg": { "raw": 204800, "gzip": 51200 } });
+    manifest(json!({ "format": 2, "publish": { "budgets": budgets } }));
+    let (code, stdout, stderr) = cli(&doc, &["art", "build", "--dir", bare.to_str().unwrap(), "--document", &d]);
+    assert_eq!(code, 0, "{stderr}");
+    assert!(stdout.contains("published 1 file to ") && stdout.contains("bare-out"), "{stdout}");
+}
+
+#[test]
+fn r7_nothing_is_written_when_a_source_has_a_problem() {
+    let doc = make_document();
+    doc.write(
+        "objects/zz-bad.json",
+        "{ \"kind\": \"sprite\", \"keys\": { \"a\": \"no-such-color\" }, \"layers\": [{ \"map\": [\"a\"] }] }\n",
+    );
+    let out = doc.base.join("out");
+    let (code, stdout, _) = cli(&doc, &["art", "build", "--dir", out.to_str().unwrap(), "--json", "--document", &doc_arg(&doc)]);
+    assert_eq!(code, 1);
+    let res: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(res["ok"], false);
+    assert_eq!(res["outputs"], json!([]));
+    assert!(res["problems"].as_array().unwrap().iter().any(|p| p.as_str().unwrap().starts_with("objects/zz-bad.json: ")), "{res}");
+    assert!(!out.join("sample.svg").exists());
 }

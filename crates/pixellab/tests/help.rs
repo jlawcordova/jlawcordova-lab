@@ -382,6 +382,28 @@ fn exit_codes_0_ok_1_command_error_2_usage_error_test_registry() {
 }
 
 #[test]
+fn stdout_piped_into_head_closes_quietly() {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    let site = make_site();
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_pixellab"));
+    cmd.args(["palette", "get", "--document"]).arg(&site.document).stdout(Stdio::piped()).stderr(Stdio::piped());
+    for (k, v) in site.env() {
+        cmd.env(k, v);
+    }
+    let mut child = cmd.spawn().unwrap();
+    // Read the first chunk, then close the pipe, as `| head` does.
+    let mut stdout = child.stdout.take().unwrap();
+    let mut first = [0u8; 16];
+    let _ = stdout.read(&mut first).unwrap();
+    drop(stdout);
+    let mut stderr = String::new();
+    child.stderr.take().unwrap().read_to_string(&mut stderr).unwrap();
+    child.wait().unwrap();
+    assert_eq!(stderr, "");
+}
+
+#[test]
 fn out_writes_the_png_and_says_so() {
     let site = make_site();
     let reg = test_registry();

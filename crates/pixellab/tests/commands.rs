@@ -96,7 +96,8 @@ fn code_of(e: &Error) -> String {
 }
 
 #[test]
-fn document_info_spec_r3_r4_a_document_resolves_to_its_folder() {
+// The format-2 meaning of the Node test: a document given by --document resolves to its folder.
+fn document_info_spec_r3_r4_a_site_checkout_resolves_to_its_legacy_source_folder() {
     let doc = make_document();
     let r = call(&doc, "document.info", json!({})).unwrap();
     assert_eq!(r["root"], doc.root.to_string_lossy().as_ref());
@@ -108,6 +109,37 @@ fn document_info_spec_r3_r4_a_document_resolves_to_its_folder() {
     assert_eq!(cli_json(&doc, &["document", "info"]), r);
     let (_, human, _) = cli(&doc, &["document", "info"]);
     assert!(human.starts_with("document  "), "{human}");
+    assert!(human.ends_with("problems  0\n"), "{human}");
+}
+
+#[test]
+fn document_info_spec_r3_r4_a_site_checkout_resolves_to_its_document_folder() {
+    let site = common::make_site();
+    let run = |extra: &[&str]| {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_pixellab"))
+            .args(["document", "info", "--site"])
+            .arg(&site.root)
+            .args(extra)
+            .envs(site.env())
+            .current_dir(&site.base)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let r: Value = serde_json::from_str(&run(&["--json"])).unwrap();
+    assert_eq!(r["root"], site.document.to_string_lossy().as_ref());
+    assert_eq!(r["siteRoot"], site.root.to_string_lossy().as_ref());
+    assert_eq!(r["kind"], "document");
+    assert_eq!(r["from"], "flag");
+    assert_eq!(r["via"], "site");
+    assert_eq!(r["publishDir"], site.document.parent().unwrap().join("sample-out").to_string_lossy().as_ref());
+    assert_eq!((r["scenes"].as_i64().unwrap() >= 1, r["objects"].as_i64().unwrap() >= 2), (true, true));
+    assert_eq!(r["colors"]["world"], 10);
+    assert_eq!(r["problems"], 0);
+    assert_eq!(r["branch"], Value::Null, "the temp copy is not a git checkout");
+    let human = run(&[]);
+    assert!(human.starts_with("document  ") && human.contains("(from the site checkout given by --site)\n"), "{human}");
     assert!(human.ends_with("problems  0\n"), "{human}");
 }
 
