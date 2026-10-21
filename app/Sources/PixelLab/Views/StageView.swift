@@ -84,12 +84,22 @@ struct StageView: View {
                     }
                     // Inside a layer, the rest fades and the layer's own render draws over it (D6).
                     let focus = render.focusLayer != nil && render.focusLayer == model.layers.inside ? render.focusImage : nil
+                    // An action playing: its render draws in place of the rest frame, placed by its own
+                    // viewBox so a pixel at rest sits where it does in the editor (a moved layer may leave the map's box).
+                    let played = model.timeline.actionImage
                     render.image.view(pointsPerPixel: geometry.zoom, displayScale: displayScale)
-                        .opacity(focus == nil ? 1 : 0.22)
+                        .opacity(played != nil ? 0 : (focus == nil ? 1 : 0.22))
                         .offset(x: geometry.artOrigin.x, y: geometry.artOrigin.y)
                         .allowsHitTesting(false)
                         .accessibilityLabel("\(doc.ref.name), \(doc.ref.kind.rawValue) at \(zoom)×")
                         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: focus == nil)
+                    if let played {
+                        let o = geometry.viewPoint(fromScene: played.viewBox.origin)
+                        played.image.view(pointsPerPixel: geometry.zoom, displayScale: displayScale)
+                            .offset(x: o.x, y: o.y)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
                     if let focus {
                         focus.view(pointsPerPixel: geometry.zoom, displayScale: displayScale)
                             .offset(x: geometry.artOrigin.x, y: geometry.artOrigin.y)
