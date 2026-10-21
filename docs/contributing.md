@@ -24,9 +24,9 @@ A small, self-contained fix can go straight to a PR into `main`.
 
 ## Rules
 
-- **The document is the source of truth, and the engine lives here** (`cli/lib/engine/`). A site installs this package to publish and test its art. Never write to the real site checkout, or the real document inside it, from tests or scripts: use a temp copy (`makeDocument()`, `makeSite()`). A change to the site's art is a change in the site repo.
+- **The document is the source of truth, and the engine lives here** (`crates/engine/`), in Rust. A site publishes its art with the `pixellab` program and the [site contract](site-contract.md). Never write to the real site checkout, or the real document inside it, from tests or scripts: use a temp copy (`make_document()`, `make_site()` in `crates/pixellab/tests/common/mod.rs`). A change to the site's art is a change in the site repo.
 - **Every action is a command** in the registry, so the CLI, the app and agents can all take it. MCP edits become proposals the owner approves; `--direct` stays off by default.
-- **No new npm or Swift dependencies** without asking.
+- **No new crates, npm packages or Swift dependencies** without asking. The Rust crates are `serde`, `serde_json` (with `preserve_order`) and `miniz_oxide`, and nothing else; Node is repo tooling only, with no packages.
 - **The app builds with the Command Line Tools:** no `@State`; never `xcode-select -s`.
 - **Colors come from the board 03 tokens** in `Theme.swift`. Pixel art is nearest-neighbor at integer zoom.
 - **Accessibility:** VoiceOver labels, visible focus, comfortable hit targets and Reduce Motion on anything interactive or animated.
@@ -36,21 +36,46 @@ A small, self-contained fix can go straight to a PR into `main`.
 
 Run what applies, from [Testing](testing.md), and paste the output in the PR:
 
+- [ ] after a `crates/` change: `cargo fmt --check` is clean and `cargo test` passes
 - [ ] `npm test` shows `# fail 0`
 - [ ] after a command change: `npm run docs:cli`, and `git status` shows only your edits
 - [ ] after an `app/` change: `swift build --package-path app` with no errors, `scripts/test-app.sh` passes
-- [ ] after an `app/`, `cli/` or `scripts/acceptance/` change: `scripts/build-app.sh`, then `scripts/acceptance.sh` exits 0
+- [ ] after an `app/`, `crates/` or `scripts/acceptance/` change: `scripts/build-app.sh`, then `scripts/acceptance.sh` exits 0
 - [ ] UI: a script-hook run with `expect` lines, and snapshots of each changed view in dark and light, looked at
 - [ ] docs: `npm run docs:site` builds (no broken links)
 
 Commit messages are imperative, with a body when it helps. When an agent wrote the change, they end with its `Co-Authored-By:` line, and PR bodies with the Claude Code line.
 
+## Building
+
+The program and the engine are Rust. Install it with [rustup](https://rustup.rs); `rust-toolchain.toml` pins the toolchain (with `rustfmt` and `clippy`), and rustup installs it the first time you run `cargo` in the repo. Then, from the repo root:
+
+```sh
+cargo build --release     # target/release/pixellab
+cargo test                # the program's tests (see Testing)
+cargo fmt                 # 140 columns, per rustfmt.toml
+node --version            # 22 or later, for npm test, the docs and the scripts
+```
+
+`scripts/build-app.sh` builds the program and bundles it into the app, so the app needs the same toolchain. The CI workflows use `rustup toolchain install` on the pinned file, so a change to the pin is a change to `rust-toolchain.toml` alone.
+
+## Adding a command
+
+Every action is a command, so one command works from the terminal, the app and agents:
+
+1. Write it in a file under `crates/pixellab/src/commands/` (the one for its group, such as `scene_edit.rs`, or a new file): a `Command` with its dotted name, summary, params as a JSON Schema object, whether it mutates, and its `run`.
+2. Register it: the file's `commands()` returns its list, and `registry()` in `crates/pixellab/src/registry.rs` extends the registry with each file's list, so a new file needs one line there (and `pub mod` in `commands/mod.rs`). The registry checks every definition when it is built, so a bad name or schema fails the tests.
+3. Test it in `crates/pixellab/tests/`, named after the requirement it proves, on a temp copy ([Testing](testing.md#adding-a-test)).
+4. Run `npm run docs:cli`. It builds the program and writes `docs/cli.md` from `pixellab help --markdown`; never edit that file by hand.
+5. If agents shouldn't have it, add it to `LEFT_OUT` in `crates/pixellab/src/server_mcp.rs` with the reason. If the app needs it, see [the app's README](../app/README.md#adding-a-feature).
+
 ## CI
 
 | Workflow | When | What |
 | --- | --- | --- |
-| Docs site (`.github/workflows/docs.yml`) | every PR, every push to `main`, by hand | checks `docs/cli.md` is current, tests and builds the docs site; deploys `main` to GitHub Pages |
-| Release Pixel Lab (`.github/workflows/release.yml`) | a `v<version>` tag on `main` | tests, builds, packages and smoke-tests the app, then publishes the release |
+| Tests (`.github/workflows/test.yml`) | every PR, every push to `main`, by hand | on Linux: `cargo fmt --check`, `cargo test`, `npm test` |
+| Docs site (`.github/workflows/docs.yml`) | every PR, every push to `main`, by hand | builds the program, checks `docs/cli.md` is current, tests and builds the docs site; deploys `main` to GitHub Pages |
+| Release Pixel Lab (`.github/workflows/release.yml`) | a `v<version>` tag on `main` | tests, builds, packages and smoke-tests the app and the program (macOS and Linux), then publishes the release |
 
 Releasing is in the README, [Releases](../README.md#development). Don't push a release tag unless the owner asks.
 

@@ -1,10 +1,10 @@
 # Example documents (`examples/`)
 
-Two small `.pixellab` documents with scene layers, to try the app on and to test with. They're made from scratch by [`scripts/make-examples.mjs`](../scripts/make-examples.mjs) with the starter palette, so they're the same on every run, and `npm test` checks the committed copies still match it. Each scene is written in depth order, back to front by where its items stand, as every edit in the app leaves it; reorder nothing by hand. Neither is the site's art.
+Two small `.pixellab` documents with scene layers, to try the app on and to test with. They're in format 2 (JSON sources), made from scratch by [`scripts/make-examples.mjs`](../scripts/make-examples.mjs), which drives the `pixellab` program (`target/release/pixellab`) with the starter palette, so they're the same on every run. `npm run examples` rewrites them, and `npm test` checks the committed copies still match. Each scene is written in depth order, back to front by where its items stand, as every edit in the app leaves it; reorder nothing by hand. Neither is the site's art.
 
 | Document | Scenes | What it has |
 | --- | --- | --- |
-| `harbor.pixellab` | `harbor`, `harbor-flat` | An 8×8 island: 89 items in 16 layers up to three deep, the site's `{ group }` wrappers around every tile and object, two rocks in no layer, and an animated boat. `harbor-flat` is the same scene with no layers, and publishes the same SVG. |
+| `harbor.pixellab` | `harbor`, `harbor-flat` | An 8×8 island: 89 items in 16 layers up to three deep, the site's `{ group }` wrappers around every tile and object, two rocks in no layer, an animated boat that hops (the `hop` action), and a barrel on the dock that bobs (an ambient loop). `harbor-flat` is the same scene with no layers, and publishes the same SVG (apart from the scene name its generated class and keyframe names are scoped by). |
 | `town.pixellab` | `town` | A 16×16 island: 379 items in 59 layers four deep (district › street › house), with eight lamps in no layer. |
 
 The harbor's layers:
@@ -36,20 +36,23 @@ scripts/try-example.sh town
 - **Group and ungroup.** <kbd>⇧</kbd>-click the two rocks on the harbor and press <kbd>⌘G</kbd>, or right-click for the menu. <kbd>⇧⌘G</kbd> ungroups.
 - **Place into a layer.** Select Trees, pick a pine in the Library (the chip says "New items go into Trees") and place it.
 
-From the command line, name the document with `--document`:
+From the command line, name the document with `--document` (build the program first with `cargo build --release`; `pixellab` below is `target/release/pixellab`, or the one in the app bundle):
 
 ```sh
-node cli/bin/pixellab.mjs scene items town --document examples/town.pixellab
-node cli/bin/pixellab.mjs scene render harbor --hide village --out /tmp/harbor.png --document examples/harbor.pixellab
-node cli/bin/pixellab.mjs art build --dir /tmp/harbor-art --document examples/harbor.pixellab
-cmp /tmp/harbor-art/harbor.svg /tmp/harbor-art/harbor-flat.svg   # the same bytes: layers never change the art
+pixellab scene items town --document examples/town.pixellab
+pixellab scene render harbor --hide village --out /tmp/harbor.png --document examples/harbor.pixellab
+pixellab art build --dir /tmp/harbor-art --document examples/harbor.pixellab
+# the same bytes once the scene's name is taken out: layers never change the art
+diff <(sed 's/harbor-flat/harbor/g' /tmp/harbor-art/harbor-flat.svg) /tmp/harbor-art/harbor.svg && echo same
 ```
+
+The harbor's manifest gives both SVGs a 128 KB budget (32 KB gzip); over a budget, `art build` warns and still writes the SVG.
 
 Commands that edit save into the folder you name, so point them at a copy (`pixellab document copy --to <path>.pixellab`).
 
 ## Tests that use them
 
-- `cli/test/examples.test.mjs`: the committed examples match the generator, each one checks clean, the harbor's and the town's layers nest as described and move as one, and `harbor` and `harbor-flat` build the same SVG.
+- `scripts/test/examples.test.mjs`: the committed examples match the generator, each one checks clean, the harbor's and the town's layers nest as described and move as one, and `harbor` and `harbor-flat` build the same SVG.
 - `scripts/acceptance/examples-harbor.txt` and `examples-town.txt`: [`scripts/acceptance.sh`](../scripts/acceptance.sh) runs them on temp copies, to pick, go inside, hide, lock, move and walk the tree from the keyboard in layers read from a file rather than made in the app.
 
 ## Changing them

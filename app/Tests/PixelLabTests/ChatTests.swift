@@ -68,12 +68,25 @@ import Testing
 
     @Test func R1_theEnvironmentDropsAParentSessionsVariablesAndAnyAPIKey() {
         let base = ["HOME": "/Users/me", "PATH": "/x", "CLAUDECODE": "1", "CLAUDE_CODE_SIMPLE": "1", "ANTHROPIC_BASE_URL": "http://x", "ANTHROPIC_API_KEY": "k", "PIXELLAB_STATE": "/s", "LANG": "en"]
-        let env = ClaudeLocator.environment(base: base, claude: URL(fileURLWithPath: "/u/.local/bin/claude"), node: URL(fileURLWithPath: "/opt/homebrew/bin/node"),
-                                            search: ClaudeLocator.Search(home: "/Users/me", useSystem: true, installer: nil))
+        let env = ClaudeLocator.environment(base: base, claude: URL(fileURLWithPath: "/u/.local/bin/claude"),
+                                            search: ClaudeLocator.Search(home: "/Users/me", useSystem: true, installer: nil), loginPath: [])
         #expect(env.keys.sorted() == ["HOME", "LANG", "PATH", "PIXELLAB_STATE"])
-        #expect(env["PATH"] == "/u/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin")
-        let temp = ClaudeLocator.environment(base: base, claude: nil, node: nil, search: ClaudeLocator.Search(home: "/tmp/h", useSystem: false, installer: nil))
+        #expect(env["PATH"] == "/u/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+        let temp = ClaudeLocator.environment(base: base, claude: nil, search: ClaudeLocator.Search(home: "/tmp/h", useSystem: false, installer: nil))
         #expect(temp["HOME"] == "/tmp/h")
+    }
+
+    @Test("R21: a turn's PATH is claude's folder, the login shell's PATH, then the system's, without repeats")
+    func R21_theChatsPathComesFromTheLoginShell() {
+        let search = ClaudeLocator.Search(home: "/Users/me", useSystem: true, installer: nil)
+        let login = ClaudeLocator.parsePath("/opt/homebrew/bin:/Users/me/.nvm/bin::/usr/bin:/u/.local/bin\n")
+        #expect(login == ["/opt/homebrew/bin", "/Users/me/.nvm/bin", "/usr/bin", "/u/.local/bin"])
+        let env = ClaudeLocator.environment(base: ["PATH": "/ignored"], claude: URL(fileURLWithPath: "/u/.local/bin/claude"), search: search, loginPath: login)
+        #expect(env["PATH"] == "/u/.local/bin:/opt/homebrew/bin:/Users/me/.nvm/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+        #expect(ClaudeLocator.parsePath(nil).isEmpty)
+        // The script hook's search never asks the owner's shell.
+        let hooked = ClaudeLocator.environment(base: [:], claude: nil, search: ClaudeLocator.Search(home: "/tmp/h", useSystem: false, installer: nil))
+        #expect(hooked["PATH"] == "/usr/bin:/bin:/usr/sbin:/sbin")
     }
 
     @Test func R4_versionAndSignInAreRead() {
@@ -99,12 +112,12 @@ import Testing
         #expect(args.contains("--strict-mcp-config") && args.contains("--verbose"))
         #expect(!ClaudeTurn.arguments(mcpConfig: "{}", prompt: "P", resume: nil).contains("--resume"))
 
-        let config = ClaudeTurn.mcpConfig(node: URL(fileURLWithPath: "/n/node"), cli: URL(fileURLWithPath: "/c/pixellab.mjs"), location: .document("/d/h.pixellab"),
+        let config = ClaudeTurn.mcpConfig(program: URL(fileURLWithPath: "/c/pixellab"), location: .document("/d/h.pixellab"),
                                           stateDir: "/s", chatID: "c1", title: "Pines")
         let v = try JSONDecoder().decode(JSONValue.self, from: Data(config.utf8))
         let server = v["mcpServers"]?["pixellab"]
-        #expect(server?["command"]?.stringValue == "/n/node")
-        #expect(server?["args"]?.arrayValue?.compactMap(\.stringValue) == ["/c/pixellab.mjs", "serve", "--mcp", "--document", "/d/h.pixellab"])
+        #expect(server?["command"]?.stringValue == "/c/pixellab")
+        #expect(server?["args"]?.arrayValue?.compactMap(\.stringValue) == ["serve", "--mcp", "--document", "/d/h.pixellab"])
         #expect(server?["env"]?["PIXELLAB_CHAT"]?.stringValue == "c1")
         #expect(server?["env"]?["PIXELLAB_CHAT_TITLE"]?.stringValue == "Pines")
         #expect(server?["env"]?["PIXELLAB_STATE"]?.stringValue == "/s")

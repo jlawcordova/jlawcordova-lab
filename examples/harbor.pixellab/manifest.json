@@ -1,4 +1,16 @@
 {
-  "format": 1,
-  "name": "harbor"
+  "format": 2,
+  "name": "harbor",
+  "publish": {
+    "budgets": {
+      "harbor.svg": {
+        "raw": 131072,
+        "gzip": 32768
+      },
+      "harbor-flat.svg": {
+        "raw": 131072,
+        "gzip": 32768
+      }
+    }
+  }
 }

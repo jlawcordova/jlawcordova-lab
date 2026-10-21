@@ -1,0 +1,15 @@
+[package]
+name = "pixellab-engine"
+description = "The Pixel Lab engine: validating, resolving, rendering, depth order, motion, compiling and previews of a .pixellab document."
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "engine"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+miniz_oxide.workspace = true

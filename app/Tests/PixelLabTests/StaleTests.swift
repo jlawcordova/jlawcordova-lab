@@ -13,11 +13,11 @@ import Testing
     }
 
     @Test func R5_namesTheFile() {
-        #expect(StaleBanner.message(file: "scenes/hero-island.mjs") == "scenes/hero-island.mjs changed on disk. You have unsaved edits here.")
+        #expect(StaleBanner.message(file: "scenes/hero-island.json") == "scenes/hero-island.json changed on disk. You have unsaved edits here.")
     }
 
     @Test func R6_decodesTheMergeOfAnApprovedProposal() throws {
-        let json = #"{"id":"20261020-120000-abcdef","doc":"scene:x","file":"scenes/x.mjs","wrote":true,"reloaded":false,"merged":true,"summary":"Applied"}"#
+        let json = #"{"id":"20261020-120000-abcdef","doc":"scene:x","file":"scenes/x.json","wrote":true,"reloaded":false,"merged":true,"summary":"Applied"}"#
         let r = try JSONDecoder().decode(ProposalApplyResult.self, from: Data(json.utf8))
         #expect(r.merged == true)
         #expect(r.conflict == nil)

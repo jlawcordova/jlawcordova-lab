@@ -1,0 +1,40 @@
+{
+  "zz-two": {
+    "viewBox": [-40, -40, 80, 80],
+    "origin": [0, 0],
+    "items": [
+      { "object": "pebble", "at": { "px": [-20, 0] } },
+      { "object": "pebble", "id": "mover", "at": { "px": [20, 0] } }
+    ],
+    "motion": {
+      "duration": 1000,
+      "tracks": [{ "item": "mover", "keys": [{ "t": 0 }, { "t": 500, "move": [0, 10], "show": true }] }]
+    }
+  },
+  "zz-hide": {
+    "viewBox": [-40, -40, 80, 80],
+    "items": [{ "object": "pebble", "id": "blink", "at": { "px": [0, 0] } }],
+    "motion": {
+      "duration": 1000,
+      "tracks": [{ "item": "blink", "keys": [{ "t": 0 }, { "t": 500, "show": false }] }]
+    }
+  },
+  "zz-group": {
+    "viewBox": [-40, -40, 80, 80],
+    "items": [
+      { "group": { "data-class": "a" }, "items": [{ "object": "pebble", "at": { "px": [-10, 0] } }] },
+      { "group": { "data-class": "b" }, "items": [{ "object": "pebble", "at": { "px": [10, 0] } }] },
+      { "object": "pebble", "at": { "px": [0, 10], "level": 1 } }
+    ]
+  },
+  "zz-layers": {
+    "viewBox": [-48, -48, 96, 96],
+    "layers": [{ "id": "rail", "name": "Rail" }, { "id": "train", "name": "Train", "parent": "rail" }],
+    "items": [
+      { "object": "block", "layer": "rail", "at": { "tile": [0, 0, 0] } },
+      { "object": "pebble", "layer": "train", "id": "p", "at": { "tile": [0, 0, 1] } },
+      { "object": "pebble", "at": { "px": [20, 20] } },
+      { "group": { "data-enter": "shadow" }, "depth": "back", "items": [{ "object": "pebble", "at": { "px": [-20, -20] } }] }
+    ]
+  }
+}

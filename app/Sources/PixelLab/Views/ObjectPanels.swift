@@ -172,6 +172,7 @@ struct ObjectInspector: View {
                 }
             } else {
                 LayersSection(objects: objects)
+                ActionsSection(rows: objects.actionRows)
                 if objects.currentLayer?.isLoop == true || (objects.editable && objects.currentLayer != nil) {
                     FramesSection(objects: objects)
                 }

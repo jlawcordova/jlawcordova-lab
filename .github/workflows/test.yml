@@ -1,0 +1,44 @@
+name: Tests
+
+# Every pull request (docs/intents/2026-10-rust-engine/spec.md, R28): the
+# Rust program's tests and the repo's Node tests, on Linux, with no site
+# checkout. The toolchain is the one rust-toolchain.toml pins.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: test-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      # rustup is on the runner; it installs the pinned toolchain on first use.
+      - name: Install the pinned Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Cache the Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+      - name: cargo fmt --check
+        run: cargo fmt --check
+      - name: cargo test
+        run: cargo test
+      - name: npm test
+        run: npm test

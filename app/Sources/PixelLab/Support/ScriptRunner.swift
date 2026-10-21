@@ -18,10 +18,16 @@ import Foundation
 ///     depth front|back|auto   (the selected item's Depth control: the group's when the item is alone in its SVG group)
 ///     groupdepth <group path>|selected front|back|auto   (the wrapper line's menu, for a group of several items; `selected` is the item's group)
 ///     sort   (Checks' Sort button: the scene's items in depth order)   set level <n>  (a pixel item's, too)
+///     play <action> [<item>]   (the Inspector's Play for an ACTIONS row of the selected item, or of item path <item>, which it selects;
+///         in object mode, of the selected layer. Waits until the action has played once and the stage is back at rest)
+///     playat <action> <ms> [<item>]   (renders the action <ms> into it, as a mid-play frame, and holds it on the stage for a snapshot)
+///     playend   (releases a held `playat` frame: the stage draws the playhead's frame again)
+///     reducemotion on|off|system   (overrides the system's Reduce Motion for Play and the timeline)
 ///     undo redo save [force] revert publish [<dir>] done   saveas <path.pixellab>
 ///     time <ms>  play  pause  tracks on|off   zoom fit|1-4   sidebar library|items
 ///     search <text>   wait <ms>   snapshot <file.png>   log <text>
-///     cli <args…>  (the bundled CLI on the script's document: an outside edit to the files)
+///     settings open|close   snapshot settings <file.png>   (the Settings window)
+///     cli <args…>  (the bundled program on the script's document: an outside edit to the files)
 ///     stale merge|reload|keep     (the changed-on-disk banner's buttons)
 ///     expect dirty|selected|object|at|items|problems|build|outputs|publishdir|document|tool|time <value>
 ///     expect scenes|objects|zoom|badge|theme|ghosttime <value>   expect scenepixel <x>,<y> <#RRGGBB|empty>
@@ -29,6 +35,10 @@ import Foundation
 ///     expect depth front|back|auto (what the Depth control shows)   expect level <n>   expect groupdepth <path>|selected front|back|auto
 ///     expect order <entry entry …>   (the scene's items in list order: each entry is a path, `#id`, `selected`,
 ///         an object name (its first item) or `name@col,row,level`; they must appear in that order)
+///     expect ambient <ms|none>   (the longest ambient loop on the scene's items and on the map layers of the objects it uses)
+///     expect timeline <ms|none>   (the timeline's length: the longest of motion and ambient loops, at most 60000)
+///     expect actions <name,name|none>   (the ACTIONS rows shown for the selected item, or the selected object layer)
+///     expect playing <name|none>   (the action on the stage now)   expect lastplay|announced <text>   (what the last Play did / said; contains)
 ///     expect warning <code>   expect nowarning <code>   (check's warnings: off_grid, out_of_order, copies)
 ///     expect cli <text>   (the last `cli` step's output contains it)
 ///     expect footprint <w>,<d>   (the open sprite's)   footprint <w>,<d>   (object mode: the Footprint steppers)
@@ -63,6 +73,13 @@ import Foundation
 ///     mousepath x,y x,y …         (a fast real drag: down, a drag every 4 ms, up)
 ///     expect color|layer|frame|layers|frames|doc|mode|hidden|calls <value>
 ///     expect pixel <x>,<y> <color name|empty>   (the rendered pixel)
+///
+/// The setup screen's Migrate… (R9; a format-1 document opens the app on the setup screen, and the script runs from there):
+///
+///     migrate   (clicks Migrate…: the alert comes up)   answer migrate|cancel   (its buttons; Migrate runs `document migrate`, starts the server and opens the document)
+///     expect migrate offered|asking|none   (Migrate… is on the setup screen / the alert is up / neither)
+///     expect phase setup|starting|ready   expect problem <text>  (the setup screen's document problem contains it)
+///     expect migratemessage <text>   (the line under the document row contains it)
 ///
 /// The Agent window (proposals are numbered from 1, oldest first, as listed):
 ///
@@ -143,7 +160,9 @@ final class ScriptRunner {
         while Date().timeIntervalSince(started) < 60 {
             if case .ready = model.phase, model.document != nil { break }
             if case .setup(let p) = model.phase {
-                log("setup problem: \([p.node, p.document, p.cli, p.server].compactMap { $0 }.joined(separator: "; "))")
+                log("setup problem: \([p.document, p.program, p.server].compactMap { $0 }.joined(separator: "; "))")
+                // A format-1 document waits on Migrate… (R9): the script goes on from the setup screen.
+                if p.migrate { break }
                 exit(2)
             }
             try? await Task.sleep(for: .milliseconds(100))
@@ -365,10 +384,9 @@ final class ScriptRunner {
             return ok ? model.lastEdit : "not saved"
         case "revert": await model.revert(); return nil
         case "cli":
-            // An outside editor: the bundled CLI, one-shot, on the document the script runs on.
-            let nodeSetting = UserDefaults.standard.string(forKey: SettingsKey.node)
-            guard let node = Locator.findNode(setting: nodeSetting), let cli = Locator.findCLI() else { throw Failure("no node or CLI") }
-            let out = try await Locator.runCli(node: node, cli: cli, Array(words.dropFirst()) + model.documentLocation.arguments)
+            // An outside editor: the bundled program, one-shot, on the document the script runs on.
+            guard let program = Locator.findProgram() else { throw Failure("no program") }
+            let out = try await Locator.runCli(program: program, Array(words.dropFirst()) + model.documentLocation.arguments)
             // Give the server's watcher time to see the file and tell the app.
             let started = Date()
             while Date().timeIntervalSince(started) < 2 {
@@ -418,6 +436,25 @@ final class ScriptRunner {
         case "time":
             model.timeline.pause()
             model.timeline.scrub(to: Double(try int(words, 1)))
+            return nil
+        case "play" where words.count > 1:
+            let row = try actionRow(words, nameAt: 1, itemAt: 2, model: model)
+            await model.timeline.playAction(row)
+            return model.timeline.lastPlay
+        case "playat":
+            let row = try actionRow(words, nameAt: 1, itemAt: 3, model: model)
+            await model.timeline.playAction(row, hold: try int(words, 2))
+            return model.timeline.reduceMotion ? model.timeline.lastPlay : "\(row.name) held at \(words[2]) ms"
+        case "playend":
+            model.timeline.endAction(render: true)
+            return nil
+        case "reducemotion":
+            switch try arg(words, 1) {
+            case "on": model.timeline.reduceMotionOverride = true
+            case "off": model.timeline.reduceMotionOverride = false
+            case "system": model.timeline.reduceMotionOverride = nil
+            default: throw Failure("reducemotion on|off|system")
+            }
             return nil
         case "play" where model.document?.ref.kind == .object:
             model.objectEditor.play()
@@ -506,13 +543,36 @@ final class ScriptRunner {
             return nil
         case "log":
             return words.dropFirst().joined(separator: " ")
+        case "settings":
+            // The Settings window (⌘,): `settings open` shows it, `settings close` hides it.
+            switch try arg(words, 1) {
+            case "open":
+                // The app menu's Settings… item (⌘,), as a click would.
+                let item = NSApp.mainMenu?.items.first?.submenu?.items.first { $0.keyEquivalent == "," }
+                if let item, let action = item.action { NSApp.sendAction(action, to: item.target, from: item) }
+                try? await Task.sleep(for: .milliseconds(500))
+                guard Self.settingsWindow() != nil else {
+                    throw Failure("the Settings window didn't open (windows: \(NSApp.windows.map { "\($0.title)|\($0.identifier?.rawValue ?? "")|\($0.isVisible)" }.joined(separator: ", ")))")
+                }
+            case "close": Self.settingsWindow()?.close()
+            default: throw Failure("settings open|close")
+            }
+            return nil
         case "snapshot":
             let agentWindow = words.count > 2 && words[1] == "agent"
-            let out = URL(fileURLWithPath: NSString(string: try arg(words, agentWindow ? 2 : 1)).expandingTildeInPath)
+            let settingsWindow = words.count > 2 && words[1] == "settings"
+            let out = URL(fileURLWithPath: NSString(string: try arg(words, agentWindow || settingsWindow ? 2 : 1)).expandingTildeInPath)
             try? await Task.sleep(for: .milliseconds(300))
-            let window = agentWindow ? model.agent.window.flatMap { $0.isVisible ? $0 : nil } : Snapshotter.mainWindow()
-            guard let window, Snapshotter.capture(window, to: out) else { throw Failure(agentWindow ? "no Agent window (agent open first)" : "couldn't capture") }
+            let window = agentWindow ? model.agent.window.flatMap { $0.isVisible ? $0 : nil } : settingsWindow ? Self.settingsWindow() : Snapshotter.mainWindow()
+            guard let window, Snapshotter.capture(window, to: out) else {
+                throw Failure(agentWindow ? "no Agent window (agent open first)" : settingsWindow ? "no Settings window (settings open first)" : "couldn't capture")
+            }
             return out.path
+        case "migrate":
+            // The setup screen's Migrate… button: the alert comes up (`answer migrate|cancel` settles it).
+            guard case .setup(let p) = model.phase, p.migrate else { throw Failure("there's no Migrate… on screen") }
+            model.askMigrate()
+            return nil
         case "agent", "proposal", "approve", "reject", "ghost", "answer", "menus", "agentkey":
             return try await performAgent(words, model: model)
         case "righttab", "setup", "chat", "chatkey", "details", "steps", "choose", "link", "chip", "savenow", "card", "altclick", "selectuses",
@@ -1128,6 +1188,11 @@ final class ScriptRunner {
             agent.setGhostShown((try arg(words, 1)) == "on")
             return nil
         case "answer":
+            // The Migrate alert's buttons (R9), when it is up.
+            if model.migrateAsking, let which = words.dropFirst().first, which == "migrate" || which == "cancel" {
+                if which == "migrate" { await model.migrate() } else { model.migrateAsking = false }
+                return nil
+            }
             guard let a = AgentAnswer(rawValue: try arg(words, 1)) else { throw Failure("answer proceed|force|reject|cancel") }
             agent.scriptAnswer = a
             return nil
@@ -1165,6 +1230,11 @@ final class ScriptRunner {
         }
     }
 
+    /// The Settings window, when it is up.
+    static func settingsWindow() -> NSWindow? {
+        NSApp.windows.first { $0.isVisible && ($0.identifier?.rawValue.lowercased().contains("settings") == true || $0.title == "Settings" || $0.title.hasSuffix(" Settings")) }
+    }
+
     /// Waits for a stroke's paint calls to be answered (at most 10 s).
     private func waitIdle(_ objects: ObjectEditor) async {
         let started = Date()
@@ -1189,6 +1259,16 @@ final class ScriptRunner {
         case "build": got = model.build?.result.map { $0.ok ? "ok" : "failed" } ?? "none"
         case "tool": got = doc?.ref.kind == .object ? model.objectEditor.tool.rawValue : model.editor.tool.rawValue
         case "time": got = String(model.timeline.renderTime)
+        case "ambient": got = model.timeline.ambientDuration.map { String(Int($0)) } ?? "none"
+        case "timeline": got = model.timeline.duration.map { String(Int($0)) } ?? "none"
+        case "actions":
+            let rows = doc?.ref.kind == .object ? model.objectEditor.actionRows : (doc?.selectedPath.map { model.timeline.actionRows(forItem: $0) } ?? [])
+            got = rows.isEmpty ? "none" : rows.map(\.name).joined(separator: ",")
+        case "playing": got = model.timeline.playingAction ?? "none"
+        case "lastplay", "announced":
+            let said = what == "announced" ? model.timeline.lastAnnouncement : model.timeline.lastPlay
+            guard said.contains(want) else { throw Failure("expected \(what) to contain \"\(want)\", got \"\(said)\"") }
+            return "\(what) = \(said)"
         case "alert": got = model.saveAlert.map { "\($0.kind)" } ?? "none"
         case "stale": got = String(model.showsStaleBanner)
         case "mergealert": got = String(model.mergeAlert != nil)
@@ -1257,6 +1337,17 @@ final class ScriptRunner {
         case "theme": got = model.stageDark ? "dark" : "light"
         case "outputs": got = model.build?.result.map { String($0.outputs.count) } ?? "none"
         case "publishdir": got = model.build?.result?.publishDir ?? model.sessionInfo?.document?.publishDir ?? "none"
+        case "migrate":
+            if model.migrateAsking { got = "asking" }
+            else if case .setup(let p) = model.phase, p.migrate { got = "offered" }
+            else { got = "none" }
+        case "phase":
+            got = switch model.phase { case .starting: "starting"; case .setup: "setup"; case .ready: "ready" }
+        case "problem", "migratemessage":
+            var text = ""
+            if what == "problem" { if case .setup(let p) = model.phase { text = p.document ?? "" } } else { text = model.migrateMessage ?? "" }
+            guard text.contains(want) else { throw Failure("expected \(what) to contain \"\(want)\", got \"\(text)\"") }
+            return "\(what) has \"\(want)\""
         case "document": got = model.sessionInfo?.document?.name ?? "none"
         case "documentkind": got = model.sessionInfo?.document?.kind ?? "none"
         case _ where expectLayers(what, model: model) != nil: got = expectLayers(what, model: model) ?? ""
@@ -1294,6 +1385,24 @@ final class ScriptRunner {
         return "\(what) = \(got)"
     }
 
+    /// The ACTIONS row `play`/`playat` names: for the selected item (or `<item>`, which it selects),
+    /// or the selected layer of the open object.
+    private func actionRow(_ words: [String], nameAt: Int, itemAt: Int, model: AppModel) throws -> ActionRow {
+        let name = try arg(words, nameAt)
+        var rows: [ActionRow]
+        if model.document?.ref.kind == .object {
+            rows = model.objectEditor.actionRows
+        } else {
+            if words.count > itemAt { model.editor.select(words[itemAt]) }
+            guard let path = model.document?.selectedPath else { throw Failure("select an item first, or give its path") }
+            rows = model.timeline.actionRows(forItem: path)
+        }
+        guard let row = rows.first(where: { $0.name == name }) else {
+            throw Failure("no action \(name) in ACTIONS (\(rows.map(\.name).joined(separator: ", ")))")
+        }
+        return row
+    }
+
     /// Where an entry of `expect order` stands in the scene's items (list order):
     /// a path, `#id`, `selected`, an object name (its first item) or `name@col,row,level`.
     static func position(of entry: String, in doc: DocumentModel) -> Int? {
@@ -1320,6 +1429,8 @@ final class ScriptRunner {
             let busy: Bool = {
                 if model.editor.pendingEdits > 0 || model.build?.running == true || model.objectEditor.busy { return true }
                 if model.newDoc?.creating == true { return true }
+                if model.migrating { return true }
+                if case .starting = model.phase { return true }
                 if model.agent.busy { return true }
                 if model.chat.setup == .checking, model.rightTab == .agent { return true }
                 guard let doc = model.document else { return false }

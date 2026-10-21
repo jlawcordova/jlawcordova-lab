@@ -24,7 +24,7 @@ struct DocRef: Hashable, Sendable, Codable, CustomStringConvertible {
     }
 
     /// The source file a `files.changed` notification names for this doc.
-    var file: String { kind == .scene ? "scenes/\(name).mjs" : "objects/\(name).mjs" }
+    var file: String { kind == .scene ? "scenes/\(name).json" : "objects/\(name).json" }
 
     init(from decoder: Decoder) throws {
         let s = try decoder.singleValueContainer().decode(String.self)
@@ -55,7 +55,7 @@ struct SessionInfo: Codable, Sendable {
     var version: String
     var `protocol`: Int
     var pid: Int
-    /// The open document (`document.mjs`): its folder, name, kind and publish folder.
+    /// The open document (`document.info`): its folder, name, kind and publish folder.
     var document: DocumentInfo?
     /// The document's folder (the old name; `document.root` is the same path).
     var site: String
@@ -90,7 +90,6 @@ struct SiteInfo: Codable, Sendable {
     var root: String
     var from: String?
     var branch: String?
-    var node: String?
     var scenes: Int
     var objects: Int
     var problems: Int
@@ -379,7 +378,8 @@ struct MotionTrack: Sendable, Hashable, Identifiable {
     var id: String { item }
 }
 
-/// `scene.show --doc`, only the motion part of the doc.
+/// `scene.show --doc`, the motion part of the doc and its source items (for
+/// their ambient loops and actions).
 struct SceneShowMotion: Codable, Sendable {
     struct Doc: Codable, Sendable {
         struct Motion: Codable, Sendable {
@@ -392,6 +392,7 @@ struct SceneShowMotion: Codable, Sendable {
             var tracks: [Track]?
         }
         var motion: Motion?
+        var items: [JSONValue]?
     }
     var name: String
     var doc: Doc?
@@ -471,6 +472,8 @@ struct ObjectShowResult: Codable, Sendable {
     var character: Bool?
     /// The hex values the object paints (the colors meter counts them).
     var usedColors: [String]
+    /// The object's source (`object.show --doc`): its layers' ambient loops and actions.
+    var doc: JSONValue?
 
     var isBlock: Bool { kind == "block" }
     /// Layers and frames can change: a sprite with layers of its own.

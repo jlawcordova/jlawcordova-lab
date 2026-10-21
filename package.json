@@ -1,32 +1,13 @@
 {
   "name": "pixellab",
   "version": "0.0.0-dev",
-  "description": "Pixel Lab: the pixel-art engine, compiler, CLI and MCP server behind the Pixel Lab Mac app. A site installs it from git to compile its .pixellab document.",
+  "description": "The repo's tooling for Pixel Lab: scripts that drive the Rust program (crates/) and the Mac app (app/), the docs site builder and the fake Claude Code. The program itself is Rust.",
   "private": true,
   "type": "module",
   "repository": { "type": "git", "url": "https://github.com/jlawcordova/jlawcordova-lab.git" },
   "engines": { "node": ">=22" },
-  "bin": { "pixellab": "cli/bin/pixellab.mjs" },
-  "exports": {
-    "./engine": "./cli/lib/engine/engine.mjs",
-    "./iso": "./cli/lib/engine/iso.mjs",
-    "./depth": "./cli/lib/engine/depth.mjs",
-    "./motion": "./cli/lib/engine/motion.mjs",
-    "./serialize": "./cli/lib/engine/serialize.mjs",
-    "./edit": "./cli/lib/engine/edit.mjs",
-    "./starter": "./cli/lib/engine/starter.mjs",
-    "./svg": "./cli/lib/engine/svg.mjs",
-    "./compile": "./cli/lib/engine/compile.mjs",
-    "./preview": "./cli/lib/engine/preview.mjs",
-    "./document": "./cli/lib/document.mjs"
-  },
-  "files": [
-    "cli/bin",
-    "cli/lib",
-    "cli/README.md"
-  ],
   "scripts": {
-    "test": "node --test \"cli/test/**/*.test.mjs\"",
+    "test": "cargo build --release --quiet && node --test \"scripts/test/**/*.test.mjs\"",
     "docs:cli": "node scripts/docs-cli.mjs",
     "docs:site": "node scripts/docs-site/build.mjs",
     "examples": "node scripts/make-examples.mjs"

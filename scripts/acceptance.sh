@@ -2,7 +2,7 @@
 # The acceptance pass of docs/intents/2026-10-mac-app/plan.md ("What ready to use means"), end to end
 # on a temp copy of the site: scene edits → save → publish, object paint →
 # save (scripts/acceptance/scene-object.txt), then an agent over MCP saves two
-# proposals (mcp-agent.mjs, through the app bundle's CLI) and the Agent window
+# proposals (mcp-agent.mjs, through the app bundle's program) and the Agent window
 # ghosts, approves and rejects them (agent.txt); a doc with unsaved edits changes on
 # disk and is merged, reloaded and kept, and another agent's proposal is approved into an
 # unsaved copy (stale-agent.mjs, stale.txt); the document is saved as a
@@ -17,6 +17,9 @@
 # (chat-setup.txt), never the owner's Claude Code or plan. The temp site is put in depth order first, with the bundled CLI's
 # scene sort --all, and that is the base it starts from; a copy of the site's document from before its depth-order change, unsorted,
 # checks the Checks warning and its Sort button (sort.txt).
+# The app runs the pixellab program in its bundle (Contents/Helpers/pixellab) and reads format 2 only (docs/intents/2026-10-rust-engine/):
+# the temp site, the example copies and the unsorted document are migrated with the program before their scripts run, and
+# migrate.txt starts the app on a copy left in format 1: R9's problem, Migrate…, Cancel leaves it, Migrate converts it.
 # The real checkout is only read (copied). Exits 0 if every step passed.
 #
 #   scripts/acceptance.sh [out-dir]      (default: a new temp dir)
@@ -36,10 +39,20 @@ site="$out/site" state="$out/state" shots="$out/shots"
 rm -rf "$site" "$state" "$shots" && mkdir -p "$site" "$state" "$shots"
 cp -R "$real/src" "$real/scripts" "$real/package.json" "$real/package-lock.json" "$site/"
 [[ -d "$real/node_modules" ]] && ln -s "$real/node_modules" "$site/node_modules"
+program="$app/Contents/Helpers/pixellab"
+[[ -x $program ]] || { echo "no $program: run scripts/build-app.sh" >&2; exit 1; }
+export PIXELLAB_PROGRAM="$program"
+# The program reads format 2 only: a copy of a format-1 document is migrated (in place) before the app opens it.
+migrate_doc() { # migrate_doc <doc.pixellab>: no-op when it is already format 2
+  [[ -f "$1/palette.mjs" ]] && PIXELLAB_STATE="$state" "$program" document migrate --document "$1" | tail -1
+  return 0
+}
+echo "==> the temp site, migrated to format 2 (document migrate)"
+PIXELLAB_STATE="$state" "$program" document migrate --site "$site" | tail -1 || true
 # Every file Pixel Lab writes is in depth order (docs/intents/2026-10-depth-order/spec.md, R4), so the temp site starts
 # that way: sorted by the bundled CLI, and that is the base the scripts' saves and merges are measured against.
 echo "==> the temp site, put in depth order (scene sort --all)"
-PIXELLAB_STATE="$state" node "$app/Contents/Resources/cli/bin/pixellab.mjs" scene sort --all --site "$site" | head -3
+PIXELLAB_STATE="$state" "$program" scene sort --all --site "$site" | head -3
 git -C "$site" init -q && git -C "$site" add -A && git -C "$site" -c user.email=t@t -c user.name=t commit -qm base
 
 run() { # run <script> <log>
@@ -59,7 +72,7 @@ run_chat() { # run_chat <script> <log> [<example>]: on the temp site, or a temp 
   if [[ -n ${3:-} ]]; then
     # An example gets its own copy and its own state dir (its proposals count from #1).
     local doc="$out/examples/$3-chat.pixellab"
-    rm -rf "$doc" "$out/state-$3-chat" && mkdir -p "$out/examples" && cp -R "$root/examples/$3.pixellab" "$doc"
+    rm -rf "$doc" "$out/state-$3-chat" && mkdir -p "$out/examples" && cp -R "$root/examples/$3.pixellab" "$doc" && migrate_doc "$doc" > /dev/null
     where=(PIXELLAB_DOC="$doc") st="$out/state-$3-chat"
   fi
   env FAKE_CLAUDE_SIGNED_IN=1 FAKE_CLAUDE_STATE="$fake_home/state" PIXELLAB_CLAUDE_HOME="$fake_home" "${where[@]}" \
@@ -70,7 +83,7 @@ run_chat() { # run_chat <script> <log> [<example>]: on the temp site, or a temp 
 
 run_example() { # run_example <script> <log> <example>: on a temp copy of examples/<example>.pixellab
   local doc="$out/examples/$3.pixellab"
-  rm -rf "$doc" && mkdir -p "$out/examples" && cp -R "$root/examples/$3.pixellab" "$doc"
+  rm -rf "$doc" && mkdir -p "$out/examples" && cp -R "$root/examples/$3.pixellab" "$doc" && migrate_doc "$doc" > /dev/null
   sed "s#@OUT@#$shots#g" "$root/scripts/acceptance/$1" > "$out/$1"
   PIXELLAB_SCRIPT="$out/$1" PIXELLAB_DOC="$doc" PIXELLAB_STATE="$state" "$app/Contents/MacOS/PixelLab" 2>&1 | grep '^script:' > "$out/$2" || true
   tail -1 "$out/$2"
@@ -84,11 +97,11 @@ svgs=$(ls "$site"/src/assets/pixel-art/*.svg | wc -l | tr -d ' ')
 echo "published $svgs SVGs into the temp site"
 git -C "$site" add -A && git -C "$site" -c user.email=t@t -c user.name=t commit -qm "after scene-object"
 echo "==> an agent over MCP proposes"
-PIXELLAB_CLI_PATH="$app/Contents/Resources/cli/bin/pixellab.mjs" node "$root/scripts/acceptance/mcp-agent.mjs" "$site" "$state"
+node "$root/scripts/acceptance/mcp-agent.mjs" "$site" "$state"
 echo "==> the Agent window: ghost, approve, reject"
 run agent.txt agent.log
 echo "==> a doc changed on disk under unsaved edits: merge, reload, keep; an approve merged in"
-PIXELLAB_CLI_PATH="$app/Contents/Resources/cli/bin/pixellab.mjs" node "$root/scripts/acceptance/stale-agent.mjs" "$site" "$state"
+node "$root/scripts/acceptance/stale-agent.mjs" "$site" "$state"
 run stale.txt stale.log
 echo "==> the Agent chat on the site: a chat's proposal ghosted, approved and rejected from its card; the Agent window"
 run_chat chat.txt chat.log
@@ -102,21 +115,26 @@ copied=$(ls "$shots"/copy-out/*.svg | wc -l | tr -d ' ')
 echo "==> scene layers: the panel, the stage, the menu, the inspector; the same SVG with layers"
 run layers.txt layers.log
 cmp "$shots/layers-before/hero-island.svg" "$shots/layers-after/hero-island.svg" || { echo "hero-island.svg changed when its layers were saved" >&2; exit 1; }
-scene="$site/src/assets/pixel-art/jlawcordova.pixellab/scenes/hero-island.mjs"
-grep -q '^  layers: \[$' "$scene" || { echo "the saved hero island has no layers" >&2; exit 1; }
+scene="$site/src/assets/pixel-art/jlawcordova.pixellab/scenes/hero-island.json"
+grep -q '^  "layers": \[$' "$scene" || { echo "the saved hero island has no layers" >&2; exit 1; }
 if grep -qE 'hidden|locked' "$scene"; then echo "hidden or locked state went into the scene file" >&2; exit 1; fi
 grep -q '"group-3"' "$state/layer-view.json" || { echo "the hidden Sky layer isn't in the app's view state" >&2; exit 1; }
-echo "hero-island.svg identical with layers; the scene holds $(grep -c "layer: '" "$scene") items in layers and no view state"
+echo "hero-island.svg identical with layers; the scene holds $(grep -c '"layer": "' "$scene") items in layers and no view state"
 echo "==> the example documents: layers from the file, three and four levels deep"
 run_example examples-harbor.txt examples-harbor.log harbor
 run_example examples-town.txt examples-town.log town
 echo "==> depth order: the pine moved behind the house, the override, the saved file"
 run_example examples-depth.txt examples-depth.log harbor
+echo "==> ambient loops and actions: the barrel's loop on the timeline, the boat's hop played, mid-play and at rest, and under Reduce Motion"
+run_example actions.txt actions.log harbor
+for shot in actions-mid-play-light actions-rest-light; do [[ -s "$shots/$shot.png" ]] || { echo "actions.txt didn't snapshot $shot" >&2; exit 1; }; done
+cmp -s "$shots/actions-mid-play-light.png" "$shots/actions-rest-light.png" && { echo "the boat looks the same mid-hop as at rest" >&2; exit 1; }
+echo "the hop played: mid-play differs from the rest frame"
 echo "==> the Agent chat: Claude Code's setup (the fake), chats, steps, a question, Stop"
 claude_home="$out/claude-home" chat_state="$out/chat-state"
 rm -rf "$claude_home" "$chat_state" && mkdir -p "$claude_home" "$chat_state"
 doc="$out/examples/chat.pixellab"
-rm -rf "$doc" && cp -R "$root/examples/harbor.pixellab" "$doc"
+rm -rf "$doc" && cp -R "$root/examples/harbor.pixellab" "$doc" && migrate_doc "$doc" > /dev/null
 sed "s#@OUT@#$shots#g" "$root/scripts/acceptance/chat-setup.txt" > "$out/chat-setup.txt"
 FAKE_CLAUDE_INSTALL_S=1 FAKE_CLAUDE_LOGIN_MS=2500 PIXELLAB_CLAUDE_HOME="$claude_home" PIXELLAB_CLAUDE_INSTALLER="$root/scripts/fake-claude/install.sh" \
   PIXELLAB_SCRIPT="$out/chat-setup.txt" PIXELLAB_DOC="$doc" PIXELLAB_STATE="$chat_state" "$app/Contents/MacOS/PixelLab" 2>&1 | grep '^script:' > "$out/chat-setup.log" || true
@@ -126,7 +144,7 @@ proposal=$(ls "$chat_state"/proposals/*.json | head -1)
 grep -q '"chat": {' "$proposal" && grep -q '"number": 1' "$proposal" || { echo "the chat's proposal doesn't name its chat and number" >&2; exit 1; }
 grep -q '"chat":{"id"' "$chat_state/activity.jsonl" || { echo "no chat lines in the activity log" >&2; exit 1; }
 [[ $(ls "$chat_state"/chats/*.json | wc -l | tr -d ' ') == 2 ]] || { echo "expected 2 chats in the state dir" >&2; exit 1; }
-[[ -z $(find "$doc" -name '*.json' ! -name manifest.json) ]] || { echo "chat state went into the document" >&2; exit 1; }
+[[ -z $(find "$doc" -name '*.json' ! -name manifest.json ! -name palette.json ! -path "$doc/scenes/*" ! -path "$doc/objects/*") ]] || { echo "chat state went into the document" >&2; exit 1; }
 # R3: each chat is one Claude session, its follow-ups resumed (the stopped turn never got to save one).
 sessions=("$claude_home"/.local/share/claude/fake/fake-claude-state/sessions/*.json)
 [[ ${#sessions[@]} == 2 ]] || { echo "expected 2 Claude sessions for 2 chats, found ${#sessions[@]}: follow-ups didn't resume (R3)" >&2; exit 1; }
@@ -136,7 +154,7 @@ echo "==> the Agent chat on the harbor example: layers as chips, Option-click, p
 run_chat chat-harbor.txt chat-harbor.log harbor
 echo "==> the Agent chat across launches: the session resumed, a proposal settled while closed, a lost session"
 relaunch_doc="$out/examples/relaunch.pixellab" relaunch_state="$out/state-relaunch" relaunch_fake="$out/fake-relaunch"
-rm -rf "$relaunch_doc" "$relaunch_state" "$relaunch_fake" && cp -R "$root/examples/harbor.pixellab" "$relaunch_doc" && mkdir -p "$relaunch_state"
+rm -rf "$relaunch_doc" "$relaunch_state" "$relaunch_fake" && cp -R "$root/examples/harbor.pixellab" "$relaunch_doc" && migrate_doc "$relaunch_doc" > /dev/null && mkdir -p "$relaunch_state"
 relaunch() { # relaunch <part>
   sed "s#@OUT@#$shots#g" "$root/scripts/acceptance/chat-relaunch-$1.txt" > "$out/chat-relaunch-$1.txt"
   FAKE_CLAUDE_SIGNED_IN=1 FAKE_CLAUDE_STATE="$relaunch_fake" PIXELLAB_CLAUDE_HOME="$fake_home" PIXELLAB_DOC="$relaunch_doc" \
@@ -147,7 +165,7 @@ relaunch() { # relaunch <part>
 relaunch 1
 # Pixel Lab is closed: the chat's proposal is rejected from a terminal.
 proposal=$(basename "$(ls "$relaunch_state"/proposals/*.json | head -1)" .json)
-PIXELLAB_STATE="$relaunch_state" node "$app/Contents/Resources/cli/bin/pixellab.mjs" proposal reject "$proposal" --document "$relaunch_doc"
+PIXELLAB_STATE="$relaunch_state" "$program" proposal reject "$proposal" --document "$relaunch_doc"
 relaunch 2
 # Claude Code loses the chat's session.
 rm -rf "$relaunch_fake/sessions"
@@ -156,14 +174,28 @@ echo "==> sort: a document written before depth order, the Checks warning, Sort,
 # The site's document is in depth order since its own depth-order change (f5d74e3), so the unsorted one is
 # the document as it was just before it, read (not checked out) from the site's history.
 unsorted_rev=${PIXELLAB_UNSORTED_REV:-6d19714}
+old_document() { # old_document <dest>: the site's document at $unsorted_rev (format 1, unsorted), read from its history
+  rm -rf "$1" "$out/old-src" && mkdir -p "$out/old-src"
+  git -C "$real" archive "$unsorted_rev" src/assets/pixel-art/jlawcordova.pixellab | tar -x -C "$out/old-src"
+  mv "$out/old-src/src/assets/pixel-art/jlawcordova.pixellab" "$1"
+}
 doc="$out/examples/unsorted.pixellab"
-rm -rf "$doc" "$out/unsorted-src" && mkdir -p "$out/unsorted-src"
-git -C "$real" archive "$unsorted_rev" src/assets/pixel-art/jlawcordova.pixellab | tar -x -C "$out/unsorted-src"
-mv "$out/unsorted-src/src/assets/pixel-art/jlawcordova.pixellab" "$doc"
+old_document "$doc"
+migrate_doc "$doc" > /dev/null
 sed "s#@OUT@#$shots#g" "$root/scripts/acceptance/sort.txt" > "$out/sort.txt"
 PIXELLAB_SCRIPT="$out/sort.txt" PIXELLAB_DOC="$doc" PIXELLAB_STATE="$state" "$app/Contents/MacOS/PixelLab" 2>&1 | grep '^script:' > "$out/sort.log" || true
 tail -1 "$out/sort.log"
 grep -q 'all steps passed' "$out/sort.log"
+# (-documentPath "" keeps the owner's saved Settings out of the Settings snapshot.)
+echo "==> migrate: a format-1 document is R9's problem; Migrate… asks, Cancel leaves it, Migrate converts it"
+old="$out/examples/old-format.pixellab"
+old_document "$old"
+sed "s#@OUT@#$shots#g" "$root/scripts/acceptance/migrate.txt" > "$out/migrate.txt"
+PIXELLAB_SCRIPT="$out/migrate.txt" PIXELLAB_DOC="$old" PIXELLAB_STATE="$out/state-migrate" "$app/Contents/MacOS/PixelLab" -documentPath "" 2>&1 | grep '^script:' > "$out/migrate.log" || true
+tail -1 "$out/migrate.log"
+grep -q 'all steps passed' "$out/migrate.log"
+[[ -f "$old/palette.json" && ! -e "$old/palette.mjs" && -z $(find "$old" -name '*.mjs') ]] || { echo "the migrated document still has .mjs sources" >&2; exit 1; }
+echo "the old-format copy is migrated: $(ls "$old/scenes" | wc -l | tr -d ' ') scenes, $(ls "$old/objects" | wc -l | tr -d ' ') objects, all .json"
 echo "==> the temp site after the run"
 git -C "$site" diff --stat HEAD~1 HEAD
 git -C "$site" diff --stat

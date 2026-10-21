@@ -1,6 +1,8 @@
 # Spec: Pixel Lab owns the art: a `.pixellab` document, and a build that publishes (from intent.md 2026-10-19)
 Status: draft (reviewed with its intent, plan and code in one PR, at the owner's request).
 
+> **Superseded in part (2026-10-21):** the engine and the CLI this spec moves into the repo have since moved to Rust ([`../2026-10-rust-engine/`](../2026-10-rust-engine/spec.md)): `cli/lib/engine/` became `crates/engine`, the Node CLI became the `pixellab` program in `crates/pixellab`, the package and its exports (R7's `pixellab/engine`, `pixellab/compile`, …) are gone, and documents are format 2 (JSON sources, not the `.mjs` files R1 describes). What stays: the document as a folder bundle, the manifest, the doors and `art build` as Publish. [Document format](../../document-format.md) and [the site contract](../../site-contract.md) are the current references.
+
 This change supersedes the "site is the source of truth" section of the architecture record (`../2026-10-mac-app/plan.md`): the engine's home is this repo, and the art lives in a document Pixel Lab owns. The site side is the change `2026-10-art-to-pixel-lab` in the site repo, which depends on this one.
 
 ## Requirements

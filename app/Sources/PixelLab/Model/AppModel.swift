@@ -13,11 +13,13 @@ enum Zoom: Hashable, Sendable {
 
 /// Why the app can't open the document yet; the setup screen shows it.
 struct SetupProblem: Equatable {
-    var node: String?
     var document: String?
-    var cli: String?
+    /// The program is missing from the app.
+    var program: String?
     var server: String?
-    var isEmpty: Bool { node == nil && document == nil && cli == nil && server == nil }
+    /// The document is in format 1 (R9): the setup screen offers Migrate….
+    var migrate = false
+    var isEmpty: Bool { document == nil && program == nil && server == nil }
 }
 
 /// The app's state: the server connection, the document's scenes and objects,
@@ -51,8 +53,14 @@ final class AppModel {
     var stageViewport: CGSize = .zero
     /// The sidebar row or cell under the pointer ("scene:x" / "object:y").
     var hovered: String?
-    /// Settings changed the site or node path since the server started.
+    /// Settings changed the document path since the server started.
     var settingsNeedRestart = false
+    /// Migrate… asked for (R9): the alert is up.
+    var migrateAsking = false
+    /// `document migrate` is running, then the server restarts on the migrated document.
+    var migrating = false
+    /// A line under the setup screen's rows: why the migration failed.
+    var migrateMessage: String?
     /// A short-lived message (a failed save, a server restart) for the status line.
     var notice: String?
 
@@ -172,33 +180,27 @@ final class AppModel {
 
     // MARK: Server
 
-    /// Finds node, the CLI and the site, starts the server and loads the site.
+    /// Finds the program and the document, starts the server and loads the document.
     func bootstrap() async {
-        phase = .starting("Finding Node.js…")
+        phase = .starting("Starting…")
         if let old = connection {
             eventsTask?.cancel()
             await old.stop()
             connection = nil
         }
-        let nodeSetting = UserDefaults.standard.string(forKey: SettingsKey.node)
-        let node = await Task.detached { Locator.findNode(setting: nodeSetting) }.value
         let location = documentLocation
         var problem = SetupProblem()
-        if node == nil {
-            problem.node = (nodeSetting ?? "").isEmpty
-                ? "Pixel Lab needs Node.js 22 or later, and couldn't find node in your shell's PATH, /opt/homebrew/bin or /usr/local/bin."
-                : "There's no node at \(nodeSetting ?? "")."
-        }
         problem.document = Locator.documentProblem(location)
-        let cli = Locator.findCLI()
-        if cli == nil { problem.cli = "The pixellab CLI is missing from the app (Contents/Resources/cli)." }
-        guard problem.isEmpty, let node, let cli else {
+        problem.migrate = Locator.needsMigration(location)
+        let program = Locator.findProgram()
+        if program == nil { problem.program = "The pixellab program is missing from the app (Contents/Helpers/pixellab)." }
+        guard problem.isEmpty, let program else {
             phase = .setup(problem)
             return
         }
 
         phase = .starting("Starting the pixellab server…")
-        let conn = ServerConnection(launch: ServerLaunch(node: node, cli: cli, location: location))
+        let conn = ServerConnection(launch: ServerLaunch(program: program, location: location))
         do {
             sessionInfo = try await conn.start()
         } catch {
@@ -261,12 +263,13 @@ final class AppModel {
             var objectsChanged: [String] = []
             var everything = false
             for file in files {
-                if file == "palette.mjs" { everything = true }
-                else if file.hasPrefix("objects/"), file.hasSuffix(".mjs") {
-                    objectsChanged.append(String(file.dropFirst("objects/".count).dropLast(".mjs".count)))
+                if file == "palette.json" { everything = true }
+                else if file.hasPrefix("objects/"), file.hasSuffix(".json") {
+                    objectsChanged.append(String(file.dropFirst("objects/".count).dropLast(".json".count)))
                 }
             }
             if everything { thumbnails.invalidateAll() } else { thumbnails.invalidate(objectsChanged) }
+            timeline.forgetObjects(everything ? nil : objectsChanged)
             if everything { await loadPalette() }
             if let doc = document, doc.ref.kind == .object, everything || objectsChanged.contains(doc.ref.name) { objectEditor.docChanged() }
             await loadLists()
@@ -499,7 +502,7 @@ final class AppModel {
                 } catch {
                     notice = "Couldn't list the items of \(doc.ref.name): \(error.localizedDescription)"
                 }
-                if timeline.hasMotion || !timeline.tracks.isEmpty { await loadMotion() }
+                await loadMotion()
             } while doc.needsItems && document === doc
             doc.loadingItems = false
             if document === doc { editor.syncDrafts() }
@@ -522,7 +525,20 @@ final class AppModel {
         guard let doc = document, doc.ref.kind == .scene, let connection else { return }
         do {
             let r: SceneShowMotion = try await connection.call("scene.show", ["name": .string(doc.ref.name), "doc": true])
-            if document === doc { timeline.load(r) }
+            // The layers of the objects the scene places carry ambient loops and actions too.
+            var names = Set<String>()
+            Animation.walk(r.doc?.items) { _, item in if let o = item["object"]?.stringValue { names.insert(o) } }
+            var objects: [String: [Int: ElementAnimation]] = [:]
+            for name in names.sorted() where timeline.objectAnimation[name] == nil {
+                let o: ObjectShowResult? = try? await connection.call("object.show", ["name": .string(name), "doc": true])
+                objects[name] = Animation.layers(of: o?.doc)
+            }
+            if document === doc {
+                let before = (timeline.duration, timeline.itemAnimation)
+                timeline.load(r, objects: objects)
+                // A loop that came or went changes what the stage shows at a time.
+                if before.0 != timeline.duration || before.1 != timeline.itemAnimation { timeline.invalidate(); requestRender() }
+            }
         } catch {
             if document === doc { timeline.load(SceneShowMotion(name: doc.ref.name, doc: nil)) }
         }
@@ -663,16 +679,15 @@ final class AppModel {
     // MARK: Documents
 
     /// New Document…: a save panel for the `.pixellab`, `document new` through
-    /// the CLI (the server needn't be up), then a switch to it.
+    /// the program (the server needn't be up), then a switch to it.
     func newDocument(at path: String? = nil) async {
         guard let path = path ?? SetupView.chooseNewDocument(title: "New Pixel Lab document", name: "Untitled.pixellab", start: documentPath) else { return }
-        let nodeSetting = UserDefaults.standard.string(forKey: SettingsKey.node)
-        guard let node = Locator.findNode(setting: nodeSetting), let cli = Locator.findCLI() else {
-            notice = "Pixel Lab needs Node.js and its CLI to make a document."
+        guard let program = Locator.findProgram() else {
+            notice = "Pixel Lab's program is missing, so it can't make a document."
             return
         }
         do {
-            let out = try await Locator.runCli(node: node, cli: cli, ["document", "new", path, "--json"])
+            let out = try await Locator.runCli(program: program, ["document", "new", path, "--json"])
             let made = try JSONDecoder().decode(DocumentNewResult.self, from: Data(out.utf8))
             await switchDocument(to: made.root)
         } catch {
@@ -682,6 +697,46 @@ final class AppModel {
                 phase = .setup(p)
             }
         }
+    }
+
+    /// The format-1 document's name for the Migrate alert (R9).
+    var migrateName: String {
+        switch documentLocation {
+        case .document(let p): return URL(fileURLWithPath: p).lastPathComponent
+        case .site(let p):
+            let art = URL(fileURLWithPath: p).appendingPathComponent("src/assets/pixel-art")
+            let old = ((try? FileManager.default.contentsOfDirectory(atPath: art.path)) ?? []).sorted().first {
+                $0.hasSuffix(".pixellab") && FileManager.default.fileExists(atPath: art.appendingPathComponent("\($0)/palette.mjs").path)
+            }
+            return old ?? "The document"
+        }
+    }
+
+    /// Migrate… (the setup screen, R9): asks first.
+    func askMigrate() {
+        guard case .setup(let p) = phase, p.migrate, !migrating else { return }
+        migrateMessage = nil
+        migrateAsking = true
+    }
+
+    /// The alert's Migrate: `pixellab document migrate` on the document, in place, then the server starts on it.
+    func migrate() async {
+        migrateAsking = false
+        guard case .setup(let p) = phase, p.migrate, !migrating else { return }
+        guard let program = Locator.findProgram() else {
+            migrateMessage = "Pixel Lab's program is missing, so it can't migrate the document."
+            return
+        }
+        migrating = true
+        migrateMessage = nil
+        defer { migrating = false }
+        do {
+            _ = try await Locator.runCli(program: program, ["document", "migrate"] + documentLocation.arguments)
+        } catch {
+            migrateMessage = "Couldn't migrate: \(error.localizedDescription)"
+            return
+        }
+        await bootstrap()
     }
 
     /// Open Document… (⌘O): a `.pixellab` folder, or a site checkout holding one.

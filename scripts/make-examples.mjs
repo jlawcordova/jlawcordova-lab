@@ -1,28 +1,34 @@
 #!/usr/bin/env node
 // Writes the example documents in examples/ (docs/intents/2026-10-scene-layers/plan.md,
-// "As built"): small .pixellab documents with scene layers, to try the app on and to
-// test with. Everything is made here, from the starter palette, so the output is the
-// same on every run; `npm test` checks the committed examples match it.
+// "As built"): small .pixellab documents in format 2 with scene layers, to try the app
+// on and to test with. They are made by the Rust program (target/release/pixellab,
+// built with `cargo build --release` when missing): `document new`, `scene new`-style
+// skeletons, then `scene place`, `scene layer new`, `scene track add`, `scene key set`,
+// `scene ambient` and `scene action`. The output is the same on every run;
+// scripts/test/examples.test.mjs checks the committed examples match it.
 //
 //   node scripts/make-examples.mjs [--out <dir>]     (default: examples/)
 //
-// harbor.pixellab   a small island: nested layers (Ground, Village › Houses › each
-//                   house, Harbor › Dock and an animated Boat), the site's { group }
+// What no command can say is written as canonical JSON first: the objects (blocks
+// have no command that sets their size or faces, and a sprite's anchor is not always
+// its bottom center), each scene's output and viewBox, and the manifest's budgets.
+//
+// harbor.pixellab   a small island: nested layers (Ground, Village > Houses > each
+//                   house, Harbor > Dock and an animated Boat), the site's { group }
 //                   wrappers around ground tiles and objects, a few items in no layer,
-//                   and harbor-flat, the same scene without layers (it publishes the
-//                   same SVG).
+//                   a barrel that bobs and a boat that hops, and harbor-flat, the same
+//                   scene without layers (it publishes the same SVG).
 // town.pixellab     a bigger island (about 400 items) with four districts of streets
 //                   of houses: about 60 layers, four levels deep, no wrappers.
 
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import * as engine from '../cli/lib/engine/engine.mjs';
-import * as iso from '../cli/lib/engine/iso.mjs';
-import { serialize } from '../cli/lib/engine/serialize.mjs';
-
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
+const BIN = join(REPO, 'target', 'release', 'pixellab');
 
 // ------------------------------------------------------------------ objects
 
@@ -138,13 +144,13 @@ export const OBJECTS = {
  * A placement before it's put in depth order: an object on a tile, with its
  * layer, an id, and the site's wrapper attributes when it has one.
  * @typedef {{ object: string, tile: number[], layer?: string, id?: string, wrap?: 'ground' | 'object' }} Place
+ * @typedef {{ id: string, name: string, parent?: string }} Layer
  */
 
 /**
  * How far back an item sits: a first guess at the back-to-front order (row +
- * col of its last tile, then level). It only gives the list a good start, which
- * keeps the compiler's runs of one color together; writeExamples then puts
- * every scene in the engine's depth order, which is what the files hold.
+ * col of its last tile, then level). Placements go in this order; the program
+ * puts every scene in its depth order as each item lands.
  */
 function depth(/** @type {Place} */ p) {
   const obj = /** @type {any} */ (OBJECTS)[p.object];
@@ -153,35 +159,20 @@ function depth(/** @type {Place} */ p) {
   return [c + w - 1 + r + d - 1, l, obj.kind === 'block' ? 0 : 1];
 }
 
-/**
- * Turns placements into a scene's items, in a first back-to-front order, each in the
- * site's entrance wrapper when it has one (its data-x/data-y the item's foot).
- * @param {Place[]} places
- * @param {number[]} origin
- */
-function itemsOf(places, origin) {
-  const sorted = places
+/** @param {Place[]} places */
+const inFirstOrder = (places) =>
+  places
     .map((p, i) => ({ p, i, k: depth(p) }))
     .sort((a, b) => a.k[0] - b.k[0] || a.k[1] - b.k[1] || a.k[2] - b.k[2] || a.i - b.i)
     .map(({ p }) => p);
-  return sorted.map((p) => {
-    const item = { object: p.object, ...(p.id ? { id: p.id } : {}), ...(p.layer ? { layer: p.layer } : {}), at: { tile: [...p.tile] } };
-    if (!p.wrap) return item;
-    const [x, y] = iso.tileToPx(p.tile, origin);
-    const group =
-      p.wrap === 'ground'
-        ? { class: 'enter', 'data-enter': 'ground', 'data-col': String(p.tile[0]), 'data-row': String(p.tile[1]), 'data-x': String(x), 'data-y': String(y) }
-        : { class: 'enter', 'data-enter': 'object', 'data-x': String(x), 'data-y': String(y) };
-    return { group, items: [item] };
-  });
-}
 
-/** The same scene with every trace of layers taken out. */
-function withoutLayers(/** @type {any} */ scene) {
-  const strip = (/** @type {any[]} */ items) =>
-    items.map((it) => ('group' in it ? { ...it, items: strip(it.items) } : (({ layer: _l, ...rest }) => rest)(it)));
-  const { layers: _layers, ...rest } = scene;
-  return { ...rest, items: strip(scene.items) };
+/** The attributes of the site's entrance wrapper: data-x/data-y are the tile's corner in pixels, a level (16 px) up. */
+function wrapper(/** @type {Place} */ p) {
+  const [c, r, l] = p.tile;
+  const [x, y] = [String((c - r) * 16), String((c + r) * 8 - l * 16)];
+  return p.wrap === 'ground'
+    ? { class: 'enter', 'data-enter': 'ground', 'data-col': String(c), 'data-row': String(r), 'data-x': x, 'data-y': y }
+    : { class: 'enter', 'data-enter': 'object', 'data-x': x, 'data-y': y };
 }
 
 /**
@@ -190,7 +181,6 @@ function withoutLayers(/** @type {any} */ scene) {
 const HARBOR_MAP = ['GGGGGGSW', 'GGGGGGSW', 'GGPPPGSW', 'GGPGPGSW', 'GGPPPPDD', 'GGGGGGSW', 'GGGGGSSW', 'SSSSSSWW'];
 
 function harbor() {
-  const origin = [0, 0];
   /** @type {Place[]} */
   const places = [];
   const ground = { G: ['grass', 'grass'], S: ['sand', 'beach'], P: ['path', 'paths'], D: ['dock', 'dock'], W: ['water', 'water'] };
@@ -215,41 +205,43 @@ function harbor() {
   for (const t of [[0, 0], [5, 0], [0, 4], [1, 6], [5, 2]]) places.push({ object: 'tree', tile: [...t, 0], layer: 'trees', wrap: 'object' });
   for (const t of [[3, 0], [0, 6], [5, 6]]) places.push({ object: 'pine', tile: [...t, 0], layer: 'trees', wrap: 'object' });
   for (const t of [[5, 3], [5, 5]]) places.push({ object: 'lamp', tile: [...t, 0], layer: 'lamps', wrap: 'object' });
-  for (const t of [[6, 3], [7, 4]]) places.push({ object: 'barrel', tile: [...t, 0], layer: 'dock' });
+  // The first barrel bobs on the dock (an ambient loop); the boat sails and hops.
+  places.push({ object: 'barrel', tile: [6, 3, 0], id: 'barrel', layer: 'dock' });
+  places.push({ object: 'barrel', tile: [7, 4, 0], layer: 'dock' });
   places.push({ object: 'boat', tile: [7, 0, -1], id: 'boat', layer: 'boat' });
   // In no layer: they show at the top level of the tree.
   places.push({ object: 'rock', tile: [6, 6, 0], wrap: 'object' });
   places.push({ object: 'rock', tile: [0, 7, 0] });
-  const scene = {
-    output: 'harbor.svg',
-    viewBox: [-136, -56, 272, 200],
-    origin,
-    layers: [
-      { id: 'ground', name: 'Ground' },
-      { id: 'grass', name: 'Grass', parent: 'ground' },
-      { id: 'paths', name: 'Paths', parent: 'ground' },
-      { id: 'beach', name: 'Beach', parent: 'ground' },
-      { id: 'water', name: 'Water', parent: 'ground' },
-      { id: 'village', name: 'Village' },
-      { id: 'houses', name: 'Houses', parent: 'village' },
-      { id: 'red-house', name: 'Red house', parent: 'houses' },
-      { id: 'wood-house', name: 'Wood house', parent: 'houses' },
-      { id: 'town-hall', name: 'Town hall', parent: 'houses' },
-      { id: 'garden', name: 'Garden', parent: 'village' },
-      { id: 'harbor', name: 'Harbor' },
-      { id: 'dock', name: 'Dock', parent: 'harbor' },
-      { id: 'boat', name: 'Boat', parent: 'harbor' },
-      { id: 'lamps', name: 'Lamps', parent: 'harbor' },
-      { id: 'trees', name: 'Trees' },
-    ],
-    items: itemsOf(places, origin),
+  /** @type {Layer[]} */
+  const layers = [
+    { id: 'ground', name: 'Ground' },
+    { id: 'grass', name: 'Grass', parent: 'ground' },
+    { id: 'paths', name: 'Paths', parent: 'ground' },
+    { id: 'beach', name: 'Beach', parent: 'ground' },
+    { id: 'water', name: 'Water', parent: 'ground' },
+    { id: 'village', name: 'Village' },
+    { id: 'houses', name: 'Houses', parent: 'village' },
+    { id: 'red-house', name: 'Red house', parent: 'houses' },
+    { id: 'wood-house', name: 'Wood house', parent: 'houses' },
+    { id: 'town-hall', name: 'Town hall', parent: 'houses' },
+    { id: 'garden', name: 'Garden', parent: 'village' },
+    { id: 'harbor', name: 'Harbor' },
+    { id: 'dock', name: 'Dock', parent: 'harbor' },
+    { id: 'boat', name: 'Boat', parent: 'harbor' },
+    { id: 'lamps', name: 'Lamps', parent: 'harbor' },
+    { id: 'trees', name: 'Trees' },
+  ];
+  /** Run on a scene after its items are placed (and the layers made): its motion, ambient loop and action. */
+  const finish = (/** @type {(...a: string[]) => void} */ run, /** @type {string} */ scene) => {
     // The boat sails three rows along the shore and back: 2:1 steps, on the grid.
-    motion: {
-      duration: 8000,
-      tracks: [{ item: 'boat', keys: [{ t: 0 }, { t: 3500, move: [-48, 24] }, { t: 4500, move: [-48, 24] }] }],
-    },
+    run('scene', 'track', 'add', scene, 'boat', '--duration', '8000');
+    run('scene', 'key', 'set', scene, 'boat', '--time', '3500', '--move', '-48,24');
+    run('scene', 'key', 'set', scene, 'boat', '--time', '4500', '--move', '-48,24');
+    // The barrel bobs a pixel, and the boat hops when the page says "hop".
+    run('scene', 'ambient', scene, 'barrel', '--duration', '3000', '--keys', JSON.stringify([{ t: 0, move: [0, 0] }, { t: 1500, move: [0, -1] }]));
+    run('scene', 'action', scene, 'boat', 'hop', '--duration', '480', '--keys', JSON.stringify([{ t: 0, move: [0, 0] }, { t: 120, move: [0, -4] }, { t: 240, move: [0, -6] }, { t: 360, move: [0, -4] }]));
   };
-  return { harbor: scene, 'harbor-flat': { ...withoutLayers(scene), output: 'harbor-flat.svg' } };
+  return { scenes: [{ name: 'harbor', output: 'harbor.svg', viewBox: [-136, -56, 272, 200], places, layers, finish }, { name: 'harbor-flat', output: 'harbor-flat.svg', viewBox: [-136, -56, 272, 200], places, layers: [], finish }] };
 }
 
 /** A small, fixed pseudo-random sequence, so the town is the same on every run. */
@@ -266,7 +258,6 @@ function random(/** @type {number} */ seed) {
  * districts of three streets of three houses, with trees between.
  */
 function town() {
-  const origin = [0, 0];
   const rand = random(20261020);
   /** @type {Place[]} */
   const places = [];
@@ -274,7 +265,7 @@ function town() {
   for (let r = 0; r < 16; r++) {
     for (let c = 0; c < 16; c++) places.push({ object: isPath(c, r) ? 'path' : 'grass', tile: [c, r, 0], layer: isPath(c, r) ? 'town-paths' : 'town-grass' });
   }
-  /** @type {{ id: string, name: string, parent?: string }[]} */
+  /** @type {Layer[]} */
   const layers = [
     { id: 'land', name: 'Land' },
     { id: 'town-grass', name: 'Grass', parent: 'land' },
@@ -316,77 +307,112 @@ function town() {
     places.push({ object: 'lamp', tile: [k, 7, 0] });
     places.push({ object: 'lamp', tile: [8, k, 0] });
   }
-  return {
-    town: {
-      output: 'town.svg',
-      viewBox: [-264, -56, 528, 336],
-      origin,
-      layers,
-      items: itemsOf(places, origin),
-    },
-  };
+  return { scenes: [{ name: 'town', output: 'town.svg', viewBox: [-264, -56, 528, 336], places, layers, finish: () => {} }] };
 }
 
 // ---------------------------------------------------------------- documents
-
-/** The starter palette as a new document's palette.mjs (as document.new writes it). */
-async function paletteText() {
-  const text = await readFile(join(REPO, 'cli/lib/engine/starter-palette.mjs'), 'utf8');
-  const body = text.slice(text.indexOf('export default'));
-  return `// The document's palette: objects name their colors from it. Colors are\n// added by hand. world: at most 32; outfit: at most 16, only for objects\n// that extend character. Names are unique across the tiers.\n${body}`;
-}
 
 /** The example documents: their manifests, the objects they use and their scenes. */
 export function examples() {
   return {
     harbor: {
-      manifest: { format: 1, name: 'harbor' },
+      manifest: {
+        format: 2,
+        name: 'harbor',
+        publish: { budgets: { 'harbor.svg': { raw: 131072, gzip: 32768 }, 'harbor-flat.svg': { raw: 131072, gzip: 32768 } } },
+      },
       objects: ['grass', 'sand', 'path', 'water', 'dock', 'walls', 'roof-red', 'roof-wood', 'hall-walls', 'hall-roof', 'tree', 'pine', 'rock', 'barrel', 'lamp', 'flowers', 'boat'],
-      scenes: harbor(),
+      ...harbor(),
     },
     town: {
-      manifest: { format: 1, name: 'town', publish: { budgets: { 'town.svg': { raw: 409600, gzip: 81920 } } } },
+      manifest: { format: 2, name: 'town', publish: { budgets: { 'town.svg': { raw: 409600, gzip: 81920 } } } },
       objects: ['grass', 'path', 'walls', 'roof-red', 'roof-wood', 'tree', 'pine', 'lamp'],
-      scenes: town(),
+      ...town(),
     },
   };
 }
 
+/** An object as canonical JSON text: the form the program writes (rows one per line, size and anchor inline). */
+function objectText(/** @type {any} */ o) {
+  const lines = (/** @type {Record<string, string>} */ m, /** @type {string} */ pad) =>
+    Object.entries(m)
+      .map(([k, v]) => `${pad}${JSON.stringify(k)}: ${JSON.stringify(v)}`)
+      .join(',\n');
+  if (o.kind === 'block') {
+    return `{\n  "kind": "block",\n  "size": [${o.size.join(', ')}],\n  "faces": {\n${lines(o.faces, '    ')}\n  }\n}\n`;
+  }
+  const rows = o.layers[0].map.map((/** @type {string} */ r) => `        ${JSON.stringify(r)}`).join(',\n');
+  return `{\n  "kind": "sprite",\n  "anchor": [${o.anchor.join(', ')}],\n  "keys": {\n${lines(o.keys, '    ')}\n  },\n  "layers": [\n    {\n      "map": [\n${rows}\n      ]\n    }\n  ]\n}\n`;
+}
+
+/** A scene's canonical start: its settings and no items. */
+const sceneText = (/** @type {any} */ s) =>
+  `{\n  "output": ${JSON.stringify(s.output)},\n  "viewBox": [${s.viewBox.join(', ')}],\n  "origin": [0, 0],\n  "items": []\n}\n`;
+
 /**
- * Writes every example document under `out`, after checking each with the
- * engine. Returns the files written, relative to `out`.
+ * Writes every example document under `out` with the program, and returns the
+ * files written, relative to `out`.
  * @param {string} out
  */
 export async function writeExamples(out) {
-  const palette = await paletteText();
-  const paletteData = (await import('../cli/lib/engine/starter-palette.mjs')).default;
+  if (!existsSync(BIN)) {
+    console.error('building target/release/pixellab (cargo build --release)');
+    execFileSync('cargo', ['build', '--release'], { cwd: REPO, stdio: 'inherit', env: { ...process.env, PATH: `${process.env.HOME}/.cargo/bin:${process.env.PATH}` } });
+  }
   /** @type {string[]} */
   const files = [];
   for (const [name, ex] of Object.entries(examples())) {
-    const objects = Object.fromEntries(ex.objects.map((o) => [o, /** @type {any} */ (OBJECTS)[o]]));
-    const problems = engine.validate(engine.loadSources({ palette: paletteData, objects, scenes: ex.scenes }));
-    if (problems.length) throw new Error(`examples/${name}.pixellab has problems:\n${problems.join('\n')}`);
-    // The files hold each scene in depth order, as every edit in Pixel Lab leaves it
-    // (docs/intents/2026-10-depth-order/spec.md, R4).
-    const sources = engine.loadSources({ palette: paletteData, objects, scenes: ex.scenes });
-    ex.scenes = Object.fromEntries(Object.entries(ex.scenes).map(([s, data]) => [s, engine.sceneInOrder(sources, data)]));
     const root = join(out, `${name}.pixellab`);
     await rm(root, { recursive: true, force: true });
-    await mkdir(join(root, 'objects'), { recursive: true });
-    await mkdir(join(root, 'scenes'), { recursive: true });
-    /** @type {[string, string][]} */
-    const writes = [
-      ['manifest.json', `${JSON.stringify(ex.manifest, null, 2)}\n`],
-      ['palette.mjs', palette],
-      ...Object.entries(objects).map(([o, data]) => /** @type {[string, string]} */ ([`objects/${o}.mjs`, serialize(data)])),
-      ...Object.entries(ex.scenes).map(([s, data]) => /** @type {[string, string]} */ ([`scenes/${s}.mjs`, serialize(data)])),
-    ];
-    for (const [file, text] of writes) {
-      await writeFile(join(root, file), text);
-      files.push(`${name}.pixellab/${file}`);
+    await mkdir(out, { recursive: true });
+    const run = (/** @type {string[]} */ ...args) => {
+      try {
+        return execFileSync(BIN, ['--document', root, ...args], { encoding: 'utf8', env: { ...process.env, HOME: out }, stdio: ['ignore', 'pipe', 'pipe'] });
+      } catch (e) {
+        throw new Error(`pixellab ${args.join(' ')} failed:\n${/** @type {any} */ (e).stderr}${/** @type {any} */ (e).stdout}`);
+      }
+    };
+    execFileSync(BIN, ['document', 'new', root, '--name', name], { stdio: 'ignore', env: { ...process.env, HOME: out } });
+    await writeFile(join(root, 'manifest.json'), `${JSON.stringify(ex.manifest, null, 2)}\n`);
+    for (const o of ex.objects) await writeFile(join(root, 'objects', `${o}.json`), objectText(/** @type {any} */ (OBJECTS)[o]));
+    for (const scene of ex.scenes) {
+      await writeFile(join(root, 'scenes', `${scene.name}.json`), sceneText(scene));
+      for (const p of inFirstOrder(scene.places)) {
+        run(
+          'scene', 'place', scene.name, p.object, '--at', p.tile.join(','),
+          ...(p.id ? ['--id', p.id] : []),
+          ...(p.wrap ? ['--new-group', JSON.stringify(wrapper(p))] : []),
+        );
+      }
+      makeLayers(run, scene);
+      scene.finish((...a) => run(...a), scene.name);
     }
+    run('check');
   }
-  return files;
+  const { readdir } = await import('node:fs/promises');
+  for (const e of await readdir(out, { recursive: true, withFileTypes: true })) {
+    if (e.isFile()) files.push(join(e.parentPath ?? /** @type {any} */ (e).path, e.name).slice(out.length + 1));
+  }
+  return files.sort();
+}
+
+/**
+ * Makes a scene's layers.
+ * @param {(...a: string[]) => string} run
+ * @param {{ name: string, places: Place[], layers: Layer[] }} scene
+ */
+function makeLayers(run, scene) {
+  if (!scene.layers.length) return;
+  const listed = JSON.parse(run('scene', 'items', scene.name, '--json'));
+  const pathOf = new Map(listed.items.map((/** @type {any} */ i) => [`${i.object}@${i.at.tile.join(',')}`, i.path]));
+  const made = (/** @type {Layer} */ l) => ['scene', 'layer', 'new', scene.name, '--layer-name', l.name, '--id', l.id];
+  // A new layer goes to the front of the list, so making them last to first leaves the
+  // list as it is written (and every layer after the ones it holds).
+  for (const l of [...scene.layers].reverse()) {
+    const items = scene.places.filter((p) => p.layer === l.id).map((p) => pathOf.get(`${p.object}@${p.tile.join(',')}`));
+    const kids = scene.layers.filter((k) => k.parent === l.id);
+    run(...made(l), ...(items.length ? ['--items', items.join(',')] : ['--layers', kids.map((k) => k.id).join(',')]));
+  }
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

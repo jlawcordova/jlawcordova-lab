@@ -1,0 +1,14 @@
+{
+  "format": 2,
+  "name": "sample",
+  "publish": {
+    "dir": "../sample-out"
+  },
+  "preview": {
+    "card": "#E9DCC6",
+    "grid": "rgba(90, 62, 43, 0.06)"
+  },
+  "theme": {
+    "darkPage": "#1C1712"
+  }
+}

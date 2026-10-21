@@ -267,7 +267,7 @@ struct ProposalCard: View {
     }
 }
 
-/// A note in the middle: "You approved #12 · wrote scenes/harbor.mjs".
+/// A note in the middle: "You approved #12 · wrote scenes/harbor.json".
 struct NoteRow: View {
     var message: ChatMessage
     var body: some View {

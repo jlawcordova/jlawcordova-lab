@@ -571,7 +571,8 @@ final class SceneEditor {
     // MARK: VoiceOver
 
     func announce(_ text: String) {
-        guard let element = stageView ?? NSApp.mainWindow else { return }
+        // No NSApp under the unit tests.
+        guard let element = stageView ?? (NSApp == nil ? nil : NSApp.mainWindow) else { return }
         NSAccessibility.post(element: element, notification: .announcementRequested, userInfo: [
             .announcement: text, .priority: NSAccessibilityPriorityLevel.medium.rawValue,
         ])

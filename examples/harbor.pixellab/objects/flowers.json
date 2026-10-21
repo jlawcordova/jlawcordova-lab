@@ -1,0 +1,22 @@
+{
+  "kind": "sprite",
+  "anchor": [4, 4],
+  "keys": {
+    "r": "roof-1",
+    "s": "roof-2",
+    "y": "gold-1",
+    "c": "cream",
+    "g": "grass-3"
+  },
+  "layers": [
+    {
+      "map": [
+        ".r...y.c.",
+        "rsr.yyycc",
+        ".r.g.y.c.",
+        ".g..g..g.",
+        "..g.g.g.."
+      ]
+    }
+  ]
+}
