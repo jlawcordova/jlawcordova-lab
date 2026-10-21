@@ -211,3 +211,47 @@ fn list_files(root: &Path) -> Vec<String> {
     out.sort();
     out
 }
+
+/// R8 against Node itself: with PIXELLAB_GOLDENS set (the folder
+/// `node scripts/goldens.mjs --out <dir>` wrote), `document migrate` on a copy
+/// of each corpus document in format 1 gives a document whose every scene
+/// builds the SVG the Node CLI built from the .mjs sources, byte for byte.
+#[test]
+fn r8_a_migrated_document_builds_every_scene_byte_identical_to_the_node_clis_build_of_the_mjs_sources() {
+    use engine::compile::{compile_scene, Budget, Budgets};
+    use engine::engine::{load_sources, Order};
+    use engine::format::{parse, read_docs};
+    let Some(dir) = std::env::var_os("PIXELLAB_GOLDENS").filter(|d| !d.is_empty()).map(PathBuf::from) else {
+        eprintln!("skipped (set PIXELLAB_GOLDENS)");
+        return;
+    };
+    let corpus: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("corpus.json")).unwrap()).unwrap();
+    let mut scenes = 0;
+    for d in corpus["docs"].as_array().unwrap() {
+        let name = d["name"].as_str().unwrap();
+        let base = common::temp_dir("pixellab-migrate-corpus-");
+        let root = base.join(format!("{name}.pixellab"));
+        common::copy_dir(Path::new(d["format1"].as_str().unwrap()), &root);
+        let mut env = std::collections::HashMap::new();
+        env.insert("HOME".to_string(), base.join("home").to_string_lossy().into_owned());
+        env.insert("PIXELLAB_STATE".to_string(), base.join("state").to_string_lossy().into_owned());
+        let (code, _, err) = cli(&["document", "migrate", "--document", root.to_str().unwrap()], &env, &root);
+        assert_eq!(code, 0, "{name}: {err}");
+        let docs = read_docs(&root);
+        assert!(docs.load_errors.is_empty(), "{name}: {:?}", docs.load_errors);
+        let manifest = parse(&std::fs::read_to_string(root.join("manifest.json")).unwrap()).unwrap();
+        let mut budgets = Budgets::new();
+        for (file, b) in manifest.pointer("/publish/budgets").and_then(Value::as_object).into_iter().flatten() {
+            budgets.insert(file.clone(), Budget { raw: b["raw"].as_u64().unwrap(), gzip: b["gzip"].as_u64().unwrap() });
+        }
+        let sources = load_sources(docs.palette.unwrap_or_default(), docs.objects, docs.scenes);
+        for scene in sources.scenes.keys() {
+            let want = std::fs::read_to_string(dir.join("goldens").join(name).join("svg").join(format!("{scene}.svg"))).unwrap();
+            let got = compile_scene(&sources, scene, &budgets, Order::Depth).map(|c| c.output).unwrap();
+            assert!(got == want, "{name}/{scene}: the migrated document's SVG differs from Node's");
+            scenes += 1;
+        }
+    }
+    assert!(scenes > 0);
+    eprintln!("{scenes} scenes compared");
+}
