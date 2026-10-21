@@ -437,7 +437,7 @@ fn call_checks_params_before_running() {
     let cmd =
         Command::new("demo.x", "s", json!({"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]}), false, run);
     let reg = Registry::new(vec![cmd]);
-    let mut ctx = Ctx { session: None, loaded: None };
+    let mut ctx = Ctx::none();
     let err = reg.call(&mut ctx, "demo.x", json!({}), false).unwrap_err();
     assert!(matches!(&err, Error::Command(e) if e.is_usage()));
     assert!(!RAN.load(Ordering::SeqCst));

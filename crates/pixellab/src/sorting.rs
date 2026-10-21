@@ -125,7 +125,14 @@ pub fn sort_scene(sources: &Sources, doc: &mut Value) -> Sorted {
     let items: Vec<Value> = doc.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
     // The lists, inner ones first, each with its order.
     let mut plans: Vec<(Vec<usize>, Vec<usize>)> = Vec::new();
-    fn plan(sources: &Sources, list: &[Value], path: &mut Vec<usize>, origin: [f64; 2], tracks: &OMap<String, Value>, plans: &mut Vec<(Vec<usize>, Vec<usize>)>) -> bool {
+    fn plan(
+        sources: &Sources,
+        list: &[Value],
+        path: &mut Vec<usize>,
+        origin: [f64; 2],
+        tracks: &OMap<String, Value>,
+        plans: &mut Vec<(Vec<usize>, Vec<usize>)>,
+    ) -> bool {
         for (i, item) in list.iter().enumerate() {
             if is_group(item) {
                 path.push(i);
@@ -271,7 +278,12 @@ pub fn path_changes(before: &Value, after: &Value) -> OMap<String, String> {
         }
     }
     collect(after.get("items"), &mut Vec::new(), &mut groups_now);
-    fn groups(items: Option<&Value>, prefix: &mut Vec<usize>, to: &mut OMap<String, String>, groups_now: &std::collections::HashSet<String>) {
+    fn groups(
+        items: Option<&Value>,
+        prefix: &mut Vec<usize>,
+        to: &mut OMap<String, String>,
+        groups_now: &std::collections::HashSet<String>,
+    ) {
         for (i, item) in items.and_then(Value::as_array).into_iter().flatten().enumerate() {
             if !is_group(item) {
                 continue;

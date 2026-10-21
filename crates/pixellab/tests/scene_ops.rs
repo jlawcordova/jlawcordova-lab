@@ -57,44 +57,40 @@ fn ids(doc: &Value) -> Vec<Value> {
     doc["items"].as_array().unwrap().iter().map(|i| i["id"].clone()).collect()
 }
 
-/// The sample document's sources (a `pine` sprite is added by the sort tests' own document).
+/// The sample document's sources, with a `pine`: the Node suite used the
+/// owner's, which isn't in the fixture, so a 16×24 stand-in is added (the
+/// expectations below are Node's sortScene for this same pine).
 fn sources() -> Sources {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/sample.pixellab");
     let docs = engine::format::read_docs(&dir);
-    load_sources(
-        docs.palette.clone().unwrap_or(Value::Null),
-        BTreeMap::from_iter(docs.objects.clone()),
-        BTreeMap::from_iter(docs.scenes.clone()),
-    )
+    let mut objects = BTreeMap::from_iter(docs.objects.clone());
+    objects.insert(
+        "pine".into(),
+        json!({ "kind": "sprite", "anchor": [8, 23], "keys": { "a": "grass-3" }, "layers": [{ "map": vec!["aaaaaaaaaaaaaaaa"; 24] }] }),
+    );
+    load_sources(docs.palette.clone().unwrap_or(Value::Null), objects, BTreeMap::from_iter(docs.scenes.clone()))
 }
 
-/// sortScene is ported with the session (U14): until then a stand-in that panics.
-fn sort_scene(_sources: &Sources, _doc: &mut Value) -> (Vec<Value>, Vec<(String, String)>) {
-    unimplemented!("sort_scene comes with the session (U14)")
+/// sortScene, ported with the session (pixellab::sorting).
+fn sort_scene(sources: &Sources, doc: &mut Value) -> (Vec<Value>, Vec<(String, String)>) {
+    let sorted = pixellab::sorting::sort_scene(sources, doc);
+    (sorted.moved, sorted.remap.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
 }
 
 #[test]
-#[ignore = "needs U14"]
 fn sort_scene_back_to_front_by_column_and_row_then_level_where_items_overlap_what_insert_index_did_for_tiles() {
     let mut doc = real();
     let (moved, remap) = sort_scene(&sources(), &mut doc);
-    // "front" was listed first but stands in front of "back" and "middle"; "far" overlaps nothing and keeps its place.
-    assert_eq!(ids(&doc), vec![json!("back"), json!("middle"), json!("front"), json!("far")]);
-    assert_eq!(moved, vec![json!({ "path": "0", "to": "2", "object": "pine" })], "only the item the sort took out of its place is listed");
-    let mut remap = remap;
-    remap.sort();
-    assert_eq!(
-        remap,
-        vec![("0".to_string(), "2".to_string()), ("1".to_string(), "0".to_string()), ("2".to_string(), "1".to_string())],
-        "remap holds every path that changed"
-    );
+    // "front" was listed first but stands in front of "back"; with this narrow pine it doesn't overlap "middle"; "far" overlaps nothing and keeps its place.
+    assert_eq!(ids(&doc), vec![json!("back"), json!("front"), json!("middle"), json!("far")]);
+    assert_eq!(moved, vec![json!({ "path": "0", "to": "1", "object": "pine" })], "only the item the sort took out of its place is listed");
+    assert_eq!(remap, vec![("0".to_string(), "1".to_string()), ("1".to_string(), "0".to_string())], "remap holds every path that changed");
     // Sorting a sorted scene moves nothing.
     let (again, remap) = sort_scene(&sources(), &mut doc);
     assert_eq!((again, remap.len()), (vec![], 0));
 }
 
 #[test]
-#[ignore = "needs U14"]
 fn sort_scene_sorts_a_group_as_one_object_and_its_members_inside_it_a_scene_that_does_not_draw_is_left_alone() {
     let mut doc = real();
     doc["items"] = json!([

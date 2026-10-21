@@ -151,7 +151,13 @@ impl<'a> Ctx<'a> {
 
     /// Edits a doc as one undo step, opening it first if needed (`ctx.edit`).
     /// `key` coalesces rapid repeats with the same key.
-    pub fn edit(&mut self, kind: DocKind, name: &str, key: Option<&str>, f: impl FnOnce(&mut Value, &Loaded) -> Result<Edit>) -> Result<Value> {
+    pub fn edit(
+        &mut self,
+        kind: DocKind,
+        name: &str,
+        key: Option<&str>,
+        f: impl FnOnce(&mut Value, &Loaded) -> Result<Edit>,
+    ) -> Result<Value> {
         self.session()?.edit(kind, name, key, f)
     }
 }

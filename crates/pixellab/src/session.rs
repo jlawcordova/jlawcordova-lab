@@ -425,7 +425,11 @@ impl Session {
         let is_object = (asked.is_none() || asked == Some(DocKind::Object)) && object_there;
         let is_scene = (asked.is_none() || asked == Some(DocKind::Scene)) && scene_there;
         if is_object && is_scene {
-            return Err(CommandError::new(format!("{name} is both an object and a scene; say objects/{name} or scenes/{name}"), "ambiguous").into());
+            return Err(CommandError::new(
+                format!("{name} is both an object and a scene; say objects/{name} or scenes/{name}"),
+                "ambiguous",
+            )
+            .into());
         }
         if !is_object && !is_scene {
             let what = asked.map_or("object or scene", DocKind::as_str);
@@ -509,7 +513,13 @@ impl Session {
 
     /// Edits a doc as one undo step (opening it first if needed). `f` gets
     /// the doc and the sources as they were before the edit.
-    pub fn edit(&mut self, kind: DocKind, name: &str, key: Option<&str>, f: impl FnOnce(&mut Value, &Loaded) -> Result<Edit>) -> Result<Value> {
+    pub fn edit(
+        &mut self,
+        kind: DocKind,
+        name: &str,
+        key: Option<&str>,
+        f: impl FnOnce(&mut Value, &Loaded) -> Result<Edit>,
+    ) -> Result<Value> {
         let ref_ = self.open(kind, name)?.ref_.clone();
         let loaded = self.loaded()?;
         let before_doc = self.entries.get(&ref_).expect("open").doc.clone();
@@ -548,7 +558,9 @@ impl Session {
         let entry = self.entries.get_mut(&ref_).expect("open");
         let changed = stringify(&entry.doc) != before;
         if changed {
-            let coalesce = key.is_some() && entry.last.as_ref().is_some_and(|(k, t)| Some(k.as_str()) == key && time - t < COALESCE_MS) && !entry.undo.is_empty();
+            let coalesce = key.is_some()
+                && entry.last.as_ref().is_some_and(|(k, t)| Some(k.as_str()) == key && time - t < COALESCE_MS)
+                && !entry.undo.is_empty();
             if coalesce {
                 entry.undo.last_mut().expect("a step").labels.push(message.clone());
             } else {
@@ -622,7 +634,11 @@ impl Session {
         let (from, to) = if undo { (&mut entry.undo, &mut entry.redo) } else { (&mut entry.redo, &mut entry.undo) };
         let Some(snap) = from.pop() else {
             let summary = if undo { "Nothing to undo" } else { "Nothing to redo" };
-            let head = obj(vec![("doc", Value::String(ref_.to_string())), ("changed", Value::Bool(false)), ("summary", Value::String(summary.into()))]);
+            let head = obj(vec![
+                ("doc", Value::String(ref_.to_string())),
+                ("changed", Value::Bool(false)),
+                ("summary", Value::String(summary.into())),
+            ]);
             return Ok(Value::Object(spread(head, self.status(ref_))));
         };
         to.push(Step { before: stringify(&entry.doc), labels: snap.labels.clone(), seq: snap.seq });
@@ -715,7 +731,11 @@ impl Session {
     pub fn plan(&mut self, ref_: &str) -> Result<Plan> {
         let entry = self.entry(ref_)?.clone();
         let Some(text) = serialize(&entry.doc) else {
-            return Err(CommandError::new(format!("{} can't be serialized; fix its shape first (pixellab check {})", entry.ref_, entry.name), "invalid").into());
+            return Err(CommandError::new(
+                format!("{} can't be serialized; fix its shape first (pixellab check {})", entry.ref_, entry.name),
+                "invalid",
+            )
+            .into());
         };
         let loaded = self.loaded()?;
         let problems = problems_in(&loaded, &entry.file);
@@ -745,7 +765,11 @@ impl Session {
             let n = plan.problems.len();
             let them = if n == 1 { "it" } else { "them" };
             return Err(CommandError::new(
-                format!("{file} has {n} problem{}; nothing written. Fix {them}, or force the save:\n{}", plural(n), plan.problems.join("\n")),
+                format!(
+                    "{file} has {n} problem{}; nothing written. Fix {them}, or force the save:\n{}",
+                    plural(n),
+                    plan.problems.join("\n")
+                ),
                 "invalid",
             )
             .with_details(Value::from(plan.problems.clone()))
@@ -835,7 +859,10 @@ impl Session {
             Some(n) => format!("#{n} ({id})"),
             None => id.clone(),
         };
-        out.insert("summary".into(), Value::String(format!("Proposed {} as {named} ({} edit{})", entry.ref_, summary.len(), plural(summary.len()))));
+        out.insert(
+            "summary".into(),
+            Value::String(format!("Proposed {} as {named} ({} edit{})", entry.ref_, summary.len(), plural(summary.len()))),
+        );
         out.insert("edits".into(), Value::from(summary));
         out.insert("diff".into(), Value::String(plan.diff));
         if in_app {
@@ -857,9 +884,12 @@ impl Session {
         if !disk.exists {
             self.entries.delete(ref_);
             self.invalidate();
-            return Ok(json!({ "doc": ref_, "changed": true, "summary": format!("Discarded {ref_}, which isn't on disk"), "closed": true, "dirty": false, "canUndo": false, "canRedo": false }));
+            return Ok(
+                json!({ "doc": ref_, "changed": true, "summary": format!("Discarded {ref_}, which isn't on disk"), "closed": true, "dirty": false, "canUndo": false, "canRedo": false }),
+            );
         }
-        let data = import_source(&disk.text).map_err(|e| CommandError::new(format!("{}: cannot be loaded: {e}", entry.file), "load_error"))?;
+        let data =
+            import_source(&disk.text).map_err(|e| CommandError::new(format!("{}: cannot be loaded: {e}", entry.file), "load_error"))?;
         let before = stringify(&entry.doc);
         let changed = stringify(&data) != before;
         let clean = serialize(&data).unwrap_or_default();
@@ -1014,10 +1044,16 @@ impl Session {
         if !disk.exists {
             self.entries.delete(ref_);
             self.invalidate();
-            return Ok(json!({ "doc": ref_, "reloaded": false, "closed": true, "changed": true, "summary": format!("Closed {ref_}: its file isn't on disk any more"), "dirty": false, "canUndo": false, "canRedo": false }));
+            return Ok(
+                json!({ "doc": ref_, "reloaded": false, "closed": true, "changed": true, "summary": format!("Closed {ref_}: its file isn't on disk any more"), "dirty": false, "canUndo": false, "canRedo": false }),
+            );
         }
         if canon.is_none() {
-            return Err(CommandError::new(format!("{} on disk doesn't load; fix it first (pixellab check {})", entry.file, entry.name), "load_error").into());
+            return Err(CommandError::new(
+                format!("{} on disk doesn't load; fix it first (pixellab check {})", entry.file, entry.name),
+                "load_error",
+            )
+            .into());
         }
         if !is_stale(&entry, &disk) && !dirty {
             let head = obj(vec![
@@ -1038,7 +1074,11 @@ impl Session {
         self.invalidate();
         self.changed(ref_);
         let now_text = stringify(&self.entries.get(ref_).expect("open").doc);
-        let note = if sorted.is_some() { format!("; it wasn't in depth order, so {} was sorted (one undo gives back the file)", entry.name) } else { String::new() };
+        let note = if sorted.is_some() {
+            format!("; it wasn't in depth order, so {} was sorted (one undo gives back the file)", entry.name)
+        } else {
+            String::new()
+        };
         let mut out = obj(vec![
             ("doc", Value::String(ref_.to_string())),
             ("reloaded", Value::Bool(true)),
@@ -1066,7 +1106,10 @@ impl Session {
                     objects.insert(entry.name.clone(), doc.clone());
                 }
             }
-            validate(&load_sources(loaded.sources.palette.clone(), objects, scenes)).into_iter().filter(|p| p.starts_with(&prefix)).collect()
+            validate(&load_sources(loaded.sources.palette.clone(), objects, scenes))
+                .into_iter()
+                .filter(|p| p.starts_with(&prefix))
+                .collect()
         };
         let had: std::collections::HashSet<String> = others.iter().flat_map(problems_of).collect();
         Ok(problems_of(data).into_iter().filter(|p| !had.contains(p)).collect())
@@ -1098,13 +1141,21 @@ impl Session {
             .into());
         };
         let Some(ours) = serialize(&entry.doc) else {
-            return Err(CommandError::new(format!("{ref_} can't be serialized; fix its shape first (pixellab check {})", entry.name), "invalid").into());
+            return Err(CommandError::new(
+                format!("{ref_} can't be serialized; fix its shape first (pixellab check {})", entry.name),
+                "invalid",
+            )
+            .into());
         };
         if ours == entry.clean {
             let sorted = self.load_from_disk(ref_, &disk)?;
             self.invalidate();
             self.changed(ref_);
-            let note = if sorted.is_some() { format!("; it wasn't in depth order, so {} was sorted (one undo gives back the file)", entry.name) } else { String::new() };
+            let note = if sorted.is_some() {
+                format!("; it wasn't in depth order, so {} was sorted (one undo gives back the file)", entry.name)
+            } else {
+                String::new()
+            };
             let mut out = obj(vec![
                 ("doc", Value::String(ref_.to_string())),
                 ("merged", Value::Bool(true)),
@@ -1121,7 +1172,8 @@ impl Session {
         let merged = merge3(&trailing(&base), &trailing(&ours), &trailing(&theirs), is_scene);
         if !merged.conflicts.is_empty() {
             let n = merged.conflicts.len();
-            let details: Vec<Value> = merged.conflicts.iter().map(|c| json!({ "base": c.base, "ours": c.ours, "theirs": c.theirs })).collect();
+            let details: Vec<Value> =
+                merged.conflicts.iter().map(|c| json!({ "base": c.base, "ours": c.ours, "theirs": c.theirs })).collect();
             return Err(CommandError::new(
                 format!(
                     "Both the open copy and {} changed the same line{} ({n} place{}); nothing merged. Reload the file (dropping the unsaved edits), or keep the open copy and save over the file.",
@@ -1152,10 +1204,18 @@ impl Session {
         let theirs_data = import_source(&theirs).map_err(Error::Internal)?;
         if is_scene {
             // A layer both sides made under the same id must hold the same items.
-            let base_ids = if base.is_empty() { Default::default() } else { import_source(&base).map(|b| ids_of(b.get("layers").unwrap_or(&Value::Null))).unwrap_or_default() };
+            let base_ids = if base.is_empty() {
+                Default::default()
+            } else {
+                import_source(&base).map(|b| ids_of(b.get("layers").unwrap_or(&Value::Null))).unwrap_or_default()
+            };
             let their_ids = ids_of(theirs_data.get("layers").unwrap_or(&Value::Null));
             let members = |doc: &Value, id: &str| -> String {
-                let mut list: Vec<String> = placed(doc).into_iter().filter(|item| item.get("layer").and_then(Value::as_str) == Some(id)).map(|item| stringify(&item)).collect();
+                let mut list: Vec<String> = placed(doc)
+                    .into_iter()
+                    .filter(|item| item.get("layer").and_then(Value::as_str) == Some(id))
+                    .map(|item| stringify(&item))
+                    .collect();
                 list.sort();
                 list.join("\n")
             };
@@ -1167,8 +1227,11 @@ impl Session {
                 .flatten()
                 .filter_map(|l| l.get("id").and_then(Value::as_str).map(str::to_string))
                 .collect();
-            let differ: Vec<String> =
-                ours_ids.into_iter().filter(|id| their_ids.contains(id) && !base_ids.contains(id)).filter(|id| members(&entry.doc, id) != members(&theirs_data, id)).collect();
+            let differ: Vec<String> = ours_ids
+                .into_iter()
+                .filter(|id| their_ids.contains(id) && !base_ids.contains(id))
+                .filter(|id| members(&entry.doc, id) != members(&theirs_data, id))
+                .collect();
             if !differ.is_empty() {
                 return Err(CommandError::new(
                     format!(
@@ -1183,13 +1246,22 @@ impl Session {
             }
         }
         let mut data = import_source(&text).map_err(|e| {
-            CommandError::new(format!("the merge of {} doesn't load ({}); nothing merged", entry.file, e.lines().next().unwrap_or("")), "merge_invalid")
+            CommandError::new(
+                format!("the merge of {} doesn't load ({}); nothing merged", entry.file, e.lines().next().unwrap_or("")),
+                "merge_invalid",
+            )
         })?;
         // A merge that loads but breaks the doc is refused.
         let added = self.new_problems(&entry, &data, &[entry.doc.clone(), theirs_data])?;
         if !added.is_empty() {
             return Err(CommandError::new(
-                format!("the merge of {} would add {} problem{} ({}); nothing merged", entry.file, added.len(), plural(added.len()), added[0]),
+                format!(
+                    "the merge of {} would add {} problem{} ({}); nothing merged",
+                    entry.file,
+                    added.len(),
+                    plural(added.len()),
+                    added[0]
+                ),
                 "merge_invalid",
             )
             .with_details(Value::from(added))
@@ -1233,7 +1305,11 @@ impl Session {
     pub fn close(&mut self, ref_: &str, force: bool) -> Result<Value> {
         self.entry(ref_)?;
         if self.is_dirty(ref_) && !force {
-            return Err(CommandError::new(format!("{ref_} has unsaved changes; save or revert it, or force the close to drop them"), "dirty").into());
+            return Err(CommandError::new(
+                format!("{ref_} has unsaved changes; save or revert it, or force the close to drop them"),
+                "dirty",
+            )
+            .into());
         }
         self.entries.delete(ref_);
         self.invalidate();
