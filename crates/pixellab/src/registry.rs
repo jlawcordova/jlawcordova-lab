@@ -186,6 +186,7 @@ pub fn registry() -> Registry {
     list.extend(commands::scene_edit::commands());
     list.extend(commands::scene_layers::commands());
     list.extend(commands::scene_motion::commands());
+    list.extend(commands::ambient::commands());
     list.extend(commands::object::commands());
     list.extend(commands::object_edit::commands());
     list.extend(commands::check::commands());

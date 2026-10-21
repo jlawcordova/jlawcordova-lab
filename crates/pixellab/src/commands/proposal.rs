@@ -222,6 +222,7 @@ fn render_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
                 .get("layers")
                 .and_then(Value::as_array)
                 .map(|l| l.iter().filter_map(Value::as_u64).map(|n| n as usize).collect()),
+            play: None,
         };
         render_object_image(&view.sources, &name, &options)?
     };

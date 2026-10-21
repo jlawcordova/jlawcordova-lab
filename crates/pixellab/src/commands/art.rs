@@ -408,9 +408,11 @@ pub fn commands() -> Vec<Command> {
     );
     build.description = Some(concat!(
         "Validates the document's files on disk (unsaved working copies aren't in it; unsaved lists them), renders each scene with an `output` to a rect SVG, ",
-        "merges each color group into one <path>, checks the result lossless and within its budget (100 KB raw / 25 KB gzip, or the manifest's), and writes <publish dir>/<output>. ",
+        "merges each color group into one <path>, checks the result lossless, and writes <publish dir>/<output>. ",
+        "A scene with an `image` is also rendered on the preview card color to a PNG, written to the manifest's publish.images (else --dir). ",
+        "Over the budget (100 KB raw / 25 KB gzip, or the manifest's) is a warning, never a failure: the SVG is still written and the result is still ok. ",
         "The publish folder is the manifest's publish.dir (relative to the document), or --dir; with neither it refuses. Nothing is written when any source has a problem. ",
-        "Returns { ok, publishDir, outputs: [{ file, scene, raw, gzip, over, report }], previewOnly: [{ scene, raw, gzip, over, report }], problems, ms, unsaved }."
+        "Returns { ok, publishDir, outputs: [{ file, scene, kind (svg or png), raw, gzip, over, report, warnings }], previewOnly: [{ scene, raw, gzip, over, report, warnings }], problems, warnings (each \"<file>: <warning>\"), ms, unsaved }; a PNG has no gzip, over or report."
     ));
     build.writes_direct = true;
     build.examples = vec!["pixellab art build", "pixellab art build --dir ~/Desktop/art"];

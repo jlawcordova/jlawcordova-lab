@@ -1,6 +1,7 @@
 //! The commands, one file per file of cli/lib/commands/. Each file's
 //! `commands()` lists its commands for the registry.
 
+pub mod ambient;
 pub mod art;
 pub mod chat;
 pub mod check;

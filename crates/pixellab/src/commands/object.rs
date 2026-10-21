@@ -8,7 +8,7 @@ use super::common::{join, obj, opt_num, opt_str, pad_end, str_of};
 use crate::context::{Ctx, DocKind};
 use crate::errors::{CommandError, Result};
 use crate::registry::{Command, Params};
-use crate::render::{render_object_image, ObjectImageOptions, MAX_SCALE};
+use crate::render::{parse_play, render_object_image, ObjectImageOptions, MAX_SCALE};
 
 fn name_param() -> Value {
     json!({ "type": "string", "description": "object name (or objects/<name>)" })
@@ -237,6 +237,10 @@ fn render_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
         time: opt_num(&params, "time"),
         frame: opt_num(&params, "frame").unwrap_or(0.0) as usize,
         layers: params.get("layers").and_then(Value::as_array).map(|l| l.iter().filter_map(Value::as_u64).map(|n| n as usize).collect()),
+        play: match opt_str(&params, "play") {
+            Some(p) => Some(parse_play(p)?),
+            None => None,
+        },
     };
     let image = render_object_image(&loaded.sources, &name, &options)?;
     let mut out = obj(vec![("object", json!(name))]);
@@ -295,6 +299,7 @@ pub fn commands() -> Vec<Command> {
                 "scale": { "type": "integer", "minimum": 1, "maximum": MAX_SCALE, "default": 1, "description": "whole-pixel zoom of the PNG" },
                 "frame": { "type": "integer", "minimum": 0, "default": 0, "description": "the frame every loop shows (loops shorter than this show nothing)" },
                 "time": { "type": "integer", "minimum": 0, "description": "ms into the loops; overrides frame" },
+                "play": super::scene::play_param(),
                 "layers": {
                     "type": "array",
                     "items": { "type": "integer", "minimum": 0 },
@@ -307,11 +312,14 @@ pub fn commands() -> Vec<Command> {
         render_run,
     );
     render.description = Some(
-        "The anchor is at (0, 0). A sprite's viewBox is its whole map, so at scale 1 PNG pixel (x, y) is map column x, row y; a block's is the box around its pixels. Returns the same shape as scene.render, with one item. On the command line, --out <file.png> writes the PNG.",
+        "The anchor is at (0, 0). A sprite's viewBox is its whole map, so at scale 1 PNG pixel (x, y) is map column x, row y; a block's is the box around its pixels. Returns the same shape as scene.render, with one item. --time also places the layers' ambient loops, and --play <action>@<ms> (with --time) places the layers that have that action where it has them <ms> into it. On the command line, --out <file.png> writes the PNG.",
     );
     render.args = vec!["name"];
     render.writes_png = true;
-    render.examples = vec!["pixellab object render pine --scale 4 --out /tmp/pine.png"];
+    render.examples = vec![
+        "pixellab object render pine --scale 4 --out /tmp/pine.png",
+        "pixellab object render character --time 0 --play hop@120 --out /tmp/hop.png",
+    ];
     render.format = Some(render_format);
 
     vec![list, show, render]
