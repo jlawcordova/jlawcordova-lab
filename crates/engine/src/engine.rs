@@ -2176,8 +2176,12 @@ pub fn render_scene_with(sources: &Sources, name: &str, order: Order, scope: Opt
     };
     let mut names = Names::default();
     place_items(sources, &list, &mut root, origin, &tracks, &mut names)?;
-    let view_box = scene.get("viewBox").and_then(Value::as_array).cloned().unwrap_or_default();
     let ids = motion::items_by_id(scene.get("items").unwrap_or(&Value::Null));
+    // A scene's own viewBox is used as it is; one without fits what its tree paints (scene-canvas spec R2, R4).
+    let view_box = match scene.get("viewBox").and_then(Value::as_array) {
+        Some(vb) => vb.clone(),
+        None => fit_box(scene, &root, &ids).iter().map(|&n| Value::from(n)).collect(),
+    };
     let motion = scene.get("motion").unwrap_or(&Value::Null);
     if let Some(scope) = scope {
         let mut loops = Vec::new();
@@ -2190,6 +2194,116 @@ pub fn render_scene_with(sources: &Sources, name: &str, order: Order, scope: Opt
     }
     let style = motion::motion_css(motion, &ids, &copies);
     Ok(Rendered { view_box, root, style: Some(style), scope: None })
+}
+
+/// A box with nothing in it: one tile around the origin (scene-canvas spec R6).
+pub const EMPTY_FRAME: [i64; 4] = [-(TILE_W as i64) / 2, -(TILE_H as i64) / 2, TILE_W as i64, TILE_H as i64];
+
+/// The box a scene publishes at, and whether the scene fixed it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Frame {
+    /// `[x, y, width, height]`.
+    pub view_box: [i64; 4],
+    /// The scene's own `viewBox`, as against the fit to its content.
+    pub fixed: bool,
+    /// The painted pixels' box with no margin, or None for an empty scene.
+    pub painted: Option<[i64; 4]>,
+}
+
+/// What box does this scene publish at (scene-canvas spec R2 to R7): its own
+/// `viewBox` when it has one, else the smallest whole-pixel box that holds
+/// everything it paints over its loop, plus its `margin`. Every reader of a
+/// scene's size goes through here (or through `render_scene`, which uses the
+/// same fit), so the box can't be worked out two ways.
+pub fn resolve_frame(sources: &Sources, name: &str) -> Result<Frame> {
+    let scene = scene_or_err(sources, name)?;
+    if let Some(vb) = scene.get("viewBox").and_then(Value::as_array) {
+        let n = |i: usize| vb.get(i).and_then(Value::as_f64).unwrap_or(0.0) as i64;
+        return Ok(Frame { view_box: [n(0), n(1), n(2), n(3)], fixed: true, painted: None });
+    }
+    let rendered = render_scene(sources, name, Order::Depth)?;
+    let ids = motion::items_by_id(scene.get("items").unwrap_or(&Value::Null));
+    let painted = painted_box(scene, &rendered.root, &ids);
+    Ok(Frame { view_box: fit_of(scene, painted), fixed: false, painted: painted.map(box_of) })
+}
+
+fn box_of(b: Bounds) -> [i64; 4] {
+    [b.min_x as i64, b.min_y as i64, (b.max_x as i64 - b.min_x as i64) + 1, (b.max_y as i64 - b.min_y as i64) + 1]
+}
+
+/// The box that fits `painted` plus the scene's margin; an empty scene has one tile.
+fn fit_of(scene: &Value, painted: Option<Bounds>) -> [i64; 4] {
+    let margin = scene.get("margin").and_then(Value::as_f64).filter(|m| *m > 0.0).unwrap_or(0.0) as i64;
+    match painted {
+        None => EMPTY_FRAME,
+        Some(b) => {
+            let [x, y, w, h] = box_of(b);
+            [x - margin, y - margin, w + 2 * margin, h + 2 * margin]
+        }
+    }
+}
+
+fn fit_box(scene: &Value, root: &Group, ids: &OMap<String, Value>) -> [i64; 4] {
+    fit_of(scene, painted_box(scene, root, ids))
+}
+
+/// Every pixel a tree paints over its whole loop: all frames of a frame loop, every variant, items
+/// that only show at some time, every place scene motion takes an item, and how far ambient loops and
+/// actions move an element. Moves step along straight or 2:1 lines, so the keys' places bound them.
+fn painted_box(scene: &Value, root: &Group, ids: &OMap<String, Value>) -> Option<Bounds> {
+    let mut by_class: HashMap<String, Vec<[i32; 2]>> = HashMap::new();
+    for track in scene.pointer("/motion/tracks").and_then(Value::as_array).into_iter().flatten() {
+        let id = js_string(track.get("item"));
+        let object = ids.get(&id).map(|item| js_string(item.get("object"))).unwrap_or_default();
+        let keys = motion::filled_keys(track, &object);
+        let Some(rest) = keys.first().map(|k| k.moved) else { continue };
+        let mut offsets: Vec<[i32; 2]> = vec![[0, 0]];
+        offsets.extend(keys.iter().map(|k| [(k.moved[0] - rest[0]) as i32, (k.moved[1] - rest[1]) as i32]));
+        by_class.insert(motion::motion_class(&id), offsets);
+    }
+    fn union(a: Option<Bounds>, b: Option<Bounds>) -> Option<Bounds> {
+        match (a, b) {
+            (None, b) => b,
+            (a, None) => a,
+            (Some(a), Some(b)) => Some(Bounds {
+                min_x: a.min_x.min(b.min_x),
+                min_y: a.min_y.min(b.min_y),
+                max_x: a.max_x.max(b.max_x),
+                max_y: a.max_y.max(b.max_y),
+            }),
+        }
+    }
+    fn shifted(b: Bounds, dx: i32, dy: i32) -> Bounds {
+        Bounds { min_x: b.min_x + dx, min_y: b.min_y + dy, max_x: b.max_x + dx, max_y: b.max_y + dy }
+    }
+    fn walk(group: &Group, by_class: &HashMap<String, Vec<[i32; 2]>>) -> Option<Bounds> {
+        let mut out: Option<Bounds> = None;
+        for child in &group.children {
+            match child {
+                Child::Layer(l) => out = union(out, bounds(l.pixels.keys())),
+                Child::Group(g) => {
+                    let inner = walk(g, by_class);
+                    let mut offsets: Vec<[i32; 2]> = Vec::new();
+                    if g.generated {
+                        if let Some(o) = g.attrs.iter().find(|(k, _)| k == "class").and_then(|(_, v)| by_class.get(v)) {
+                            offsets.extend(o);
+                        }
+                    }
+                    if let Some(m) = &g.moves {
+                        offsets.push([0, 0]);
+                        let moved = m.ambient.iter().flat_map(|a| a.keys.iter()).chain(m.actions.iter().flat_map(|(_, a)| a.keys.iter()));
+                        offsets.extend(moved.map(|k| [k.moved[0] as i32, k.moved[1] as i32]));
+                    }
+                    out = match inner {
+                        Some(b) if !offsets.is_empty() => offsets.iter().fold(out, |acc, o| union(acc, Some(shifted(b, o[0], o[1])))),
+                        other => union(out, other),
+                    };
+                }
+            }
+        }
+        out
+    }
+    walk(root, &by_class)
 }
 
 /// The frame loops a tree plays, in the order they first appear: (loop, frame class prefix, frame count).
