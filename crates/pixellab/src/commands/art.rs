@@ -67,19 +67,24 @@ fn build_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let outputs: Vec<Value> = r
         .outputs
         .iter()
-        .map(|o| json!({ "file": o.file, "scene": o.scene, "raw": o.raw, "gzip": o.gzip, "over": o.over, "report": o.report }))
+        .map(|o| {
+            json!({ "file": o.file, "scene": o.scene, "kind": "svg", "raw": o.raw, "gzip": o.gzip, "over": o.over, "report": o.report, "warnings": o.warnings })
+        })
         .collect();
     let preview_only: Vec<Value> = r
         .preview_only
         .iter()
-        .map(|p| json!({ "scene": p.scene, "raw": p.raw, "gzip": p.gzip, "over": p.over, "report": p.report }))
+        .map(|p| json!({ "scene": p.scene, "raw": p.raw, "gzip": p.gzip, "over": p.over, "report": p.report, "warnings": p.warnings }))
         .collect();
+    // Every output's warnings in one list, "<file>: <warning>" (R4).
+    let warnings: Vec<String> = r.outputs.iter().flat_map(|o| o.warnings.iter().map(move |w| format!("{}: {w}", o.file))).collect();
     Ok(Value::Object(obj(vec![
         ("ok", json!(r.ok)),
         ("publishDir", json!(path_text(&out))),
         ("outputs", Value::Array(outputs)),
         ("previewOnly", Value::Array(preview_only)),
         ("problems", json!(r.problems)),
+        ("warnings", json!(warnings)),
         ("ms", json!(started.elapsed().as_millis() as u64)),
         ("unsaved", Value::Array(unsaved)),
     ])))
@@ -103,11 +108,9 @@ fn build_format(r: &Value, _: &Params) -> String {
     let outputs = list("outputs").len();
     if !problems.is_empty() {
         lines.push(format!("{}; nothing written.", plural(problems.len(), "problem")));
-    } else if r["ok"] == json!(true) {
+    } else {
         let secs = engine::jsnum::to_fixed(r["ms"].as_f64().unwrap_or(0.0) / 1000.0, 1);
         lines.push(format!("published {} to {} in {secs} s", plural(outputs, "file"), str_of(r.get("publishDir"))));
-    } else {
-        lines.push(format!("published {} to {}, but some are OVER BUDGET", plural(outputs, "file"), str_of(r.get("publishDir"))));
     }
     let unsaved = list("unsaved");
     if !unsaved.is_empty() {
@@ -260,6 +263,8 @@ fn sizes_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     };
     let head_objects = before.as_ref().map(object_rows);
     let head_colors = before.as_ref().map(color_rows);
+    let budget = engine::compile::scene_budget(sources, &target.name, &ctx.document()?.budgets);
+    let warnings = engine::compile::budget_warnings(budget, now.raw, now.gzip);
     Ok(Value::Object(obj(vec![
         ("scene", json!(target.name)),
         ("output", output),
@@ -267,6 +272,7 @@ fn sizes_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
         ("head", head_value),
         ("objects", Value::Array(rows(&object_rows(&now), head_objects.as_ref(), "object"))),
         ("colors", Value::Array(rows(&color_rows(&now), head_colors.as_ref(), "color"))),
+        ("warnings", json!(warnings)),
     ])))
 }
 
@@ -361,6 +367,8 @@ fn sizes_format(r: &Value, _: &Params) -> String {
     let colors = r["colors"].as_array().cloned().unwrap_or_default();
     table(&mut lines, "object", "Bytes each object adds (the scene compiled without it), against HEAD:", &objects, true);
     table(&mut lines, "color", "Bytes each color's path takes, against HEAD:", &colors, false);
+    let warnings = r["warnings"].as_array().cloned().unwrap_or_default();
+    lines.extend(warnings.iter().map(|w| format!("warning: {}: {}", str_of(r.get("scene")), str_of(Some(w)))));
     lines.join("\n")
 }
 

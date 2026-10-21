@@ -375,15 +375,16 @@ fn r7_dir_publishes_elsewhere_and_a_document_without_a_publish_folder_refuses_wi
     let (code, _, stderr) = cli(&doc, &["art", "build", "--json", "--document", &d]);
     assert_eq!(code, 1);
     assert_eq!(serde_json::from_str::<Value>(&stderr).unwrap()["error"]["code"], "no_publish_dir");
-    // With a budget the scene exceeds, it is over, and still written.
+    // With a budget the scene exceeds, it is over, still written, and only a warning (R4).
     let bare = doc.base.join("bare-out");
     let budgets = json!({ "sample.svg": { "raw": 100, "gzip": 50 } });
     manifest(json!({ "format": 2, "publish": { "budgets": budgets } }));
     let (code, stdout, _) = cli(&doc, &["art", "build", "--dir", bare.to_str().unwrap(), "--json", "--document", &d]);
-    assert_eq!(code, 1);
+    assert_eq!(code, 0);
     let res: Value = serde_json::from_str(&stdout).unwrap();
-    assert_eq!(res["ok"], false);
+    assert_eq!(res["ok"], true);
     assert_eq!(res["outputs"][0]["over"], true);
+    assert_eq!(res["outputs"][0]["warnings"].as_array().unwrap().len(), 2);
     assert!(fs::metadata(bare.join("sample.svg")).unwrap().len() > 0);
     let budgets = json!({ "sample.svg": { "raw": 204800, "gzip": 51200 } });
     manifest(json!({ "format": 2, "publish": { "budgets": budgets } }));
