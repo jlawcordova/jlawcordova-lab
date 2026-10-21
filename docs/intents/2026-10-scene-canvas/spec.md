@@ -1,5 +1,5 @@
 # Spec: A scene without a size, and keyboard block placement (from intent.md 2026-10-21)
-Status: draft.
+Status: approved.
 
 ## Requirements
 
