@@ -223,13 +223,25 @@ fn migrate_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
         None if legacy => site_root.clone().expect("a site").join(SITE_ART_DIR).join(format!("{name}{EXTENSION}")),
         None => root.clone(),
     };
-    if target != root && target.exists() {
+    let copying = opt_str(&params, "to").is_some();
+    if copying {
+        // A copy inside the document would copy itself (as document.copy refuses).
+        let (to_text, from_text) = (target.to_string_lossy().into_owned(), root.to_string_lossy().into_owned());
+        if to_text != from_text && to_text.starts_with(&format!("{}/", from_text.trim_end_matches('/'))) {
+            return Err(CommandError::usage(format!("{to_text} is inside the document itself")).into());
+        }
+    }
+    if (copying || target != root) && target.exists() {
         return Err(CommandError::new(format!("{} already exists; pick another path", target.display()), "exists").into());
     }
     let io = |e: std::io::Error| CommandError::new(format!("writing {} failed: {e}", target.display()), "write_failed");
+    let write = |file: &str, text: &str| -> Result<()> {
+        write_atomic(&target.join(file), text)
+            .map_err(|e| CommandError::new(format!("writing {} failed: {}", target.join(file).display(), e.message()), "write_failed").into())
+    };
     if target != root {
         fs::create_dir_all(&target).map_err(io)?;
-        if opt_str(&params, "to").is_some() {
+        if copying {
             copy_others(&root, &target, "").map_err(io)?;
         }
     }
@@ -237,15 +249,17 @@ fn migrate_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     for dir in ["objects", "scenes"] {
         fs::create_dir_all(target.join(dir)).map_err(io)?;
     }
-    write_atomic(&target.join("manifest.json"), &manifest_text)?;
-    files.push(json!("manifest.json"));
+    // The sources first and the manifest last: until the manifest says
+    // format 2, a document interrupted here still opens as format 1.
     for (file, text) in &texts {
-        write_atomic(&target.join(file), text)?;
-        files.push(json!(file));
+        write(file, text)?;
     }
+    write("manifest.json", &manifest_text)?;
+    files.push(json!("manifest.json"));
+    files.extend(texts.iter().map(|(file, _)| json!(file)));
     // In place (or out of a legacy folder): the .mjs files go.
     let mut removed = Vec::new();
-    if opt_str(&params, "to").is_none() {
+    if !copying {
         for file in sources_of(&root) {
             fs::remove_file(root.join(&file)).map_err(io)?;
             removed.push(json!(if legacy { format!("{}/{file}", crate::document::LEGACY_SOURCE_DIR) } else { file }));

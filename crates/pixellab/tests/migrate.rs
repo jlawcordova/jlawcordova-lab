@@ -164,3 +164,50 @@ fn r8_a_sites_legacy_source_folder_becomes_its_pixellab_bundle() {
     assert_eq!(code, 0);
     assert!(out.contains("sample"));
 }
+
+#[test]
+fn r8_migrate_to_refuses_the_document_itself_and_a_folder_inside_it() {
+    let (root, env) = old_document();
+    let doc = root.to_str().unwrap();
+    let before = list_files(&root);
+    let (code, _, err) = cli(&["document", "migrate", "--document", doc, "--to", doc], &env, &root);
+    assert_eq!(code, 1, "{err}");
+    assert!(err.contains("already exists"), "{err}");
+    let inside = root.join("copy.pixellab");
+    let (code, _, err) = cli(&["document", "migrate", "--document", doc, "--to", inside.to_str().unwrap()], &env, &root);
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("is inside the document itself"), "{err}");
+    assert_eq!(list_files(&root), before, "nothing written");
+}
+
+#[test]
+fn r8_in_place_the_manifest_is_written_after_the_sources() {
+    // If writing a source fails, the manifest still says format 1 and the .mjs files stay.
+    let (root, env) = old_document();
+    let manifest = std::fs::read_to_string(root.join("manifest.json")).unwrap();
+    std::fs::create_dir_all(root.join("scenes/sample.json")).unwrap(); // a folder where a source goes
+    let (code, _, err) = cli(&["document", "migrate", "--document", root.to_str().unwrap()], &env, &root);
+    assert_eq!(code, 1, "{err}");
+    assert!(err.contains("writing ") && err.contains("failed"), "{err}");
+    assert_eq!(std::fs::read_to_string(root.join("manifest.json")).unwrap(), manifest);
+    assert!(root.join("palette.mjs").exists() && root.join("scenes/sample.mjs").exists());
+}
+
+/// Every file under a folder, relative and sorted.
+fn list_files(root: &Path) -> Vec<String> {
+    fn walk(dir: &Path, rel: &str, out: &mut Vec<String>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let path = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
+            if e.file_type().unwrap().is_dir() {
+                walk(&e.path(), &path, out);
+            } else {
+                out.push(path);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, "", &mut out);
+    out.sort();
+    out
+}
