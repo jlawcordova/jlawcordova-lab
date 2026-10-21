@@ -1,4 +1,5 @@
 //! The shared param checker and the command-line parser (ports cli/test/params.test.mjs).
+#![allow(clippy::result_large_err)]
 
 use pixellab::argv::{parse_command_line, Globals, Parsed};
 use pixellab::context::Ctx;
