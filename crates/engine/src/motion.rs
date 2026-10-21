@@ -324,7 +324,7 @@ pub fn shown_items(items: &[Value]) -> Vec<Value> {
         .collect()
 }
 
-fn px(v: f64) -> String {
+pub(crate) fn px(v: f64) -> String {
     if v == 0.0 {
         "0".into()
     } else {
@@ -338,7 +338,7 @@ pub fn pct_of(t: f64, duration: f64) -> f64 {
     jsnum::fixed((t / duration) * 100.0, 3)
 }
 
-fn pct(t: f64, duration: f64) -> String {
+pub(crate) fn pct(t: f64, duration: f64) -> String {
     format!("{}%", jsnum::to_string(pct_of(t, duration)))
 }
 
@@ -497,11 +497,17 @@ fn frame_loop_rules(scope: &str, l: &FrameLoop) -> Vec<String> {
 }
 
 /// A compiled SVG's whole `<style>` (spec D7): the scene's motion with its
-/// names scoped to `scope`, its frame loops, and one reduced-motion rule that
-/// stops them all and shows each loop's first frame. Empty when the scene
-/// plays nothing.
-pub fn scene_css(scope: &str, motion: Option<(&Value, &OMap<String, Value>, &OMap<String, Vec<Copy>>)>, loops: &[FrameLoop]) -> String {
+/// names scoped to `scope`, its elements' ambient loops and actions, its
+/// frame loops, and one reduced-motion rule that stops them all and shows
+/// each loop's first frame. Empty when the scene plays nothing.
+pub fn scene_css(
+    scope: &str,
+    motion: Option<(&Value, &OMap<String, Value>, &OMap<String, Vec<Copy>>)>,
+    loops: &[FrameLoop],
+    elements: &[std::rc::Rc<crate::ambient::Moves>],
+) -> String {
     let mut rules = motion.map(|(m, ids, copies)| motion_rules(m, ids, copies, Some(scope))).unwrap_or_default();
+    rules.extend(crate::ambient::elements_css(scope, elements));
     let generated = !rules.is_empty();
     for l in loops {
         rules.extend(frame_loop_rules(scope, l));

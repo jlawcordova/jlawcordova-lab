@@ -375,7 +375,7 @@ fn object_pixels(
     frame: usize,
 ) -> eng_result::Result<(OMap<Pixel, ColorName>, Option<Bounds>)> {
     let tree = render_object(sources, name)?;
-    let pixels = composite(&tree, CompositeOptions { first_variant: false, frame, time });
+    let pixels = composite(&tree, CompositeOptions { first_variant: false, frame, time, play: None });
     let box_ = eng::bounds(pixels.keys());
     Ok((pixels, box_))
 }
@@ -517,7 +517,7 @@ fn inner_scene_image(
         if dark {
             dark_theme(&mut rendered.root, false);
         }
-        let pixels = composite(&rendered.root, CompositeOptions { first_variant: false, frame: 0, time: Some(time) });
+        let pixels = composite(&rendered.root, CompositeOptions { first_variant: false, frame: 0, time: Some(time), play: None });
         Ok(to_image(sources, &pixels, view, &extra))
     };
     let image = paint(&kept)?;
