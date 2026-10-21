@@ -114,7 +114,7 @@ fn r17_painting_an_object_that_extends_another_overrides_whole_rows_and_drops_a_
     let body = sprite(&["....", ".gg.", ".gg."], json!({ "g": "grass-2" }), json!({}));
     let mut outfit = json!({ "kind": "sprite", "extends": "body", "keys": {}, "rows": {} });
     let all = |o: &Value| src(&[("body", &body), ("outfit", o)]);
-    let mut p = |outfit: &mut Value, pixels: &[[i64; 2]], color: Option<&str>| {
+    let p = |outfit: &mut Value, pixels: &[[i64; 2]], color: Option<&str>| {
         let sources = all(&outfit.clone());
         paint(&sources, "outfit", outfit, at(0, 0), pixels, color).unwrap()
     };
