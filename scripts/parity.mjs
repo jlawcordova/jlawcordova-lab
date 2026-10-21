@@ -199,6 +199,36 @@ function normalize(/** @type {any} */ v, /** @type {[string, string][]} */ roots
   return v;
 }
 
+/**
+ * R4's expected change, narrowly: over budget warns and never fails, so the
+ * program's `art build` result gains `kind` and `warnings` on each output (and
+ * a top-level `warnings`), words the over-budget report as a warning, and
+ * stays ok where Node said `ok: false`; `art sizes` gains `warnings`. Each is
+ * removed from the program's result only where it applies, and a scene the
+ * program warns about must be one Node called over budget.
+ * @param {string} command @param {any} node @param {any} rust
+ */
+function acceptR4(command, node, rust) {
+  if (!rust || typeof rust !== 'object' || !node || typeof node !== 'object') return;
+  if (command === 'art.sizes' && Array.isArray(rust.warnings) && !('warnings' in node)) delete rust.warnings;
+  if (command !== 'art.build') return;
+  let over = false;
+  for (const list of ['outputs', 'previewOnly']) {
+    for (const [i, o] of (rust[list] ?? []).entries()) {
+      if (list === 'outputs' && o.kind === 'svg') delete o.kind;
+      if (!Array.isArray(o.warnings)) continue;
+      if (o.warnings.length) {
+        if (!node[list]?.[i]?.over) continue;
+        over = true;
+        o.report = o.report.replace(/ — over its .* \(warning\)$/, ' — OVER BUDGET');
+      }
+      delete o.warnings;
+    }
+  }
+  if (Array.isArray(rust.warnings) && (rust.warnings.length === 0 || over)) delete rust.warnings;
+  if (over && node.ok === false && rust.ok === true) rust.ok = false;
+}
+
 /** Compares two results; returns a difference's text or null. */
 function compare(/** @type {any} */ nodeResult, /** @type {any} */ rustResult, /** @type {[string, string][]} */ nodeRoots, /** @type {[string, string][]} */ rustRoots) {
   /** @type {{ path: string, node: number }[]} */
@@ -349,8 +379,12 @@ async function main() {
     rmSync(out2, { recursive: true, force: true });
     const b1 = nodeCli(['art', 'build', '--dir', out1, '--json', '--document', format1], env);
     const b2 = rustCli(['art', 'build', '--dir', out2, '--json', '--document', format2], env);
-    if (b1.status !== b2.status) differ(name, 'art build exit code', `node ${b1.status}, rust ${b2.status}`);
-    const built = compare(JSON.parse(b1.stdout || '{}'), JSON.parse(b2.stdout || '{}'), [[out1, '<out>'], ...nodeRoots], [[out2, '<out>'], ...rustRoots]);
+    const [built1, built2] = [JSON.parse(b1.stdout || '{}'), JSON.parse(b2.stdout || '{}')];
+    acceptR4('art.build', built1, built2);
+    // R4: Node exited 1 over budget; the program exits 0 (acceptR4 made ok false again, the exit code follows it).
+    const overBudget = built2.ok === false && built1.ok === false && b1.status === 1 && b2.status === 0 && (built1.problems ?? []).length === 0;
+    if (b1.status !== b2.status && !overBudget) differ(name, 'art build exit code', `node ${b1.status}, rust ${b2.status}`);
+    const built = compare(built1, built2, [[out1, '<out>'], ...nodeRoots], [[out2, '<out>'], ...rustRoots]);
     if (built) differ(name, 'art build result', built);
     const svgs = filesIn(out1);
     if (JSON.stringify(svgs) !== JSON.stringify(filesIn(out2))) differ(name, 'art build files', `node ${svgs.join(', ')}; rust ${filesIn(out2).join(', ')}`);
@@ -378,6 +412,7 @@ async function main() {
       const reply = /** @type {any} */ (await rust.call(command, params));
       const rustResult = reply.error ? { error: { code: reply.error.data?.code ?? 'internal', message: reply.error.message } } : reply.result;
       compared++;
+      acceptR4(command, nodeResult, rustResult);
       const d = compare(nodeResult, rustResult, nodeRoots, rustRoots);
       if (d) differ(name, `${command} ${JSON.stringify(params)}`, d);
     }

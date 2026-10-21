@@ -20,7 +20,9 @@ mod common;
 mod depthlib;
 
 use depthlib::*;
-use engine::compile::{compile_all, compile_scene, optimize_svg, verify_lossless, Budget, Budgets, Build, Output, PreviewOnly, BUDGET};
+use engine::compile::{
+    budget_warnings, compile_all, compile_scene, optimize_svg, verify_lossless, Budget, Budgets, Build, Output, PreviewOnly, BUDGET,
+};
 use engine::engine::Order;
 
 fn svg(body: &str) -> String {
@@ -186,11 +188,27 @@ fn r7_compiles_a_scene_to_one_path_per_color_lossless_with_the_engine_budget_unl
     assert!(is_report(&r.report), "{}", r.report);
     let tight = compile_scene(&sources, "sample", &budgets("sample.svg", 10, 10), Order::Depth).unwrap();
     assert!(tight.over);
-    assert!(tight.report.ends_with(" — OVER BUDGET"), "{}", tight.report);
+    assert!(tight.report.ends_with(" — over its 0.0 KB budget and over its 0.0 KB gzip budget (warning)"), "{}", tight.report);
+    assert_eq!(tight.warnings, ["over its 0.0 KB budget", "over its 0.0 KB gzip budget"]);
+    assert!(r.warnings.is_empty());
     assert!(
         !compile_scene(&sources, "sample-preview", &budgets("sample.svg", 10, 10), Order::Depth).unwrap().over,
         "a preview-only scene keeps the engine budget"
     );
+}
+
+#[test]
+fn r4_compile_all_writes_an_over_budget_scene_with_a_warning_and_stays_ok() {
+    let out = Temp::new();
+    let sources = sample();
+    let r = compile_all(&sources, &[], &out.0, &budgets("sample.svg", 512, 100 * 1024)).unwrap();
+    assert!(r.ok, "over budget never fails");
+    assert!(out.0.join("sample.svg").exists());
+    assert_eq!(r.outputs[0].warnings, ["over its 0.5 KB budget"]);
+    assert!(r.outputs[0].report.ends_with(", lossless — over its 0.5 KB budget (warning)"), "{}", r.outputs[0].report);
+    let gz = compile_all(&sources, &[], &out.0, &budgets("sample.svg", 100 * 1024, 300)).unwrap();
+    assert_eq!(gz.outputs[0].warnings, ["over its 0.3 KB gzip budget"]);
+    assert_eq!(budget_warnings(Budget { raw: 750 * 1024, gzip: 150 * 1024 }, 750 * 1024 + 1, 1), ["over its 750 KB budget"]);
 }
 
 #[test]
