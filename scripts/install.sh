@@ -2,7 +2,7 @@
 # Installs Pixel Lab for the current user: builds "build/Pixel Lab.app" and
 # copies it to ~/Applications (created if missing; no sudo, never
 # /Applications). Then prints the commands that connect Claude Code to the
-# installed app's bundled CLI. It doesn't run them.
+# installed app's bundled program. It doesn't run them.
 #
 #   scripts/install.sh                 build, then install into ~/Applications
 #   scripts/install.sh --no-build      install the existing build/Pixel Lab.app
@@ -44,8 +44,7 @@ rm -rf "$target"
 ditto "$built" "$target"
 codesign --verify --deep --strict "$target"
 
-cli="$target/Contents/Resources/cli/bin/pixellab.mjs"
-node_bin=$(command -v node || true)
+program="$target/Contents/Helpers/pixellab"
 cat <<EOF
 
 Installed $target
@@ -57,11 +56,8 @@ it can't check the app, Control-click it in Finder › Open, or allow it under
 System Settings › Privacy & Security.
 
 Connect Claude Code (MCP; agents propose, you approve in Window › Agent):
-  claude mcp add pixellab -- node "$cli" serve --mcp
+  claude mcp add pixellab -- "$program" serve --mcp
 
-Optional: the CLI as a shell command (add to ~/.zshrc):
-  alias pixellab='node "$cli"'
+Optional: the program as a shell command (add to ~/.zshrc):
+  alias pixellab='"$program"'
 EOF
-if [[ -z $node_bin ]]; then
-  echo "\nnote: node isn't on this shell's PATH; Pixel Lab needs Node.js 22 or later (or set its path in Settings)."
-fi

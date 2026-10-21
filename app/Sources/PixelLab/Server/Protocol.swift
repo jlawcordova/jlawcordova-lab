@@ -24,7 +24,7 @@ struct DocRef: Hashable, Sendable, Codable, CustomStringConvertible {
     }
 
     /// The source file a `files.changed` notification names for this doc.
-    var file: String { kind == .scene ? "scenes/\(name).mjs" : "objects/\(name).mjs" }
+    var file: String { kind == .scene ? "scenes/\(name).json" : "objects/\(name).json" }
 
     init(from decoder: Decoder) throws {
         let s = try decoder.singleValueContainer().decode(String.self)
@@ -55,7 +55,7 @@ struct SessionInfo: Codable, Sendable {
     var version: String
     var `protocol`: Int
     var pid: Int
-    /// The open document (`document.mjs`): its folder, name, kind and publish folder.
+    /// The open document (`document.info`): its folder, name, kind and publish folder.
     var document: DocumentInfo?
     /// The document's folder (the old name; `document.root` is the same path).
     var site: String
@@ -90,7 +90,6 @@ struct SiteInfo: Codable, Sendable {
     var root: String
     var from: String?
     var branch: String?
-    var node: String?
     var scenes: Int
     var objects: Int
     var problems: Int

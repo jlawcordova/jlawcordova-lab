@@ -3,8 +3,8 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 const [site, state] = process.argv.slice(2);
-const cli = process.env.PIXELLAB_CLI_PATH ?? new URL('../../cli/bin/pixellab.mjs', import.meta.url).pathname;
-const p = spawn(process.execPath, [cli, 'serve', '--mcp', '--site', site], { env: { ...process.env, PIXELLAB_STATE: state }, stdio: ['pipe', 'pipe', 'inherit'] });
+const program = process.env.PIXELLAB_PROGRAM ?? new URL('../../target/release/pixellab', import.meta.url).pathname;
+const p = spawn(program, ['serve', '--mcp', '--site', site], { env: { ...process.env, PIXELLAB_STATE: state }, stdio: ['pipe', 'pipe', 'inherit'] });
 const rl = createInterface({ input: p.stdout });
 const waiting = new Map();
 rl.on('line', (l) => { const m = JSON.parse(l); waiting.get(m.id)?.(m); });

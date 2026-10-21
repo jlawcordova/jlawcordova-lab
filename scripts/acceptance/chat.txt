@@ -29,7 +29,7 @@ appearance dark
 # R16: approve from the card: the document changes, the card and a note say so
 card approve
 expect cardstatus Applied
-expect lastnote You approved #4 · wrote scenes/closeup-front-trees.mjs
+expect lastnote You approved #4 · wrote scenes/closeup-front-trees.json
 expect proposals 0
 expect badge none
 expect dirty false

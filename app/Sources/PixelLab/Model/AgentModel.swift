@@ -443,14 +443,14 @@ final class AgentModel {
 
     // MARK: MCP setup
 
-    /// `claude mcp add …` for the CLI this app runs (and its site and state dir when they aren't the defaults).
+    /// `claude mcp add …` for the program this app runs (and its site and state dir when they aren't the defaults).
     var mcpCommand: String {
-        let cli = Locator.findCLI()?.path ?? "<path to>/cli/bin/pixellab.mjs"
+        let program = Locator.findProgram()?.path ?? "<path to>/pixellab"
         var parts = ["claude", "mcp", "add", "pixellab"]
         if let state = app?.sessionInfo?.stateDir, URL(fileURLWithPath: state).standardizedFileURL != Self.defaultStateDir.standardizedFileURL {
             parts += ["-e", "PIXELLAB_STATE=\(Self.shellQuote(state))"]
         }
-        parts += ["--", "node", Self.shellQuote(cli), "serve", "--mcp"]
+        parts += ["--", Self.shellQuote(program), "serve", "--mcp"]
         // The document the app runs on, when it isn't the default site's.
         if let location = app?.documentLocation, location != .site(Locator.defaultSitePath) {
             parts += location.arguments.enumerated().map { $0.offset == 1 ? Self.shellQuote($0.element) : $0.element }

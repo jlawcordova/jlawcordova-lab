@@ -1,9 +1,8 @@
 import Foundation
 
-/// How to start the server: `node <cli> serve --stdio --document <path>` (or `--site <checkout>`).
+/// How to start the server: `pixellab serve --stdio --document <path>` (or `--site <checkout>`).
 struct ServerLaunch: Sendable, Equatable {
-    var node: URL
-    var cli: URL
+    var program: URL
     var location: DocumentLocation
     /// Extra environment for the server (e.g. PIXELLAB_STATE).
     var environment: [String: String] = [:]
@@ -41,7 +40,7 @@ enum ServerError: Error, LocalizedError, Sendable {
 /// 2.0 over the child's stdin and stdout. Requests carry increasing ids and
 /// resolve when their response line arrives; notifications (which the server
 /// sends before the response of the request that caused them) go to `events`
-/// in order. stderr is kept for diagnostics. If node crashes the server is
+/// in order. stderr is kept for diagnostics. If the program crashes the server is
 /// started again (at most 4 times a minute) and `.restarted` is sent, so the
 /// app can reopen its docs.
 actor ServerConnection {
@@ -72,7 +71,7 @@ actor ServerConnection {
 
     // MARK: Lifecycle
 
-    /// Starts node and asks for `session.info`.
+    /// Starts the program and asks for `session.info`.
     @discardableResult
     func start() async throws -> SessionInfo {
         stopping = false
@@ -112,13 +111,9 @@ actor ServerConnection {
         generation += 1
         let gen = generation
         let p = Process()
-        p.executableURL = launch.node
-        p.arguments = [launch.cli.path, "serve", "--stdio"] + launch.location.arguments
+        p.executableURL = launch.program
+        p.arguments = ["serve", "--stdio"] + launch.location.arguments
         var env = ProcessInfo.processInfo.environment
-        // node's own folder first on the PATH, as a login shell would have it.
-        let nodeDir = launch.node.deletingLastPathComponent().path
-        env["PATH"] = ([nodeDir] + (env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin").split(separator: ":").map(String.init))
-            .joined(separator: ":")
         for (k, v) in launch.environment { env[k] = v }
         p.environment = env
         p.currentDirectoryURL = URL(fileURLWithPath: Locator.path(of: launch.location), isDirectory: true)

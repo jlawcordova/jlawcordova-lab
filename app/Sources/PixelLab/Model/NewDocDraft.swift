@@ -40,7 +40,7 @@ final class NewDocDraft: Identifiable {
     func help(taken: Set<String>) -> String {
         if let e = serverError { return e }
         if let p = problem(taken: taken) { return name.isEmpty && !tried ? "Lowercase words joined by hyphens, like small-rock." : p }
-        return "It'll be saved at src/assets/pixel-art/source/\(kind.rawValue)s/\(trimmedName).mjs."
+        return "It'll be saved as \(kind.rawValue)s/\(trimmedName).json."
     }
 
     /// The command that makes it: `scene.new` or `object.new` with its params.

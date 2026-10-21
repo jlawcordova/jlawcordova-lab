@@ -345,6 +345,8 @@ flowchart TB
 
 - **As built, PR 2 (from step 11's review):** `serve --stdio` opens a format-1 document too, so R8's migrate works through the app's door: every command that needs the document gives R9's problem, and `document.migrate` converts it and reopens it in the same server (a site's legacy `source/` folder reopens as its new bundle). `serve --mcp` still refuses a format-1 document. A panic in a command is an internal error for that call, and the servers keep their open docs.
 
+- **As built, PR 4:** the program is bundled at `Contents/Helpers/pixellab`, not `Contents/MacOS/pixellab` (spec D10, steps 19 and 30): on a case-insensitive volume `pixellab` is the app's own executable `PixelLab`, so the copy would overwrite it. `Locator.findProgram()`, `install.sh`'s `claude mcp add` line, the Agent window and step 30's smoke test use that path. Migrate… runs the program as a CLI (`document migrate`) and then restarts the server. Under the script hook only, the chat's PATH is the launching shell's rather than the login shell's, so the fake `claude` (a `#!/bin/sh` that runs `node`) finds `node` without asking the owner's login shell.
+
 If the owner wants any of these the spec's way, `spec.md` wins.
 
 ## Risks

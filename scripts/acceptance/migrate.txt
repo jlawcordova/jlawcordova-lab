@@ -1,0 +1,44 @@
+# Acceptance: migrate (docs/intents/2026-10-rust-engine/spec.md R9, D3, D10). The app starts on a document
+# still in format 1: the setup screen gives R9's problem and offers Migrate…, which asks first. Cancel leaves
+# the document as it was; Migrate converts it in place with `document migrate`, starts the server on it and opens it.
+appearance dark
+expect phase setup
+expect migrate offered
+expect problem old-format.pixellab uses the old format. Migrate it with `pixellab document migrate`, or in the app.
+snapshot @OUT@/migrate-setup-dark.png
+appearance light
+snapshot @OUT@/migrate-setup-light.png
+# Settings: the document only, no Node.js.
+settings open
+snapshot settings @OUT@/settings-light.png
+appearance dark
+snapshot settings @OUT@/settings-dark.png
+settings close
+# Migrate… asks first; Cancel changes nothing.
+migrate
+expect migrate asking
+snapshot @OUT@/migrate-alert-dark.png
+appearance light
+snapshot @OUT@/migrate-alert-light.png
+answer cancel
+expect migrate offered
+expect phase setup
+expect problem uses the old format
+# Migrate converts it, the server starts on it, and the document opens.
+migrate
+expect migrate asking
+answer migrate
+expect phase ready
+expect migrate none
+expect document jlawcordova
+expect documentkind document
+expect scenes 28
+expect objects 204
+open scene:hero-island
+expect problems 0
+appearance dark
+snapshot @OUT@/migrate-done-dark.png
+# The art is the same: the migrated document publishes.
+publish @OUT@/migrated-out
+expect build ok
+done

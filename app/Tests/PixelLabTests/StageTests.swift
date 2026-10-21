@@ -175,12 +175,12 @@ import Testing
             SceneItemInfo(path: "5.2", object: "pine", at: ItemAt(tile: [1, 2, 0])),
             SceneItemInfo(path: "7", object: "crane-jib", at: ItemAt(px: [3, 4]), id: "jib"),
         ]
-        #expect(ProblemLocator.path(in: "scenes/x.mjs: items[5].items[2]: object \"nope\" does not exist") == "5.2")
-        #expect(ProblemLocator.path(in: "scenes/x.mjs: items[12]: at must be") == "12")
-        #expect((ProblemLocator.path(in: "scenes/x.mjs: viewBox must be four whole numbers")) == nil)
-        #expect(ProblemLocator.locate("scenes/x.mjs: items[5].items[2]: class must be", items: items) == "5.2")
-        #expect(ProblemLocator.locate("scenes/x.mjs: motion: track \"jib\": keys must be in order", items: items) == "7")
-        #expect((ProblemLocator.locate("scenes/x.mjs: items[9]: nope", items: items)) == nil)
+        #expect(ProblemLocator.path(in: "scenes/x.json: items[5].items[2]: object \"nope\" does not exist") == "5.2")
+        #expect(ProblemLocator.path(in: "scenes/x.json: items[12]: at must be") == "12")
+        #expect((ProblemLocator.path(in: "scenes/x.json: viewBox must be four whole numbers")) == nil)
+        #expect(ProblemLocator.locate("scenes/x.json: items[5].items[2]: class must be", items: items) == "5.2")
+        #expect(ProblemLocator.locate("scenes/x.json: motion: track \"jib\": keys must be in order", items: items) == "7")
+        #expect((ProblemLocator.locate("scenes/x.json: items[9]: nope", items: items)) == nil)
     }
 
     @Test func testKeySpecs() {

@@ -1,38 +1,8 @@
 import Foundation
 
-/// Finds node, the bundled CLI and the site checkout.
+/// Finds the bundled program and the site checkout.
 enum Locator {
     static let defaultSitePath = NSString(string: "~/Projects/jlawcordova.github.io").expandingTildeInPath
-
-    /// node: the Settings value, else `zsh -lc 'command -v node'`, else the usual Homebrew spots.
-    static func findNode(setting: String?) -> URL? {
-        if let setting, !setting.trimmingCharacters(in: .whitespaces).isEmpty {
-            let path = NSString(string: setting).expandingTildeInPath
-            return isExecutable(path) ? URL(fileURLWithPath: path) : nil
-        }
-        if let found = loginShellNode(), isExecutable(found) { return URL(fileURLWithPath: found) }
-        for path in ["/opt/homebrew/bin/node", "/usr/local/bin/node"] where isExecutable(path) {
-            return URL(fileURLWithPath: path)
-        }
-        return nil
-    }
-
-    private static func loginShellNode() -> String? {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        p.arguments = ["-lc", "command -v node"]
-        let out = Pipe()
-        p.standardOutput = out
-        p.standardError = FileHandle.nullDevice
-        p.standardInput = FileHandle.nullDevice
-        do { try p.run() } catch { return nil }
-        // A login shell can hang on a broken profile; give it a few seconds.
-        let deadline = Date().addingTimeInterval(5)
-        while p.isRunning, Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
-        if p.isRunning { p.terminate(); return nil }
-        let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        return text.split(separator: "\n").last.map { String($0).trimmingCharacters(in: .whitespaces) }
-    }
 
     static func isExecutable(_ path: String) -> Bool {
         var dir: ObjCBool = false
@@ -40,17 +10,20 @@ enum Locator {
             && FileManager.default.isExecutableFile(atPath: path)
     }
 
-    /// The CLI entry point: the app bundle's `Resources/cli`, else
-    /// `PIXELLAB_CLI`, else a `cli/` found above the executable (`swift run`),
-    /// else the repo this file was compiled from.
-    static func findCLI() -> URL? {
-        let rel = "cli/bin/pixellab.mjs"
+    /// The program: `Contents/Helpers/pixellab` in the app bundle, else
+    /// `PIXELLAB_PROGRAM` (tests), else `target/release/pixellab` in a checkout
+    /// found above the executable (`swift run`) or the one this file was
+    /// compiled from. (It can't sit in `Contents/MacOS/`: on a case-insensitive
+    /// volume `pixellab` is the app's own `PixelLab`.)
+    static func findProgram(environment env: [String: String] = ProcessInfo.processInfo.environment) -> URL? {
         var candidates: [URL] = []
-        if let res = Bundle.main.resourceURL { candidates.append(res.appendingPathComponent(rel)) }
-        if let env = ProcessInfo.processInfo.environment["PIXELLAB_CLI"], !env.isEmpty {
-            let url = URL(fileURLWithPath: NSString(string: env).expandingTildeInPath)
-            candidates.append(url.pathExtension == "mjs" ? url : url.appendingPathComponent("bin/pixellab.mjs"))
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            candidates.append(Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/pixellab"))
         }
+        if let override = env["PIXELLAB_PROGRAM"], !override.isEmpty {
+            candidates.append(URL(fileURLWithPath: NSString(string: override).expandingTildeInPath))
+        }
+        let rel = "target/release/pixellab"
         if let exe = Bundle.main.executableURL?.resolvingSymlinksInPath() {
             var dir = exe.deletingLastPathComponent()
             for _ in 0..<8 {
@@ -62,13 +35,19 @@ enum Locator {
         var source = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { source = source.deletingLastPathComponent() }
         candidates.append(source.appendingPathComponent(rel))
-        return candidates.first { FileManager.default.fileExists(atPath: $0.path) }
+        return candidates.first { isExecutable($0.path) }
     }
 
-    /// Why a path isn't a document the CLI can open, or nil if it is: a
-    /// `.pixellab` folder holding `palette.mjs`, or (`.site`) a site checkout
-    /// holding one under `src/assets/pixel-art/` (a `*.pixellab`, or the
-    /// legacy `source/` folder).
+    /// R9's problem for a document still in format 1.
+    static func oldFormatProblem(_ name: String) -> String {
+        "\(name) uses the old format. Migrate it with `pixellab document migrate`, or in the app."
+    }
+
+    /// Why a path isn't a document the program can open, or nil if it is: a
+    /// `.pixellab` folder holding `palette.json`, or (`.site`) a site checkout
+    /// holding one under `src/assets/pixel-art/`. A `palette.mjs` (format 1,
+    /// or the legacy `source/` folder) is R9's problem, which Migrate… fixes
+    /// (`needsMigration`).
     static func documentProblem(_ location: DocumentLocation) -> String? {
         let fm = FileManager.default
         let isFolder = { (path: String) -> Bool in
@@ -79,18 +58,20 @@ enum Locator {
         case .document(let path):
             let root = URL(fileURLWithPath: NSString(string: path).expandingTildeInPath)
             guard isFolder(root.path) else { return "There's no document at \(path)." }
-            guard fm.fileExists(atPath: root.appendingPathComponent("palette.mjs").path) else {
-                return "\(root.lastPathComponent) isn't a Pixel Lab document (no palette.mjs). Choose a .pixellab, or make a new one."
-            }
-            return nil
+            if fm.fileExists(atPath: root.appendingPathComponent("palette.json").path) { return nil }
+            if fm.fileExists(atPath: root.appendingPathComponent("palette.mjs").path) { return oldFormatProblem(root.lastPathComponent) }
+            return "\(root.lastPathComponent) isn't a Pixel Lab document (no palette.json). Choose a .pixellab, or make a new one."
         case .site(let path):
             let root = URL(fileURLWithPath: NSString(string: path).expandingTildeInPath)
             guard isFolder(root.path) else { return "There's no folder at \(path)." }
             let art = root.appendingPathComponent("src/assets/pixel-art")
             let bundles = ((try? fm.contentsOfDirectory(atPath: art.path)) ?? []).filter { $0.hasSuffix(".pixellab") }
-            if bundles.contains(where: { fm.fileExists(atPath: art.appendingPathComponent("\($0)/palette.mjs").path) }) { return nil }
-            if fm.fileExists(atPath: art.appendingPathComponent("source/palette.mjs").path) { return nil }
-            return "\(root.lastPathComponent) doesn't look like the site checkout: no .pixellab document or source/ folder under src/assets/pixel-art/."
+            if bundles.contains(where: { fm.fileExists(atPath: art.appendingPathComponent("\($0)/palette.json").path) }) { return nil }
+            if let old = bundles.first(where: { fm.fileExists(atPath: art.appendingPathComponent("\($0)/palette.mjs").path) }) {
+                return oldFormatProblem(old)
+            }
+            if fm.fileExists(atPath: art.appendingPathComponent("source/palette.mjs").path) { return oldFormatProblem("source") }
+            return "\(root.lastPathComponent) doesn't look like the site checkout: no .pixellab document under src/assets/pixel-art/."
         }
     }
 
@@ -101,14 +82,20 @@ enum Locator {
         }
     }
 
-    /// Runs the CLI once (`node <cli> <args>`), for the commands the app needs
-    /// before or outside the server: `document new`. Returns stdout; throws
-    /// with stderr on a non-zero exit.
-    static func runCli(node: URL, cli: URL, _ args: [String]) async throws -> String {
+    /// Whether a document problem is R9's (a format-1 document), which
+    /// Migrate… fixes.
+    static func needsMigration(_ location: DocumentLocation) -> Bool {
+        documentProblem(location)?.contains("uses the old format") == true
+    }
+
+    /// Runs the program once (`pixellab <args>`), for the commands the app
+    /// needs before or outside the server: `document new`, `document migrate`.
+    /// Returns stdout; throws with stderr on a non-zero exit.
+    static func runCli(program: URL, _ args: [String]) async throws -> String {
         try await Task.detached {
             let p = Process()
-            p.executableURL = node
-            p.arguments = [cli.path] + args
+            p.executableURL = program
+            p.arguments = args
             let out = Pipe(), err = Pipe()
             p.standardOutput = out
             p.standardError = err
@@ -131,8 +118,8 @@ enum Locator {
 }
 
 /// What the server opens: a `.pixellab` document (`--document`), or the
-/// document inside a site checkout (`--site`, which the CLI resolves to a
-/// `*.pixellab` under `src/assets/pixel-art/` or its legacy `source/` folder).
+/// document inside a site checkout (`--site`, which the program resolves to a
+/// `*.pixellab` under `src/assets/pixel-art/`).
 enum DocumentLocation: Equatable, Sendable {
     case document(String)
     case site(String)
