@@ -31,7 +31,10 @@ This is a change to the Mac app only. No command, CLI flag or MCP tool changes, 
   - Two-finger scroll pans the stage, as it does now.
   - The Hand tool drags the view.
   - Space held with any tool is a temporary hand, and Space + arrows pan, as now.
-- **R5. Quiet scroll bars.** The stage's scroll bars are thin overlay scrollers that show while scrolling and fade after. They take no layout space, so nothing shifts when they appear. This applies to the stage and to the Library popover's grid (R8).
+- **R5. Quiet scroll bars.** The stage's scroll bars follow the system's "Show scroll bars" setting (the owner's decision).
+  - Set to show them automatically or when scrolling: thin overlay scrollers that show while scrolling, fade after and take no layout space, so nothing shifts when they appear.
+  - Set to Always: they're always shown, in the small (thinner) size. Their room is always reserved, so nothing shifts either.
+  - This applies to the stage and to the Library popover's grid (R8).
 
 **The floating bar**
 
@@ -105,6 +108,7 @@ This is a change to the Mac app only. No command, CLI flag or MCP tool changes, 
   - Saving stays explicit (autosave is `../2026-10-autosave/intent.md`).
   - The document, the engine, the CLI and MCP don't change, and neither does the published art.
   - The Agent window, the chat and proposals behave as they do today, apart from where the badge sits.
+  - There's no command to hide every panel; the owner doesn't need one for now.
 
 **Accessibility, tests and docs**
 
@@ -125,7 +129,7 @@ This is a change to the Mac app only. No command, CLI flag or MCP tool changes, 
 - **The right panel:**
   - `.inspector(isPresented:)` stays, bound to a constant `true`. `showInspector` and its menu item go.
   - The column keeps `.inspectorColumnWidth(min: 260, ideal: 340, max: 520)`.
-  - The sidebar stays collapsible with the system's View › Hide Sidebar (⌃⌘S), which `NavigationSplitView` provides. The owner didn't ask for it to go, so it stays (an area of concern).
+  - The sidebar stays collapsible with the system's View › Hide Sidebar (⌃⌘S), which `NavigationSplitView` provides (the owner's decision).
 
 ### D2. Zoom (R1–R3)
 - **Pinch and ⌘-scroll:**
@@ -143,9 +147,9 @@ This is a change to the Mac app only. No command, CLI flag or MCP tool changes, 
   - Under Reduce Motion it appears and disappears with no fade.
 
 ### D3. Scroll bars (R5)
-- The stage's `ScrollView` gets `.scrollIndicators(.automatic)`. Its underlying `NSScrollView` (reached the way `StageInput` already reaches `enclosingScrollView`) is set to `scrollerStyle = .overlay` and `autohidesScrollers = true`, with `scrollerKnobStyle` left at default.
-- The Library grid's `ScrollView` does the same.
-- This overrides the system's "Show scroll bars: Always" setting for these two views only (an area of concern).
+- The stage's `ScrollView` and the Library grid's keep the system's scroller style. Their underlying `NSScrollView`s, reached the way `StageInput` already reaches `enclosingScrollView`, don't set `scrollerStyle`, so AppKit follows the "Show scroll bars" setting and the input device.
+- They do set `autohidesScrollers = true`, and set both scrollers' `controlSize` to `.small`, so a scroller that stays shown is the thin one.
+- With overlay scrollers nothing takes layout space. With legacy scrollers the room is reserved from the start, so the content never shifts when a scroller appears.
 
 ### D4. The floating bar (R6, R7)
 - **The view:**
@@ -241,20 +245,20 @@ The acceptance scripts that use `mode`, `sidebar` or `tool place` are updated to
 - The docs site is rebuilt to check links.
 
 ## Areas of concern
-- **How far pinch reaches** (the intent's open question). The spec keeps today's levels: scenes 1×–4×, objects 4×–16×. The constraint is whole zoom, and wider ranges would need new Fit and margin rules. The owner should confirm, or ask for more levels (for example 5×–8× for scenes).
-- **A way to hide every panel** (the intent's open question). The spec doesn't add one. If the owner wants it, the research suggests ⌘. or Tab, as a View menu item that hides the sidebar and right panel and still leaves the bar. Ask the owner before the plan.
-- **Shortcut changes.**
+The owner settled the concerns raised in review on 2026-10-22:
+- **How far pinch reaches:** today's levels (scenes 1×–4×, objects 4×–16×) are fine.
+- **A way to hide every panel:** not needed for now. It's out of scope.
+- **Shortcuts:**
   - Removed: A (Place) and ⌥⌘I (Inspector).
-  - Added: L, ⌘=, ⌘−, ⌘↩ and ⌘[.
-  - ⌘[ and ⌘↩ are Mac conventions (Back, and open the selected thing) that the owner didn't name. Confirm them, or pick others.
-- **Forcing overlay scroll bars** (D3) overrides the system setting "Show scroll bars: Always" on two views. The setting is an accessibility preference for some people. The owner asked for quiet scroll bars, so the spec forces them on the stage and the popover grid only. Alternatively the app could respect the system setting and only thin the bars.
-- **The sidebar stays collapsible** through the system's View › Hide Sidebar, though its toolbar button goes (D1). The owner asked for the right panel to stay put, not the sidebar. Confirm.
-- **Publish in the right panel.** The intent records that Publish sits beside Save, as in the approved prototype. The owner had first said every remaining button goes in the floating bar. The research backs keeping the bar small: Figma's bottom bar drew a long feedback thread about clutter. The spec follows the prototype.
+  - Added: L, ⌘= and ⌘−, ⌘↩ for Edit Object, and ⌘[ for Back.
+  - The owner accepted all of these.
+- **Scroll bars:** respect the system's "Show scroll bars" setting (R5, D3), rather than forcing overlay scrollers.
+- **The sidebar:** it stays collapsible through View › Hide Sidebar.
+- **Publish:** it stays beside Save in the right panel, as prototyped.
+
+These remain as notes for the plan:
 - **Losing the toolbar's discoverability.** Apple's guidelines say a toolbar item can't be the only place for a command, and that hidden controls need a reliable way back. Every removed control keeps a menu item (D9), and the bar's help tags name their keys.
 - **The Command Line Tools build has no SwiftUI macros.** All new view state (`libraryOpen`, `zoomReadout`, `returnScene`) lives in `AppModel`, as `CLAUDE.md` requires.
 
 ## Open questions
-- **How far should pinch zoom reach?** Carried forward with the spec's recommendation, today's levels (Areas of concern).
-- **Should there be a way to hide every panel?** Carried forward. The spec leaves it out unless the owner asks (Areas of concern).
-- **New:** confirm ⌘[ for Back and ⌘↩ for Edit Object.
-- **New:** confirm forcing overlay scroll bars over the system setting.
+None. The intent's two questions are answered: pinch keeps today's levels, and a way to hide every panel isn't needed for now. The review's questions are answered above.
