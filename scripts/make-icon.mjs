@@ -1,18 +1,19 @@
 #!/usr/bin/env node
-// Renders Pixel Lab's app icon with the engine (cli/lib/engine/): the house, at a whole
-// pixel scale, on a 1024×1024 warm squircle with a faint iso grid. Node
-// built-ins only; PNG via the engine's encodePng. Reads the document, never writes it.
+// Renders Pixel Lab's app icon: the house, at a whole pixel scale, on a
+// 1024×1024 warm squircle with a faint iso grid. The art comes from the
+// program (target/release/pixellab object render, a 1× PNG), which this reads
+// back; everything else is Node built-ins. Reads the document, never writes it.
 //
 //   node scripts/make-icon.mjs [--document <path> | --site <path>] [--object house] [--out app/Sources/PixelLab/Resources/AppIcon.png]
 //
 // scripts/build-app.sh turns the PNG into AppIcon.icns with sips and iconutil.
 
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-import { createContext } from '../cli/lib/context.mjs';
-import { openDocument } from '../cli/lib/document.mjs';
+import { crc32, deflateSync, inflateSync } from 'node:zlib';
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -31,11 +32,105 @@ const GROUND_BOTTOM = [0x2d, 0x25, 0x1c];
 const GRID = [0xf1, 0xe8, 0xd8, 0.07];
 const RIM = [0xf1, 0xe8, 0xd8, 0.1];
 
-const site = await openDocument({ doc: flag('document'), site: flag('site') });
-const { sources } = await createContext(site).sources();
-if (!sources.objects.has(objectName)) throw new Error(`no object ${objectName} in ${site.root}`);
-const pixels = site.engine.composite(site.engine.renderObject(sources, objectName), { frame: 0 });
-const box = site.engine.bounds(pixels.keys());
+const PROGRAM = join(repo, 'target/release/pixellab');
+
+/** The object's frame 0 at 1×, from the program: its pixels (as "x,y" → [r, g, b]) with x and y in map coordinates. */
+function objectPixels() {
+  const env = { ...process.env, PATH: `${join(homedir(), '.cargo/bin')}:${process.env.PATH ?? ''}` };
+  const built = spawnSync('cargo', ['build', '--release', '--quiet', '--bin', 'pixellab'], { cwd: repo, env, stdio: ['ignore', 'inherit', 'inherit'] });
+  if (built.status !== 0) throw new Error('cargo build --release failed');
+  const doc = flag('document') ? ['--document', flag('document')] : flag('site') ? ['--site', flag('site')] : [];
+  const r = spawnSync(PROGRAM, ['object', 'render', objectName, '--json', ...doc], { cwd: repo, env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const result = JSON.parse(r.stdout || '{}');
+  if (r.status !== 0 || result.error) throw new Error(`pixellab object render ${objectName}: ${result.error?.message ?? r.stderr}`);
+  const png = decodePng(Buffer.from(result.png, 'base64'));
+  const [vx, vy] = result.viewBox;
+  const map = new Map();
+  for (let y = 0; y < png.height; y++) {
+    for (let x = 0; x < png.width; x++) {
+      const i = (y * png.width + x) * 4;
+      if (png.rgba[i + 3] === 0) continue;
+      map.set(`${vx + x},${vy + y}`, [png.rgba[i], png.rgba[i + 1], png.rgba[i + 2]]);
+    }
+  }
+  return map;
+}
+
+/** Decodes an 8-bit RGBA, non-interlaced PNG. @param {Buffer} data */
+function decodePng(data) {
+  let at = 8;
+  let width = 0;
+  let height = 0;
+  const idat = [];
+  while (at < data.length) {
+    const len = data.readUInt32BE(at);
+    const type = data.toString('latin1', at + 4, at + 8);
+    const body = data.subarray(at + 8, at + 8 + len);
+    if (type === 'IHDR') {
+      width = body.readUInt32BE(0);
+      height = body.readUInt32BE(4);
+      if (body[8] !== 8 || body[9] !== 6 || body[12] !== 0) throw new Error('expected an 8-bit RGBA PNG without interlace');
+    } else if (type === 'IDAT') idat.push(body);
+    at += 12 + len;
+  }
+  const raw = inflateSync(Buffer.concat(idat));
+  const rgba = Buffer.alloc(width * height * 4);
+  const stride = width * 4;
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)];
+    for (let x = 0; x < stride; x++) {
+      const v = raw[y * (stride + 1) + 1 + x];
+      const a = x >= 4 ? rgba[y * stride + x - 4] : 0;
+      const b = y > 0 ? rgba[(y - 1) * stride + x] : 0;
+      const c = x >= 4 && y > 0 ? rgba[(y - 1) * stride + x - 4] : 0;
+      let add = 0;
+      if (filter === 1) add = a;
+      else if (filter === 2) add = b;
+      else if (filter === 3) add = (a + b) >> 1;
+      else if (filter === 4) {
+        const p = a + b - c;
+        const pa = Math.abs(p - a);
+        const pb = Math.abs(p - b);
+        const pc = Math.abs(p - c);
+        add = pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+      }
+      rgba[y * stride + x] = (v + add) & 255;
+    }
+  }
+  return { width, height, rgba };
+}
+
+/** Encodes 8-bit RGBA as a PNG. @param {number} width @param {number} height @param {Buffer} rgba */
+function encodePng(width, height, rgba) {
+  const stride = width * 4 + 1;
+  const raw = Buffer.alloc(stride * height);
+  for (let y = 0; y < height; y++) rgba.copy(raw, y * stride + 1, y * width * 4, (y + 1) * width * 4);
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr.set([8, 6, 0, 0, 0], 8);
+  const chunk = (/** @type {string} */ type, /** @type {Buffer} */ body) => {
+    const head = Buffer.alloc(8);
+    head.writeUInt32BE(body.length, 0);
+    head.write(type, 4, 'latin1');
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), body])) >>> 0, 0);
+    return Buffer.concat([head, body, crc]);
+  };
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+
+const pixels = objectPixels();
+if (pixels.size === 0) throw new Error(`object ${objectName} has no pixels`);
+let [minX, minY, maxX, maxY] = [Infinity, Infinity, -Infinity, -Infinity];
+for (const key of pixels.keys()) {
+  const [px, py] = key.split(',').map(Number);
+  minX = Math.min(minX, px);
+  maxX = Math.max(maxX, px);
+  minY = Math.min(minY, py);
+  maxY = Math.max(maxY, py);
+}
+const box = { minX, minY, maxX, maxY };
 const artW = box.maxX - box.minX + 1;
 const artH = box.maxY - box.minY + 1;
 
@@ -89,15 +184,13 @@ for (let y = 0; y < SIZE; y++) {
   }
 }
 
-for (const [key, name] of pixels) {
+for (const [key, rgb] of pixels) {
   const [px, py] = key.split(',').map(Number);
-  const hex = sources.colors.get(name)?.hex ?? '#000000';
-  const rgb = [1, 3, 5].map((k) => parseInt(hex.slice(k, k + 2), 16));
   const x0 = ox + (px - box.minX) * scale;
   const y0 = oy + (py - box.minY) * scale;
   for (let y = y0; y < y0 + scale; y++) for (let x = x0; x < x0 + scale; x++) blend((y * SIZE + x) * 4, rgb, 1);
 }
 
 mkdirSync(dirname(out), { recursive: true });
-writeFileSync(out, site.preview.encodePng({ width: SIZE, height: SIZE, rgba }, 1));
+writeFileSync(out, encodePng(SIZE, SIZE, rgba));
 console.log(`wrote ${out} (${objectName} at ${scale}×, 1024×1024)`);

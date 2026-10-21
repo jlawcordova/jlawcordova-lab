@@ -38,7 +38,7 @@ Default to **one slice**, with each step in Order of work as a commit inside it.
 
 Split into more than one slice only when the work can't, or shouldn't, be done by one runner in one pass, and say why in the plan. Valid reasons:
 
-- **Parallel work:** independent parts that subagents can build at the same time, each owning its own files, for example a CLI slice (`cli/`) and an app slice (`app/`) once the command they share is settled. Put the shared pieces they build on (a new command and its params, a protocol change) in an earlier slice that lands first.
+- **Parallel work:** independent parts that subagents can build at the same time, each owning its own files, for example a program slice (`crates/`) and an app slice (`app/`) once the command they share is settled. Put the shared pieces they build on (a new command and its params, a protocol change) in an earlier slice that lands first.
 - **A foundation the rest builds on:** an early part that later slices need merged before they start.
 - **A risky or hard-to-reverse step** (a change to the source format written to the site, the proposals or state-dir format, anything that writes to the site checkout) that should be merged and checked before anything builds on it.
 - **An external dependency:** a step waits on something outside the change, such as a change in the site repo, a signing identity or an approval. Put the work that depends on it in its own slice, so the rest isn't blocked, and name the dependency in the plan.
@@ -52,7 +52,7 @@ The plan decides how the work runs, so the implementer doesn't stop to ask. Its 
 
 - **Who runs each slice, and on which branch:** the main session or subagents (for example one per slice, in parallel worktrees), in order or in parallel, and how their work is gathered. A table of the run, step by step, with who, where and what happens next, is the clearest form. Subagents that build (code, tests, PRs) run on Sonnet; subagents that define (brainstorming, specs, plans, an adversarial review) run on Opus.
 - **The merge rules:** who merges each slice into `feat/<slug>` and when, what happens when `main` moves, and who resolves a conflict between slices.
-- **File ownership** when slices run in parallel: which files each slice may edit. A slice that needs a file another slice owns, or a shared file from an earlier slice, stops and reports instead of editing it. Shared files to watch: `cli/lib/registry.mjs`, `docs/cli.md` (generated), `app/Sources/PixelLab/Support/ScriptRunner.swift`, `app/Sources/PixelLab/Model/AppModel.swift`.
+- **File ownership** when slices run in parallel: which files each slice may edit. A slice that needs a file another slice owns, or a shared file from an earlier slice, stops and reports instead of editing it. Shared files to watch: `crates/pixellab/src/registry.rs`, `docs/cli.md` (generated), `app/Sources/PixelLab/Support/ScriptRunner.swift`, `app/Sources/PixelLab/Model/AppModel.swift`.
 - **Owner reviews:** the steps that pause for the owner, what they look at (snapshots, an installed build to try, a proposal in the Agent window), and what happens with their feedback. Plan one only where the owner's judgment is the point: a first design that sets the look for the rest, a choice between options, or a feel that can't be checked by a script. Everything else runs without a pause.
 - **Independent review:** none by default. The implementer's own tests and checks, pasted into the PR, are the verification. Plan a `verify-change` run, or another adversarial subagent review, only where a second pair of eyes earns its cost: a change to what's written to the site, the proposals and approval path, the MCP server's surface, a change other work builds on, or the final PR of a large change. Name the PR or step it runs on.
 
@@ -94,7 +94,7 @@ When implementing, follow it as written:
 ## Files that change
 app/Sources/PixelLab/Model/HitTesting.swift, app/Sources/PixelLab/Model/SceneEditor.swift,
 app/Sources/PixelLab/Support/ScriptRunner.swift, app/Tests/PixelLabTests/StageTests.swift,
-cli/lib/scene-ops.mjs, cli/lib/commands/scene-edit.mjs, cli/test/edit-commands.test.mjs,
+crates/pixellab/src/scene_ops.rs, crates/pixellab/src/commands/scene_edit.rs, crates/pixellab/tests/scene_commands.rs,
 docs/cli.md (generated)
 
 ## Order of work

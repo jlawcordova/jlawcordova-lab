@@ -1,6 +1,5 @@
-//! The canonical text (plan step 5, spec D4): every bootstrapped file is the
-//! canonical serialization of itself, so the Rust writer and the Node
-//! bootstrap (scripts/goldens.mjs) agree byte for byte.
+//! The canonical text (spec D4): every file of the committed fixture is the
+//! canonical serialization of itself.
 
 mod common;
 
@@ -22,13 +21,4 @@ fn check_document(root: &Path) -> usize {
 #[test]
 fn the_fixture_is_canonical() {
     assert_eq!(check_document(&common::fixture()), 5);
-}
-
-#[test]
-fn every_bootstrapped_file_is_canonical() {
-    let Some(dir) = common::goldens("every_bootstrapped_file_is_canonical") else { return };
-    for (name, format2, _) in common::corpus(&dir) {
-        let n = check_document(&format2);
-        eprintln!("{name}: {n} files canonical");
-    }
 }
