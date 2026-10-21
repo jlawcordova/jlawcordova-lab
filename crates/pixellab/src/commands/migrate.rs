@@ -146,8 +146,20 @@ fn migrate_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let mut refused = Vec::new();
     let mut notes = Vec::new();
     for file in sources_of(&root) {
-        let text = fs::read_to_string(root.join(&file)).unwrap_or_default();
-        match convert(&file, &text) {
+        let text = match fs::read(root.join(&file)).map(String::from_utf8) {
+            Ok(Ok(t)) => t,
+            Ok(Err(_)) => {
+                refused.push(format!("{file}: not UTF-8 text"));
+                continue;
+            }
+            Err(e) => {
+                refused.push(format!("{file}: can't be read ({e})"));
+                continue;
+            }
+        };
+        // A byte order mark, as Node's import skips it.
+        let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+        match convert(&file, text) {
             Ok(value) => {
                 let target = json_name(&file);
                 for n in value.get("notes").and_then(Value::as_array).into_iter().flatten() {

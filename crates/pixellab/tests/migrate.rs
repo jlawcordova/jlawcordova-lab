@@ -323,3 +323,17 @@ fn r8_r9_the_apps_server_migrates_a_sites_legacy_source_folder_into_its_bundle_a
     assert_eq!(r[1]["result"]["document"]["kind"], "document");
     assert_eq!(r[2]["result"]["scenes"][0]["name"], "sample", "{}", r[2]);
 }
+
+#[test]
+fn r8_a_source_with_a_byte_order_mark_migrates_and_one_that_is_not_utf_8_is_refused_by_name() {
+    let (root, env) = old_document();
+    let palette = std::fs::read_to_string(root.join("palette.mjs")).unwrap();
+    std::fs::write(root.join("palette.mjs"), format!("\u{feff}{palette}")).unwrap();
+    std::fs::write(root.join("objects/bad.mjs"), b"export default { kind: '\xff' };\n").unwrap();
+    let (code, _, err) = cli(&["document", "migrate", "--document", root.to_str().unwrap()], &env, &root);
+    assert_eq!(code, 1);
+    assert!(err.contains("1 source can't be read as data") && err.contains("objects/bad.mjs: not UTF-8 text"), "{err}");
+    std::fs::remove_file(root.join("objects/bad.mjs")).unwrap();
+    let (code, _, err) = cli(&["document", "migrate", "--document", root.to_str().unwrap()], &env, &root);
+    assert_eq!(code, 0, "{err}");
+}
