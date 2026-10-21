@@ -9,7 +9,7 @@ A unit's checks: `cargo fmt --check`, `cargo test` for its crate, its ported sui
 | Unit | Node → Rust | Tests ported | Needs | Tier | Status |
 |---|---|---|---|---|---|
 | U1 | `iso.mjs` → `iso.rs` | iso cases of `engine.test.mjs` | PR 1 | S | merged |
-| U2 | `svg.mjs`, `starter.mjs`, `starter-palette.mjs` → `svg.rs`, `starter.rs`, `starter-palette.json` | svg and starter cases | PR 1 | S | ready |
+| U2 | `svg.mjs`, `starter.mjs`, `starter-palette.mjs` → `svg.rs`, `starter.rs`, `starter-palette.json` | svg and starter cases | PR 1 | S | merged |
 | U3 | `engine.mjs` → `engine.rs` (validate, resolve, `sceneAt`) | validation cases | PR 1 | O | ready |
 | U4 | `depth.mjs` → `depth.rs` | `depth.test.mjs` | U1, U3 | O | waiting |
 | U5 | `motion.mjs` → `motion.rs` | motion cases of `engine.test.mjs` and `depth-motion.test.mjs` | U3 | O | waiting |
