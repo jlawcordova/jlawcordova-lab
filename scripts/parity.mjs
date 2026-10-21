@@ -461,6 +461,17 @@ async function fixtureChecks(/** @type {string} */ base, /** @type {any} */ env,
   };
   const n = await mcp(['node', NODE_CLI, 'serve', '--mcp', '--document', format1]);
   const r = await mcp([PROGRAM, 'serve', '--mcp', '--document', format2]);
+  // PR 3 adds the four ambient and action tools and gives scene_render and object_render a play param (R24, D8):
+  // those six tools are left out of both lists; every other tool and every other message is compared as it is.
+  const CHANGED_TOOLS = ['scene_ambient', 'scene_action', 'object_ambient', 'object_action', 'scene_render', 'object_render'];
+  for (const lines of [n, r]) {
+    for (let i = 0; i < lines.length; i++) {
+      const message = JSON.parse(lines[i]);
+      if (!Array.isArray(message.result?.tools)) continue;
+      message.result.tools = message.result.tools.filter((/** @type {any} */ t) => !CHANGED_TOOLS.includes(t.name));
+      lines[i] = JSON.stringify(message);
+    }
+  }
   for (let i = 0; i < Math.max(n.length, r.length); i++) {
     // Format 2 names its source files .json.
     if (n[i] !== undefined) n[i] = n[i].split('starter.mjs').join('starter.rs').split('.mjs').join('.json');
@@ -542,22 +553,33 @@ async function fixtureChecks(/** @type {string} */ base, /** @type {any} */ env,
     if (norm(a.stderr, e1) !== norm(b.stderr, e2)) differ('sample', `${argv.join(' ')} stderr`, `node ${norm(a.stderr, e1).slice(0, 400)}\n  rust ${norm(b.stderr, e2).slice(0, 400)}`);
   }
   note(`sample: human output and exit codes of ${reads.length} read commands and ${FAILING.length} failing calls compared`);
-  // The CLI reference: the Node script's docs/cli.md and the program's help --markdown.
-  const md1 = run(['node', join(REPO, 'scripts/docs-cli.mjs'), '--stdout'], env);
+  // The CLI reference: the Node CLI's (scripts/docs-cli-node.mjs, what docs/cli.md was before the program wrote it)
+  // and the program's help --markdown, apart from what PR 3 adds or changes on purpose.
+  const { renderCliDocs } = await import('./docs-cli-node.mjs');
+  const md1 = { stdout: renderCliDocs().replace(/\n{3,}/g, '\n\n').replace(/\n*$/, '\n') };
   const md2 = rustCli(['help', '--markdown'], env);
-  // document migrate is new in the program (R8): its row and its section aren't in the Node reference.
-  md2.stdout = md2.stdout
-    .split('\n')
-    .filter((l) => !l.startsWith('| [`document migrate`]'))
-    .join('\n')
-    .replace(/\n#### document\.migrate\n[\s\S]*?(?=\n#### )/, '')
-    .replace(/; `document_migrate` \([^)]*\)/, '');
-  const ref = (md1.status === 0 && md1.stdout.startsWith('#') ? md1.stdout : readFileSync(join(REPO, 'docs/cli.md'), 'utf8')).split('starter.mjs').join('starter.rs').replace(/\b(palette|(?:objects|scenes)\/[^\s`"'*)\]]+)\.mjs/g, '$1.json');
+  // New commands and the commands PR 3 changes: art build (images, warnings; R4, R18), scene render and object render
+  // (--play; R24), document migrate (R8) and the four ambient and action commands (R24, D8). Their index rows, their
+  // reference sections (cut from the "#### name" heading to the next heading) and document_migrate's MCP sentence go
+  // from both sides; nothing else is filtered.
+  const NEW = ['document.migrate', 'scene.ambient', 'scene.action', 'object.ambient', 'object.action'];
+  const CHANGED = ['art.build', 'scene.render', 'object.render'];
+  const without = (/** @type {string} */ text) => {
+    let t = text
+      .split('\n')
+      .filter((l) => !NEW.some((name) => l.startsWith(`| [\`${name.replace('.', ' ')}\`]`)))
+      .join('\n')
+      .replace(/; `document_migrate` \([^)]*\)/, '');
+    for (const name of [...NEW, ...CHANGED]) t = t.replace(new RegExp(`\\n#### ${name.replace('.', '\\.')}\\n[\\s\\S]*?(?=\\n#### |\\n### |$)`), '');
+    return t;
+  };
+  md2.stdout = without(md2.stdout);
+  const ref = without(md1.stdout).split('starter.mjs').join('starter.rs').replace(/\b(palette|(?:objects|scenes)\/[^\s`"'*)\]]+)\.mjs/g, '$1.json');
   if (ref !== md2.stdout) {
     const at = [...ref].findIndex((ch, k) => ch !== md2.stdout[k]);
     differ('sample', 'help --markdown', `node …${ref.slice(Math.max(0, at - 150), at + 200)}…\n  rust …${md2.stdout.slice(Math.max(0, at - 150), at + 200)}…`);
   }
-  note('sample: help --markdown compared with docs/cli.md');
+  note('sample: help --markdown compared with the Node CLI reference');
   void execFileSync;
 }
 

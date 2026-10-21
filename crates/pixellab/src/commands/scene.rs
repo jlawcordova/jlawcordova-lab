@@ -8,7 +8,7 @@ use super::common::{flag, join, obj, opt_num, opt_str, pad_end, pad_start, str_o
 use crate::context::{Ctx, DocKind};
 use crate::errors::{CommandError, Result};
 use crate::registry::{Command, Params};
-use crate::render::{flatten_items, parse_path, render_scene_image, SceneImageOptions, Theme, MAX_SCALE};
+use crate::render::{flatten_items, parse_path, parse_play, render_scene_image, SceneImageOptions, Theme, MAX_SCALE};
 
 fn name_param() -> Value {
     json!({ "type": "string", "description": "scene name (or scenes/<name>)" })
@@ -19,6 +19,15 @@ pub fn render_params() -> Value {
     json!({
         "scale": { "type": "integer", "minimum": 1, "maximum": MAX_SCALE, "default": 1, "description": "whole-pixel zoom of the PNG" },
         "time": { "type": "integer", "minimum": 0, "description": "ms into the animation: frame loops and motion tracks (default 0, the rest frame)" }
+    })
+}
+
+/// `--play`: an action to show a frame of.
+pub fn play_param() -> Value {
+    json!({
+        "type": "string",
+        "pattern": "^[a-z0-9]+(-[a-z0-9]+)*@\\d+$",
+        "description": "an action and the ms into it, like hop@120: the elements that have it are placed where it has them then, instead of on their ambient loop"
     })
 }
 
@@ -309,6 +318,10 @@ fn render_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
         theme: if opt_str(&params, "theme") == Some("dark") { Theme::Dark } else { Theme::Light },
         hide: hidden,
         focus: focused,
+        play: match opt_str(&params, "play") {
+            Some(p) => Some(parse_play(p)?),
+            None => None,
+        },
     };
     let image = render_scene_image(&loaded.sources, &name, &dark_page, &options)?;
     let mut out = obj(vec![("scene", json!(name))]);
@@ -375,6 +388,7 @@ pub fn commands() -> Vec<Command> {
         props.extend(rp);
     }
     props.insert("theme".into(), theme());
+    props.insert("play".into(), play_param());
     props.insert(
         "show".into(),
         json!({ "type": "string", "pattern": "^\\d+(\\.\\d+)*$", "description": "an item path whose variant group to show, like 12.0" }),
@@ -398,7 +412,9 @@ pub fn commands() -> Vec<Command> {
         "Returns { png (base64), scale, viewBox, width, height, time, items: [{ path, object, at, id, bounds: [x, y, w, h] }] }. ",
         "Bounds are in output pixels (scale included), for hit-testing. Of each run of data-class variant groups only the first shows, ",
         "or the one holding --show. --hide leaves out the items in those layers (and the layers inside them), as hiding them in Pixel Lab does; ",
-        "--focus adds focusPng, the same render with only that layer's items. On the command line, --out <file.png> writes the PNG."
+        "--focus adds focusPng, the same render with only that layer's items. ",
+        "Ambient loops are placed at --time; --play <action>@<ms> places the elements that have that action where it has them <ms> into it. ",
+        "On the command line, --out <file.png> writes the PNG."
     ));
     render.args = vec!["name"];
     render.writes_png = true;
@@ -406,6 +422,7 @@ pub fn commands() -> Vec<Command> {
         "pixellab scene render hero-island --scale 2 --out /tmp/hero.png",
         "pixellab scene render range-sprite --time 400 --json",
         "pixellab scene render hero-island --theme dark --out /tmp/hero-dark.png",
+        "pixellab scene render meadow --play hop@120 --out /tmp/hop.png",
     ];
     render.format = Some(render_format);
 

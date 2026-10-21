@@ -33,7 +33,10 @@
 | [`doc undo`](#docundo) | Undo the last edit to an open doc | edit, session |
 | [`document copy`](#documentcopy) | Save a copy of the open document at another path (Save As) | writes files |
 | [`document info`](#documentinfo) | Show the document in use: where it came from, its publish folder and what it holds | read |
+| [`document migrate`](#documentmigrate) | Migrate a document from format 1 (.mjs sources) to format 2 (JSON sources), in place or as a copy | writes files |
 | [`document new`](#documentnew) | Make a new, empty .pixellab document with the starter palette | writes files |
+| [`object action`](#objectaction) | Add, change or delete an action of a sprite map layer | edit |
+| [`object ambient`](#objectambient) | Set or clear a sprite map layer's ambient loop | edit |
 | [`object animate`](#objectanimate) | Turn a still layer into one of the site's frame loops, or switch a loop's kind | edit |
 | [`object erase`](#objecterase) | Erase pixels of an object (make them transparent), on a layer and frame | edit |
 | [`object fill`](#objectfill) | Flood-fill from a pixel with a palette color, on a layer and frame | edit |
@@ -61,6 +64,8 @@
 | [`proposal reject`](#proposalreject) | Reject a proposal: delete it, leaving the site as it is | writes files |
 | [`proposal render`](#proposalrender) | Render a proposal's doc as it would be once applied, without writing anything | read |
 | [`proposal show`](#proposalshow) | Show a proposal: its edits, the source, and a diff from the file as it is now | read |
+| [`scene action`](#sceneaction) | Add, change or delete a scene item's action: a one-shot move the page plays by name | edit |
+| [`scene ambient`](#sceneambient) | Set or clear a scene item's ambient loop: a move that repeats on its own | edit |
 | [`scene duplicate`](#sceneduplicate) | Duplicate an item one column over, where the copy stands in depth order | edit |
 | [`scene group set`](#scenegroupset) | Set or remove a group's class and data attributes, or set its data-x and data-y to its first item's foot | edit |
 | [`scene items`](#sceneitems) | List a scene's items in depth order (back to front), with stable paths | read |
@@ -158,7 +163,7 @@ The server holds a **session**: docs open as in-memory working copies with undo 
 | --- | --- | --- |
 | `doc.changed` | `{ doc, dirty, canUndo, canRedo }` | after each edit, undo, redo, save, revert, merge or reload, and when a clean open doc reloads because its file changed. Sent before the request's response. |
 | `doc.stale` | `{ doc, file }` | an open doc with unsaved edits whose file changed on disk (the app shows Merge, Reload, Keep Mine), and after an applied proposal whose merge into the open copy clashed |
-| `files.changed` | `{ files: ["scenes/hero-island.mjs", …] }` | sources changed on disk (another editor, git, an applied proposal, a save), debounced 150 ms |
+| `files.changed` | `{ files: ["scenes/hero-island.json", …] }` | sources changed on disk (another editor, git, an applied proposal, a save), debounced 150 ms |
 | `proposals.changed` | `{ proposals: [ProposalSummary] }` (as `proposal.list`) | a proposal was written, applied or rejected |
 | `activity.appended` | `{ entries: [{ time, tool, args, ok, summary }] }` | an MCP server logged tool calls |
 
@@ -172,7 +177,7 @@ An open doc without unsaved changes reloads from disk when its file changes; one
 
 **The session follows disk.** Before every `tools/call`, the session brings its open docs in line with disk where nothing is lost. A doc whose proposal was applied or rejected is settled: marked clean if it matches the file; reloaded if it has no edits since the proposal; rebased onto the file, keeping the later edits, if the proposal was applied; left as it is only when a rejected proposal has edits on top. `doc_status` reports it as `synced: { proposal, outcome: applied | rejected, action: clean | reloaded | rebased | kept }` (`settled`, without a doc, lists the latest, including a new doc discarded after its proposal was rejected). A clean doc whose file changed reloads. So the next edit starts from the file, with no revert. `doc_reload` reloads a doc only when nothing unsaved is lost (code `dirty` with the edits otherwise, `proposed` while its proposal waits); `doc_revert`, which drops edits, is annotated destructive.
 
-**What the app has open.** `doc_status` lists `unsavedInApp`: the docs Pixel Lab has open with unsaved edits (from `open/<pid>.json`). A proposal for one of them comes back with `warnings`: approving it will merge it into the owner's unsaved edits, and lines both changed will clash. Left out of the tools: `proposal_apply` (approving a proposal is for a person, in Pixel Lab or with pixellab proposal apply); `proposal_reject` (rejecting a proposal is for a person); `art_build` (it publishes the SVGs a site inlines; a person publishes after approving); `document_copy` (saving a copy of the document is for a person). With `--direct`, `art_build` is a tool.
+**What the app has open.** `doc_status` lists `unsavedInApp`: the docs Pixel Lab has open with unsaved edits (from `open/<pid>.json`). A proposal for one of them comes back with `warnings`: approving it will merge it into the owner's unsaved edits, and lines both changed will clash. Left out of the tools: `proposal_apply` (approving a proposal is for a person, in Pixel Lab or with pixellab proposal apply); `proposal_reject` (rejecting a proposal is for a person); `art_build` (it publishes the SVGs a site inlines; a person publishes after approving); `document_copy` (saving a copy of the document is for a person); `document_migrate` (migrating the document is for a person, in Pixel Lab or with pixellab document migrate). With `--direct`, `art_build` is a tool.
 
 ### Setup for Claude Code
 
@@ -230,7 +235,7 @@ Publish: validate every source, compile each scene with an output and write the 
 pixellab art build [--dir <text>]
 ```
 
-Validates the document's files on disk (unsaved working copies aren't in it; unsaved lists them), renders each scene with an `output` to a rect SVG, merges each color group into one <path>, checks the result lossless and within its budget (100 KB raw / 25 KB gzip, or the manifest's), and writes <publish dir>/<output>. The publish folder is the manifest's publish.dir (relative to the document), or --dir; with neither it refuses. Nothing is written when any source has a problem. Returns { ok, publishDir, outputs: [{ file, scene, raw, gzip, over, report }], previewOnly: [{ scene, raw, gzip, over, report }], problems, ms, unsaved }.
+Validates the document's files on disk (unsaved working copies aren't in it; unsaved lists them), renders each scene with an `output` to a rect SVG, merges each color group into one <path>, checks the result lossless, and writes <publish dir>/<output>. A scene with an `image` is also rendered on the preview card color to a PNG, written to the manifest's publish.images (else --dir). Over the budget (100 KB raw / 25 KB gzip, or the manifest's) is a warning, never a failure: the SVG is still written and the result is still ok. The publish folder is the manifest's publish.dir (relative to the document), or --dir; with neither it refuses. Nothing is written when any source has a problem. Returns { ok, publishDir, outputs: [{ file, scene, kind (svg or png), raw, gzip, over, report, warnings }], previewOnly: [{ scene, raw, gzip, over, report, warnings }], problems, warnings (each "<file>: <warning>"), ms, unsaved }; a PNG has no gzip, over or report.
 
 read-only · writes files directly · not an MCP tool
 
@@ -343,7 +348,7 @@ Validate the sources with the engine, all of them or one doc.
 pixellab check [name] [--kind <object|scene>]
 ```
 
-Problems are the engine's "<file>: <where>: <rule>" lines. With a name, only the problems in that doc and the files it uses (palette.mjs, the objects it places or extends) are listed. On the command line, the exit code is 1 when there are problems. Warnings don't fail the check, and each has a code. off_grid: a scene's key-to-key moves (the loop back to the first key included) whose steps aren't 1 px straight, 1:1 or 2:1, so the item jumps instead of walking the grid; scene.motion.path makes on-grid keys. out_of_order: a scene whose file lists its items out of depth order (it still publishes in depth order; scene.sort writes the file in order), with how many items would move. copies: a moving item that takes several places among the others as it moves is drawn once for each place in the SVG, which adds to its size; the warning says how many.
+Problems are the engine's "<file>: <where>: <rule>" lines. With a name, only the problems in that doc and the files it uses (palette.json, the objects it places or extends) are listed. On the command line, the exit code is 1 when there are problems. Warnings don't fail the check, and each has a code. off_grid: a scene's key-to-key moves (the loop back to the first key included) whose steps aren't 1 px straight, 1:1 or 2:1, so the item jumps instead of walking the grid; scene.motion.path makes on-grid keys. out_of_order: a scene whose file lists its items out of depth order (it still publishes in depth order; scene.sort writes the file in order), with how many items would move. copies: a moving item that takes several places among the others as it moves is drawn once for each place in the SVG, which adds to its size; the warning says how many.
 
 read-only · MCP tool `check`
 
@@ -538,6 +543,27 @@ root is the .pixellab folder (or a legacy source/ folder in a site checkout, kin
 
 read-only · MCP tool `document_info`
 
+#### document.migrate
+
+Migrate a document from format 1 (.mjs sources) to format 2 (JSON sources), in place or as a copy.
+
+```
+pixellab document migrate [--to <text>]
+```
+
+Reads every .mjs source as data (comments become notes; anything that isn't plain data is refused with its file, line and column), checks that every scene builds the same SVG from the JSON sources, then writes palette.json, objects/*.json, scenes/*.json and a manifest with "format": 2. In place it removes the .mjs files (a site's legacy source/ folder becomes src/assets/pixel-art/<name>.pixellab); with --to it writes a copy and leaves the document as it is. Refuses while the document has unsaved edits open in Pixel Lab.
+
+edits docs · writes files directly · not an MCP tool
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `--to` | string |  | write the migrated document to this new folder instead of converting it in place |
+
+```sh
+pixellab document migrate --document ~/art/old.pixellab
+pixellab document migrate --to /tmp/copy.pixellab
+```
+
 #### document.new
 
 Make a new, empty .pixellab document with the starter palette.
@@ -546,7 +572,7 @@ Make a new, empty .pixellab document with the starter palette.
 pixellab document new <path> [--name <text>]
 ```
 
-Writes manifest.json, palette.mjs and empty objects/ and scenes/ folders at path (.pixellab is added when missing). Refuses an existing path. The new document is not opened: name it with --document.
+Writes manifest.json, palette.json and empty objects/ and scenes/ folders at path (.pixellab is added when missing). Refuses an existing path. The new document is not opened: name it with --document.
 
 edits docs · writes files directly · MCP tool `document_new`
 
@@ -560,6 +586,58 @@ pixellab document new ~/Art/meadow.pixellab
 ```
 
 ### object
+
+#### object.action
+
+Add, change or delete an action of a sprite map layer.
+
+```
+pixellab object action <name> <layer> <action> [--duration <n>] [--keys <json,…>] [--delete]
+```
+
+As scene action, for one layer of the sprite. A frame loop layer, a block and an outfit refuse. object render --time T --play <action>@<ms> shows a frame of it.
+
+edits docs · MCP tool `object_action`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | object name (or objects/<name>) |
+| `layer` (positional) | integer | required | the map layer, from 0 at the bottom (a frame loop or a block has none) (at least 0) |
+| `action` (positional) | string | required | the action's name: lowercase words joined by hyphens, like hop |
+| `--duration` | integer |  | the action's length in ms, up to 600000 (at least 1) |
+| `--keys` | list of object |  | the keys, a JSON list of { "t": ms, "move": [x, y] }: the first at t 0, each after the one before and below the duration, moves in whole pixels from where the art is drawn. On the command line, the list as one JSON string. |
+| `--delete` | boolean | default `false` | delete the action instead |
+
+```sh
+pixellab object action character 1 hop --duration 480 --keys '[{"t":0,"move":[0,0]},{"t":120,"move":[0,-4]}]'
+pixellab object action character 1 hop --delete
+```
+
+#### object.ambient
+
+Set or clear a sprite map layer's ambient loop.
+
+```
+pixellab object ambient <name> <layer> [--duration <n>] [--offset <n>] [--keys <json,…>] [--clear]
+```
+
+As scene ambient, for one layer of the sprite, which moves wherever the sprite is placed. A frame loop layer, a block and an outfit (which has no layers of its own) refuse. object render --time places the loop.
+
+edits docs · MCP tool `object_ambient`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | object name (or objects/<name>) |
+| `layer` (positional) | integer | required | the map layer, from 0 at the bottom (a frame loop or a block has none) (at least 0) |
+| `--duration` | integer |  | the loop's length in ms, up to 600000 (at least 1) |
+| `--offset` | integer |  | start the loop this many ms in (below the duration) (at least 0) |
+| `--keys` | list of object |  | the keys, a JSON list of { "t": ms, "move": [x, y] }: the first at t 0, each after the one before and below the duration, moves in whole pixels from where the art is drawn. On the command line, the list as one JSON string. |
+| `--clear` | boolean | default `false` | remove the ambient loop instead |
+
+```sh
+pixellab object ambient pine 1 --duration 4000 --keys '[{"t":0,"move":[0,0]},{"t":2000,"move":[1,0]}]'
+pixellab object ambient pine 1 --clear
+```
 
 #### object.animate
 
@@ -816,7 +894,7 @@ Make a new object from a starter: a blank sprite, a block, or one that extends a
 pixellab object new <name> [--kind <sprite|block>] [--extends <text>] [--width <n>] [--height <n>] [--footprint <n,…>]
 ```
 
-The same starters as the lab's New dialog and `npm run art -- --new` (starter.mjs): a sprite of --width × --height (16×16 by default) anchored at its bottom center (--footprint says how many tiles it covers, 1,1 unless given), a one-level grass block, or an object that --extends another with no rows overridden yet.
+The same starters as the lab's New dialog and `npm run art -- --new` (starter.rs): a sprite of --width × --height (16×16 by default) anchored at its bottom center (--footprint says how many tiles it covers, 1,1 unless given), a one-level grass block, or an object that --extends another with no rows overridden yet.
 
 edits docs · MCP tool `object_new`
 
@@ -886,10 +964,10 @@ read-only · MCP tool `object_pick`
 Render one object to a transparent PNG.
 
 ```
-pixellab object render <name> [--scale <n>] [--frame <n>] [--time <n>] [--layers <n,…>] [--out <file.png>]
+pixellab object render <name> [--scale <n>] [--frame <n>] [--time <n>] [--play <text>] [--layers <n,…>] [--out <file.png>]
 ```
 
-The anchor is at (0, 0). A sprite's viewBox is its whole map, so at scale 1 PNG pixel (x, y) is map column x, row y; a block's is the box around its pixels. Returns the same shape as scene.render, with one item. On the command line, --out <file.png> writes the PNG.
+The anchor is at (0, 0). A sprite's viewBox is its whole map, so at scale 1 PNG pixel (x, y) is map column x, row y; a block's is the box around its pixels. Returns the same shape as scene.render, with one item. --time also places the layers' ambient loops, and --play <action>@<ms> (with --time) places the layers that have that action where it has them <ms> into it. On the command line, --out <file.png> writes the PNG.
 
 read-only · MCP tool `object_render`
 
@@ -899,10 +977,12 @@ read-only · MCP tool `object_render`
 | `--scale` | integer | default `1` | whole-pixel zoom of the PNG (1 to 16) |
 | `--frame` | integer | default `0` | the frame every loop shows (loops shorter than this show nothing) (at least 0) |
 | `--time` | integer |  | ms into the loops; overrides frame (at least 0) |
+| `--play` | string |  | an action and the ms into it, like hop@120: the elements that have it are placed where it has them then, instead of on their ambient loop |
 | `--layers` | list of integer |  | only these layers of a sprite, each at --frame or its last frame, as the lab's stage shows them (hidden layers, onion skin) |
 
 ```sh
 pixellab object render pine --scale 4 --out /tmp/pine.png
+pixellab object render character --time 0 --play hop@120 --out /tmp/hop.png
 ```
 
 #### object.resize
@@ -1051,6 +1131,58 @@ read-only · MCP tool `proposal_show`
 | `id` (positional) | string | required | the proposal id (proposal.list) |
 
 ### scene
+
+#### scene.action
+
+Add, change or delete a scene item's action: a one-shot move the page plays by name.
+
+```
+pixellab scene action <name> <item> <action> [--duration <n>] [--keys <json,…>] [--delete]
+```
+
+An action plays when the page names it in data-play (the site contract's actions), replaces the item's ambient loop while it plays, holds its last key until --duration ms, then the item is back at rest. --keys is as for scene ambient. Giving a name the item has changes it; --delete removes it. An item has at most 16 actions, and a name is one move in a scene. scene render --play <action>@<ms> shows a frame of it.
+
+edits docs · MCP tool `scene_action`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id |
+| `action` (positional) | string | required | the action's name: lowercase words joined by hyphens, like hop |
+| `--duration` | integer |  | the action's length in ms, up to 600000 (at least 1) |
+| `--keys` | list of object |  | the keys, a JSON list of { "t": ms, "move": [x, y] }: the first at t 0, each after the one before and below the duration, moves in whole pixels from where the art is drawn. On the command line, the list as one JSON string. |
+| `--delete` | boolean | default `false` | delete the action instead |
+
+```sh
+pixellab scene action meadow frog hop --duration 480 --keys '[{"t":0,"move":[0,0]},{"t":120,"move":[0,-4]}]'
+pixellab scene action meadow frog hop --delete
+```
+
+#### scene.ambient
+
+Set or clear a scene item's ambient loop: a move that repeats on its own.
+
+```
+pixellab scene ambient <name> <item> [--duration <n>] [--offset <n>] [--keys <json,…>] [--clear]
+```
+
+The loop lasts --duration ms and starts --offset ms in. --keys is a JSON list of { "t", "move" }: the first at t 0, each later one after the one before and below the duration; the item is moved by [x, y] whole pixels from where the scene places it, stepping a pixel at a time between keys, and after the last key it steps back to the first over the rest of the duration. It plays in the SVG on its own, and scene render --time places it. Setting replaces the loop the item has. --clear removes it. An item with scene motion can't also have an ambient loop. An edit that would leave the scene with a problem is refused, and nothing changes.
+
+edits docs · MCP tool `scene_ambient`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id |
+| `--duration` | integer |  | the loop's length in ms, up to 600000 (at least 1) |
+| `--offset` | integer |  | start the loop this many ms in (below the duration) (at least 0) |
+| `--keys` | list of object |  | the keys, a JSON list of { "t": ms, "move": [x, y] }: the first at t 0, each after the one before and below the duration, moves in whole pixels from where the art is drawn. On the command line, the list as one JSON string. |
+| `--clear` | boolean | default `false` | remove the ambient loop instead |
+
+```sh
+pixellab scene ambient meadow cloud --duration 16000 --keys '[{"t":0,"move":[0,0]},{"t":8000,"move":[12,0]}]'
+pixellab scene ambient meadow cloud --clear
+```
 
 #### scene.duplicate
 
@@ -1437,10 +1569,10 @@ edits docs · MCP tool `scene_remove`
 Render a scene to a transparent PNG, with item bounds.
 
 ```
-pixellab scene render <name> [--scale <n>] [--time <n>] [--theme <light|dark>] [--show <text>] [--hide <text,…>] [--focus <text>] [--out <file.png>]
+pixellab scene render <name> [--scale <n>] [--time <n>] [--theme <light|dark>] [--play <text>] [--show <text>] [--hide <text,…>] [--focus <text>] [--out <file.png>]
 ```
 
-Returns { png (base64), scale, viewBox, width, height, time, items: [{ path, object, at, id, bounds: [x, y, w, h] }] }. Bounds are in output pixels (scale included), for hit-testing. Of each run of data-class variant groups only the first shows, or the one holding --show. --hide leaves out the items in those layers (and the layers inside them), as hiding them in Pixel Lab does; --focus adds focusPng, the same render with only that layer's items. On the command line, --out <file.png> writes the PNG.
+Returns { png (base64), scale, viewBox, width, height, time, items: [{ path, object, at, id, bounds: [x, y, w, h] }] }. Bounds are in output pixels (scale included), for hit-testing. Of each run of data-class variant groups only the first shows, or the one holding --show. --hide leaves out the items in those layers (and the layers inside them), as hiding them in Pixel Lab does; --focus adds focusPng, the same render with only that layer's items. Ambient loops are placed at --time; --play <action>@<ms> places the elements that have that action where it has them <ms> into it. On the command line, --out <file.png> writes the PNG.
 
 read-only · MCP tool `scene_render`
 
@@ -1450,6 +1582,7 @@ read-only · MCP tool `scene_render`
 | `--scale` | integer | default `1` | whole-pixel zoom of the PNG (1 to 16) |
 | `--time` | integer |  | ms into the animation: frame loops and motion tracks (default 0, the rest frame) (at least 0) |
 | `--theme` | `light` \| `dark` | default `"light"` | dark draws as the site's dark theme: the hero island's drop shadow (data-enter="shadow") takes the dark page color |
+| `--play` | string |  | an action and the ms into it, like hop@120: the elements that have it are placed where it has them then, instead of on their ambient loop |
 | `--show` | string |  | an item path whose variant group to show, like 12.0 |
 | `--hide` | list of string |  | layers (ids or names) whose items are left out |
 | `--focus` | string |  | a layer: the result adds focusPng, the render of only its items (and those of the layers inside it) |
@@ -1458,6 +1591,7 @@ read-only · MCP tool `scene_render`
 pixellab scene render hero-island --scale 2 --out /tmp/hero.png
 pixellab scene render range-sprite --time 400 --json
 pixellab scene render hero-island --theme dark --out /tmp/hero-dark.png
+pixellab scene render meadow --play hop@120 --out /tmp/hop.png
 ```
 
 #### scene.set

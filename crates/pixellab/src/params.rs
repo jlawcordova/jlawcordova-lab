@@ -297,6 +297,14 @@ pub fn coerce_value(schema: &Value, value: &Value) -> Value {
                 _ => return value.clone(),
             };
             let items = schema.get("items").cloned().unwrap_or_else(|| Value::Object(Map::new()));
+            // A list of objects is given as one JSON list: --keys '[{"t":0,"move":[0,0]}]'.
+            if items.get("type").and_then(Value::as_str) == Some("object") {
+                if let [Value::String(s)] = list.as_slice() {
+                    if let Ok(parsed @ Value::Array(_)) = serde_json::from_str::<Value>(s) {
+                        return parsed;
+                    }
+                }
+            }
             // A list of lists ([[3, 4], [5, 6]]): "3,4 5,6" or "3,4;5,6", or
             // the flag (or positional) repeated, one inner list each.
             if items.get("type").and_then(Value::as_str) == Some("array") {

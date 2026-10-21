@@ -44,6 +44,28 @@ pub fn parse_path(text: &str) -> Option<Vec<usize>> {
     Some(out)
 }
 
+/// Parses `--play <action>@<ms>`: an action's name and the ms into it.
+pub fn parse_play(text: &str) -> Result<(String, f64)> {
+    let bad = || CommandError::usage(format!("--play {text}: give an action and the ms into it, like hop@120"));
+    let (name, at) = text.rsplit_once('@').ok_or_else(bad)?;
+    if !engine::engine::is_name(name) || at.is_empty() || !at.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(bad().into());
+    }
+    Ok((name.to_string(), at.parse::<f64>().map_err(|_| bad())?))
+}
+
+/// Whether any item of a scene (or a layer of an object it places) has the action.
+fn scene_has_action(sources: &Sources, items: Option<&Value>, action: &str) -> bool {
+    items.and_then(Value::as_array).into_iter().flatten().any(|item| {
+        if item.get("group").is_some() {
+            return scene_has_action(sources, item.get("items"), action);
+        }
+        let own = engine::ambient::moves_of(item).is_some_and(|m| m.actions.iter().any(|(n, _)| n == action));
+        own || resolve(sources, &js_string(item.get("object")))
+            .is_ok_and(|r| r.layer_moves.iter().flatten().any(|m| m.actions.iter().any(|(n, _)| n == action)))
+    })
+}
+
 /// Where an item's placement point is, in scene pixels.
 pub fn placement_point(item: &Value, origin: [f64; 2]) -> [f64; 2] {
     let at = item.get("at");
@@ -373,9 +395,10 @@ fn object_pixels(
     name: &str,
     time: Option<f64>,
     frame: usize,
+    play: Option<(String, f64)>,
 ) -> eng_result::Result<(OMap<Pixel, ColorName>, Option<Bounds>)> {
     let tree = render_object(sources, name)?;
-    let pixels = composite(&tree, CompositeOptions { first_variant: false, frame, time, play: None });
+    let pixels = composite(&tree, CompositeOptions { first_variant: false, frame, time, play });
     let box_ = eng::bounds(pixels.keys());
     Ok((pixels, box_))
 }
@@ -434,11 +457,13 @@ pub struct SceneImageOptions {
     pub theme: Theme,
     pub hide: Option<OSet<String>>,
     pub focus: Option<OSet<String>>,
+    /// An action playing, and ms into it (`--play hop@120`): its elements take its move instead of their ambient loop.
+    pub play: Option<(String, f64)>,
 }
 
 impl Default for SceneImageOptions {
     fn default() -> Self {
-        SceneImageOptions { scale: 1, time: 0.0, show: None, theme: Theme::Light, hide: None, focus: None }
+        SceneImageOptions { scale: 1, time: 0.0, show: None, theme: Theme::Light, hide: None, focus: None, play: None }
     }
 }
 
@@ -473,6 +498,15 @@ pub fn render_scene_image(sources: &Sources, name: &str, dark_page: &str, option
         .scenes
         .get(name)
         .ok_or_else(|| Error::Internal(format!("Cannot read properties of undefined (reading 'origin'): {name}")))?;
+    if let Some((action, _)) = &options.play {
+        if !scene_has_action(sources, scene.get("items"), action) {
+            return Err(CommandError::new(
+                format!("scene {name} has no action {action}; give one of its items an action (pixellab scene action)"),
+                "not_found",
+            )
+            .into());
+        }
+    }
     let view = view_box_of(scene).ok_or_else(|| Error::Internal("Invalid viewBox".to_string()))?;
     inner_scene_image(sources, name, scene, view, dark_page, options).map_err(|m| render_error("scene", name, &m))
 }
@@ -486,7 +520,7 @@ fn inner_scene_image(
     options: &SceneImageOptions,
 ) -> std::result::Result<Value, String> {
     let e = |err: engine::EngineError| err.0;
-    let SceneImageOptions { scale, time, show, theme, hide, focus } = options;
+    let SceneImageOptions { scale, time, show, theme, hide, focus, play } = options;
     let (scale, time) = (*scale, *time);
     let origin = origin_of(scene);
     // The scene as it stands at `time`: every list in the order it draws in then (an item that moves among others
@@ -517,7 +551,7 @@ fn inner_scene_image(
         if dark {
             dark_theme(&mut rendered.root, false);
         }
-        let pixels = composite(&rendered.root, CompositeOptions { first_variant: false, frame: 0, time: Some(time), play: None });
+        let pixels = composite(&rendered.root, CompositeOptions { first_variant: false, frame: 0, time: Some(time), play: play.clone() });
         Ok(to_image(sources, &pixels, view, &extra))
     };
     let image = paint(&kept)?;
@@ -537,7 +571,7 @@ fn inner_scene_image(
         let art = match arts.get(&object) {
             Some(b) => *b,
             None => {
-                let (_, b) = object_pixels(sources, &object, Some(time), 0).map_err(e)?;
+                let (_, b) = object_pixels(sources, &object, Some(time), 0, None).map_err(e)?;
                 arts.insert(object.clone(), b);
                 b
             }
@@ -622,11 +656,13 @@ pub struct ObjectImageOptions {
     pub time: Option<f64>,
     pub frame: usize,
     pub layers: Option<Vec<usize>>,
+    /// An action playing at `time`, and ms into it (`--play hop@120`).
+    pub play: Option<(String, f64)>,
 }
 
 impl Default for ObjectImageOptions {
     fn default() -> Self {
-        ObjectImageOptions { scale: 1, time: None, frame: 0, layers: None }
+        ObjectImageOptions { scale: 1, time: None, frame: 0, layers: None, play: None }
     }
 }
 
@@ -634,16 +670,31 @@ impl Default for ObjectImageOptions {
 /// is its whole map, so output pixel (x, y) at 1x is map column x, row y; a
 /// block's is the box around its painted pixels.
 pub fn render_object_image(sources: &Sources, name: &str, options: &ObjectImageOptions) -> Result<Value> {
+    if let Some((action, _)) = &options.play {
+        if options.time.is_none() {
+            return Err(CommandError::usage("--play needs --time: the action plays over the loops at that time").into());
+        }
+        let has = resolve(sources, name)
+            .map(|r| r.layer_moves.iter().flatten().any(|m| m.actions.iter().any(|(n, _)| n == action)))
+            .unwrap_or(false);
+        if !has {
+            return Err(CommandError::new(
+                format!("object {name} has no action {action}; give a layer one (pixellab object action)"),
+                "not_found",
+            )
+            .into());
+        }
+    }
     inner_object_image(sources, name, options).map_err(|m| render_error("object", name, &m))
 }
 
 fn inner_object_image(sources: &Sources, name: &str, options: &ObjectImageOptions) -> std::result::Result<Value, String> {
-    let ObjectImageOptions { scale, time, frame, layers } = options;
+    let ObjectImageOptions { scale, time, frame, layers, play } = options;
     let (scale, frame) = (*scale, *frame);
     let resolved = resolve(sources, name).map_err(|e| e.0)?;
     let (pixels, b) = match layers {
         Some(layers) if resolved.block.is_none() => layer_pixels(&resolved, layers, frame),
-        _ => object_pixels(sources, name, *time, frame).map_err(|e| e.0)?,
+        _ => object_pixels(sources, name, *time, frame, play.clone()).map_err(|e| e.0)?,
     };
     let view: [i64; 4] = if resolved.block.is_none() {
         [-resolved.anchor[0], -resolved.anchor[1], resolved.width, resolved.height]
