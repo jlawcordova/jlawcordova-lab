@@ -1,5 +1,5 @@
 # Spec: A canvas-first window, with a floating library (from intent.md 2026-10-21)
-Status: draft.
+Status: approved (by the owner in chat on 2026-10-22; the plan follows in the same PR).
 
 The design is the prototype canvas named in the intent:
 - `Groups.dc.html` and `GroupsDay.dc.html`: the scene, the floating bar and Library, and going into an object and back.
