@@ -3,6 +3,8 @@
 //! are ported; the `test registry` tests run the same behavior on a small
 //! registry built here.
 
+#![allow(clippy::result_large_err)]
+
 mod common;
 
 use std::collections::HashMap;

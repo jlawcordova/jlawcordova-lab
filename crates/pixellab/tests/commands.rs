@@ -5,6 +5,8 @@
 //! site's art (hero-island, pine, ...); these run on the sample document
 //! (scene `sample`, objects `block` and `pebble`), format 2.
 
+#![allow(clippy::result_large_err)]
+
 mod common;
 
 use std::collections::HashMap;
