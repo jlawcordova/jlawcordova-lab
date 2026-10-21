@@ -1,5 +1,5 @@
 # Plan: The engine in Rust, and a site that only takes its output (from intent.md 2026-10-21)
-Status: draft, for the owner's approval.
+Status: approved.
 
 The approved spec is `spec.md` (PR #27). This plan ports the Node CLI and engine to one Rust program engine-first, keeps the Node CLI shippable until a parity gate passes, then changes the art, the app and the release, and removes Node from everything but repo tooling. The site's own change (spec D13) is not part of this plan. It starts after this change's release.
 
