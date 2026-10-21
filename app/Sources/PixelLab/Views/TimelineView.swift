@@ -68,7 +68,7 @@ struct TimelineStrip: View {
     }
 
     static let leading: CGFloat = 118
-    static let trailing: CGFloat = 132
+    static let trailing: CGFloat = 184
 
     /// The selected item's key times, marked on the scrubber.
     private var selectedKeys: [Double] {
