@@ -129,7 +129,8 @@ fn r3_a_missing_folder_names_the_path_where_it_came_from_and_how_to_fix_it() {
 }
 
 #[test]
-fn r3_a_folder_without_palette_json_is_not_a_document_a_checkout_without_art_is_not_a_site() {
+// Format 2 reads palette.json, so a folder without it is no document.
+fn r3_a_folder_without_palette_mjs_is_not_a_document_a_checkout_without_art_is_not_a_site() {
     let doc = make_document();
     let e = err_of(check_document(&doc.home, From::Flag, Via::Doc));
     assert!(is_document_error(&e) && e.message.contains("isn't a Pixel Lab document: it has no palette.json"), "{}", e.message);
@@ -210,7 +211,8 @@ fn bad(m: Value, expect: &str) {
 }
 
 #[test]
-fn r2_format_is_required_and_must_be_2_everything_else_is_optional() {
+// The current format is 2: required, and nothing else is.
+fn r2_format_is_required_and_must_be_1_everything_else_is_optional() {
     ok(json!({ "format": 2 }));
     bad(json!({}), r#""format" must be 2 (missing)"#);
     bad(json!({ "format": 3 }), r#""format" must be 2 (got 3)"#);
@@ -507,7 +509,8 @@ fn docs_are_copies_changing_one_does_not_change_the_next_load() {
 }
 
 #[test]
-fn a_file_that_cant_be_read_is_a_load_error_as_the_compiler_reports_it() {
+// Format 2 sources are JSON: a file that isn't JSON is the load error.
+fn a_file_that_cant_be_imported_is_a_load_error_as_the_compiler_reports_it() {
     let doc = make_document();
     doc.write("manifest.json", r#"{ "format": 2 }"#);
     doc.write("objects/zz-broken.json", "{");
