@@ -44,10 +44,17 @@ pub fn unzlib(data: &[u8]) -> Result<Vec<u8>, String> {
     decompress_to_vec_zlib(data).map_err(|e| format!("bad zlib stream: {:?}", e.status))
 }
 
-/// A gzip stream (RFC 1952) of `data` at level 6, as `gzipSync`.
+/// The level gzip compresses at: miniz_oxide's level 9 comes closest to
+/// zlib's default (level 6, what `gzipSync` used) on the corpus — within
+/// 0.31% on average and 1.10% at worst over the owner's scenes, where
+/// miniz's own level 6 is 0.62% and 1.64% (spec D2).
+const GZIP_LEVEL: u8 = 9;
+
+/// A gzip stream (RFC 1952) of `data`, as `gzipSync` writes them (the bytes
+/// differ from zlib's; the size is close, see GZIP_LEVEL).
 pub fn gzip(data: &[u8]) -> Vec<u8> {
     let mut out = vec![0x1f, 0x8b, 0x08, 0x00, 0, 0, 0, 0, 0x00, 0x03];
-    out.extend(compress_to_vec(data, LEVEL));
+    out.extend(compress_to_vec(data, GZIP_LEVEL));
     out.extend(crc32(data).to_le_bytes());
     out.extend((data.len() as u32).to_le_bytes());
     out
