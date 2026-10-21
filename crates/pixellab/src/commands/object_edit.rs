@@ -9,8 +9,8 @@
 use std::collections::HashSet;
 
 use engine::engine::{
-    bounds, composite, is_key, is_name, js_len, js_string, render_object, resolve, truthy, used_colors, CompositeOptions, Resolved,
-    Sources, SpriteLayer, CAPS, MAX_FOOTPRINT,
+    bounds, composite, is_key, js_len, js_string, render_object, resolve, truthy, used_colors, CompositeOptions, Resolved, Sources,
+    SpriteLayer, CAPS, MAX_FOOTPRINT,
 };
 use engine::format::stringify;
 use engine::iso::Pixel;
@@ -21,6 +21,7 @@ use engine::{edit, starter};
 use serde_json::{json, Map, Value};
 
 use super::common::{flag, format_change, obj, opt_str, str_of};
+use super::scene_edit::check_new_name;
 use crate::context::{Ctx, DocKind, Loaded};
 use crate::errors::{CommandError, Error, Result};
 use crate::registry::{Command, Params};
@@ -516,26 +517,6 @@ fn footprint_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
         object.insert("footprint".into(), to.clone());
         Ok(Edit::new(obj(vec![("footprint", to)]), format!("Footprint of {n} set to {text}")))
     })
-}
-
-/// The new-name checks (`checkNewName` of scene-edit.mjs; a private copy,
-/// as commands/scene_edit.rs isn't ported in this worktree).
-fn check_new_name(ctx: &mut Ctx, name: &str, command: &str) -> Result<()> {
-    let len = js_len(name);
-    if len > starter::MAX_NAME {
-        return Err(usage(format!("{command}: name is {len} characters long, max {}", starter::MAX_NAME)));
-    }
-    if !is_name(name) {
-        return Err(usage(format!("{command}: name {} must be lowercase kebab-case, like small-rock", stringify(&json!(name)))));
-    }
-    let taken = ctx.names(DocKind::Object)?.iter().any(|n| n == name)
-        || ctx.names(DocKind::Scene)?.iter().any(|n| n == name)
-        || ctx.load_error(DocKind::Object, name)?.is_some_and(|e| !e.is_empty())
-        || ctx.load_error(DocKind::Scene, name)?.is_some_and(|e| !e.is_empty());
-    if taken {
-        return Err(failed(format!("there's already an object or scene called {name}"), "exists"));
-    }
-    Ok(())
 }
 
 fn new_run(ctx: &mut Ctx, params: Params) -> Result<Value> {

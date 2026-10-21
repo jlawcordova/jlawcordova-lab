@@ -171,6 +171,8 @@ function normalize(/** @type {any} */ v, /** @type {[string, string][]} */ roots
     let s = v;
     for (const [from, to] of roots) s = s.split(from).join(to);
     if (node) s = s.split('.mjs').join('.json');
+    // chat.context's version hashes the saved file's text (.mjs or .json).
+    s = s.replace(/version="[^"]*"/g, 'version="<v>"');
     // Reports print gzip sizes in KB: those are compared within 1% with the numbers.
     return s.replace(/\d+\.\d KB gzip/g, '<gz> KB gzip').replace(/\d+\.\d KB \/ \d+\.\d KB gzip/g, '<sizes>');
   }

@@ -23,7 +23,12 @@ fn goldens() -> Option<PathBuf> {
     }
 }
 
-/// A value with R3's differences taken out.
+thread_local! {
+    /// The gzip sizes a normalize took out, in order: compared within 1% apart.
+    static GZIP: std::cell::RefCell<Vec<f64>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// A value with R3's differences taken out; gzip sizes go to GZIP.
 fn normalize(v: &Value, roots: &[(String, &str)], node: bool) -> Value {
     match v {
         Value::String(s) => {
@@ -34,13 +39,23 @@ fn normalize(v: &Value, roots: &[(String, &str)], node: bool) -> Value {
             if node {
                 s = s.replace(".mjs", ".json");
             }
+            // chat.context's version hashes the saved file's text (.mjs or .json).
+            while let Some(at) = s.find("version=\"").filter(|at| !s[at + 9..].starts_with("<v>")) {
+                let end = s[at + 9..].find('"').map_or(s.len(), |e| at + 9 + e);
+                s.replace_range(at + 9..end, "<v>");
+            }
             Value::String(s)
         }
         Value::Array(list) => Value::Array(list.iter().map(|e| normalize(e, roots, node)).collect()),
         Value::Object(m) => {
             let mut out = Map::new();
             for (k, e) in m {
-                if k == "ms" || k == "node" {
+                if k == "ms" || k == "node" || k == "version" {
+                    continue;
+                }
+                if k == "gzip" && e.is_number() {
+                    GZIP.with(|g| g.borrow_mut().push(e.as_f64().unwrap()));
+                    out.insert(k.clone(), Value::String("<gzip>".into()));
                     continue;
                 }
                 if (k == "png" || k == "focusPng") && e.is_string() {
@@ -93,6 +108,7 @@ fn every_read_command_gives_nodes_result() {
     let reg = registry();
     let (mut compared, mut skipped) = (0, std::collections::BTreeMap::<String, usize>::new());
     let mut differ = Vec::new();
+    let (mut worst_gzip, mut gzip_over) = (0.0f64, Vec::<String>::new());
     for doc in corpus["docs"].as_array().unwrap() {
         let name = doc["name"].as_str().unwrap();
         let format1 = doc["format1"].as_str().unwrap();
@@ -116,6 +132,7 @@ fn every_read_command_gives_nodes_result() {
                 *skipped.entry(command.to_string()).or_default() += 1;
                 continue;
             }
+            GZIP.with(|g| g.borrow_mut().clear());
             let want = if case["ok"] == Value::Bool(true) {
                 normalize(&case["result"], &node_roots, true)
             } else {
@@ -125,6 +142,7 @@ fn every_read_command_gives_nodes_result() {
                     true,
                 )
             };
+            let node_gzip = GZIP.with(|g| std::mem::take(&mut *g.borrow_mut()));
             let got = match reg.call(&mut Ctx::new(&mut session), command, case["params"].clone(), false) {
                 Ok(v) => normalize(&v, &rust_roots, false),
                 Err(pixellab::errors::Error::Command(e)) => {
@@ -133,6 +151,16 @@ fn every_read_command_gives_nodes_result() {
                 Err(e) => serde_json::json!({ "error": { "code": "internal", "message": e.message() } }),
             };
             compared += 1;
+            let rust_gzip = GZIP.with(|g| std::mem::take(&mut *g.borrow_mut()));
+            // gzip sizes within 1% of the larger of the value and the total it's part of (spec R3, D2).
+            let total = node_gzip.iter().cloned().fold(0.0, f64::max);
+            for (n, r) in node_gzip.iter().zip(&rust_gzip) {
+                let off = (n - r).abs() / n.abs().max(total).max(1.0) * 100.0;
+                worst_gzip = worst_gzip.max(off);
+                if off > 1.0 {
+                    gzip_over.push(format!("{name}: {command} {}: gzip {n} (node) vs {r} (rust), {off:.2}%", case["params"]));
+                }
+            }
             let (w, g) = (engine::format::stringify(&want), engine::format::stringify(&got));
             if w != g {
                 let at = w.bytes().zip(g.bytes()).position(|(a, b)| a != b).unwrap_or(w.len().min(g.len()));
@@ -147,6 +175,9 @@ fn every_read_command_gives_nodes_result() {
         }
         let _ = std::fs::remove_dir_all(&state);
     }
-    eprintln!("corpus: {compared} command results compared; not ported yet: {skipped:?}");
+    eprintln!("corpus: {compared} command results compared; not ported yet: {skipped:?}; gzip sizes at most {worst_gzip:.2}% from Node's");
+    for g in &gzip_over {
+        eprintln!("corpus: gzip over 1%: {g}");
+    }
     assert!(differ.is_empty(), "{} results differ:\n{}", differ.len(), differ.iter().take(15).cloned().collect::<Vec<_>>().join("\n"));
 }
