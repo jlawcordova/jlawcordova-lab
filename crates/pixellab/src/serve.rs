@@ -92,8 +92,6 @@ pub fn serve(argv: &[String], io: &mut Io) -> i32 {
     }
 }
 
-use std::io::Write;
-
 fn run(argv: &[String], io: &mut Io) -> Result<i32, Error> {
     let flags = parse(argv)?;
     if flags.help {
@@ -108,7 +106,21 @@ fn run(argv: &[String], io: &mut Io) -> Result<i32, Error> {
     }
     let document = open_document(&OpenOptions { doc: flags.document, site: flags.site, env: io.env.clone(), cwd: io.cwd.clone() })?;
     if flags.stdio {
-        return Ok(crate::server_stdio::start(document, io.env.clone(), io.registry, Box::new(std::io::BufReader::new(std::io::stdin())), Box::new(std::io::stdout()), true));
+        return Ok(crate::server_stdio::start(
+            document,
+            io.env.clone(),
+            io.registry,
+            Box::new(std::io::BufReader::new(std::io::stdin())),
+            Box::new(std::io::stdout()),
+            true,
+        ));
     }
-    Ok(crate::server_mcp::start(document, io.env.clone(), io.registry, flags.direct, Box::new(std::io::BufReader::new(std::io::stdin())), Box::new(std::io::stdout())))
+    Ok(crate::server_mcp::start(
+        document,
+        io.env.clone(),
+        io.registry,
+        flags.direct,
+        Box::new(std::io::BufReader::new(std::io::stdin())),
+        Box::new(std::io::stdout()),
+    ))
 }

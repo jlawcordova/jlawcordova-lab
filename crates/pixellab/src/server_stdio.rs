@@ -55,7 +55,14 @@ fn path_string(p: &Option<std::path::PathBuf>) -> Value {
 
 /// Runs the server until its input ends or it's told to shut down; returns
 /// the exit code.
-pub fn start(document: Document, env: Env, registry: &Registry, input: Box<dyn BufRead + Send>, output: Box<dyn Write + Send>, watch: bool) -> i32 {
+pub fn start(
+    document: Document,
+    env: Env,
+    registry: &Registry,
+    input: Box<dyn BufRead + Send>,
+    output: Box<dyn Write + Send>,
+    watch: bool,
+) -> i32 {
     let rpc = Output::new(output);
     let notify = rpc.clone();
     let mut session = Session::new(
@@ -114,7 +121,9 @@ pub fn start(document: Document, env: Env, registry: &Registry, input: Box<dyn B
                         return Ok(json!({ "ok": true }));
                     }
                     if !registry.has(method) {
-                        return Err(RpcError::new(METHOD_NOT_FOUND, format!("no method {method}")).with_data(json!({ "code": "not_found" })).into());
+                        return Err(RpcError::new(METHOD_NOT_FOUND, format!("no method {method}"))
+                            .with_data(json!({ "code": "not_found" }))
+                            .into());
                     }
                     let result = registry.call(&mut Ctx::new(&mut session), method, params, false);
                     // Opening and closing docs changes the list without a doc.changed; written before the response.
@@ -158,7 +167,9 @@ pub fn start(document: Document, env: Env, registry: &Registry, input: Box<dyn B
                     let changes = w.poll(now);
                     if changes.proposals {
                         match registry.call(&mut Ctx::new(&mut session), "proposal.list", json!({}), false) {
-                            Ok(r) => rpc.notify("proposals.changed", json!({ "proposals": r.get("proposals").cloned().unwrap_or(Value::Null) })),
+                            Ok(r) => {
+                                rpc.notify("proposals.changed", json!({ "proposals": r.get("proposals").cloned().unwrap_or(Value::Null) }))
+                            }
                             Err(e) => log(&format!("listing proposals failed: {}", e.message())),
                         }
                     }

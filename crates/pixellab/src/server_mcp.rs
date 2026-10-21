@@ -131,21 +131,30 @@ pub fn initialize_result(asked: Option<&str>) -> Value {
 }
 
 /// Runs the MCP server until its input ends; returns the exit code.
-pub fn start(document: Document, env: Env, registry: &Registry, direct: bool, input: Box<dyn BufRead + Send>, output: Box<dyn Write + Send>) -> i32 {
+pub fn start(
+    document: Document,
+    env: Env,
+    registry: &Registry,
+    direct: bool,
+    input: Box<dyn BufRead + Send>,
+    output: Box<dyn Write + Send>,
+) -> i32 {
     let chat = chat_of(&env);
-    let mut session = Session::new(document, Options { env, mode: if direct { Mode::Direct } else { Mode::Propose }, chat, ..Options::default() });
+    let mut session =
+        Session::new(document, Options { env, mode: if direct { Mode::Direct } else { Mode::Propose }, chat, ..Options::default() });
     let left = left_out(direct);
     let rpc = Output::new(output);
     let mut handle = |method: &str, params: Value, _: &Value| -> Result<Value, Failure> {
         match method {
             "initialize" => {
                 let client = params.get("clientInfo");
-                session.agent = client.and_then(|c| c.get("name")).and_then(Value::as_str).filter(|n| !n.is_empty()).map(|name| {
-                    match client.and_then(|c| c.get("version")).and_then(Value::as_str).filter(|v| !v.is_empty()) {
-                        Some(v) => format!("{name} {v}"),
-                        None => name.to_string(),
-                    }
-                });
+                session.agent =
+                    client.and_then(|c| c.get("name")).and_then(Value::as_str).filter(|n| !n.is_empty()).map(|name| {
+                        match client.and_then(|c| c.get("version")).and_then(Value::as_str).filter(|v| !v.is_empty()) {
+                            Some(v) => format!("{name} {v}"),
+                            None => name.to_string(),
+                        }
+                    });
                 Ok(initialize_result(params.get("protocolVersion").and_then(Value::as_str)))
             }
             "notifications/initialized" | "notifications/cancelled" => Ok(Value::Null),
@@ -165,7 +174,9 @@ fn call_tool(session: &mut Session, registry: &Registry, left: &[(&str, &str)], 
     let name = params.get("name");
     let args = params.get("arguments").filter(|a| !a.is_null()).cloned().unwrap_or(json!({}));
     let name_text = engine::engine::js_string(name);
-    let cmd = name.and_then(Value::as_str).and_then(|n| registry.commands.iter().find(|c| !left.iter().any(|(l, _)| *l == c.name) && tool_name(c.name) == n));
+    let cmd = name
+        .and_then(Value::as_str)
+        .and_then(|n| registry.commands.iter().find(|c| !left.iter().any(|(l, _)| *l == c.name) && tool_name(c.name) == n));
     let time = iso_time(now_ms());
     let append = |session: &Session, ok: bool, summary: &str| {
         let mut entry = Map::new();
@@ -187,7 +198,11 @@ fn call_tool(session: &mut Session, registry: &Registry, left: &[(&str, &str)], 
     let Some(cmd) = cmd else {
         append(session, false, &format!("unknown tool {name_text}"));
         let why = name.and_then(Value::as_str).and_then(|n| left.iter().find(|(l, _)| *l == n.replace('_', ".")).map(|(_, w)| *w));
-        return Err(RpcError::new(INVALID_PARAMS, format!("unknown tool {name_text}{}", why.map(|w| format!(": {w}")).unwrap_or_default())).into());
+        return Err(RpcError::new(
+            INVALID_PARAMS,
+            format!("unknown tool {name_text}{}", why.map(|w| format!(": {w}")).unwrap_or_default()),
+        )
+        .into());
     };
     session.sync();
     match registry.call(&mut Ctx::new(session), cmd.name, args.clone(), false) {
