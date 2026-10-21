@@ -218,7 +218,8 @@ fn motion_compiled_the_optimizer_keeps_the_style_and_stays_lossless() {
     let mut s = scene(motion(), mover());
     s["output"] = json!("demo.svg");
     let compiled = compile_scene(&src(s), "demo", &Budgets::new(), Order::Depth).unwrap();
-    let (cls, pose0) = (motion_class("mover"), pose_class("mover", 0));
+    // A compiled SVG scopes the engine's names to its scene (spec R15).
+    let (cls, pose0) = (format!("demo--{}", motion_class("mover")), format!("demo--{}", pose_class("mover", 0)));
     assert!(
         compiled.output.starts_with("<svg ") && compiled.output.contains(&format!("><style>@keyframes {cls}{{")),
         "{}",
