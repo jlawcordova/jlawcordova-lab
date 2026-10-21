@@ -182,6 +182,11 @@ final class ObjectEditor {
         return "Layer \(index + 1)\(l.class.map { " · \($0)" } ?? "")"
     }
 
+    /// The ACTIONS rows of the selected layer (a map layer's own actions).
+    var actionRows: [ActionRow] {
+        Animation.rows(own: Animation.layers(of: info?.doc)[layer], layers: [])
+    }
+
     /// The frame's name in its loop: f0, w3…
     func frameName(_ i: Int) -> String { "\(currentLayer?.prefix ?? "f")\(i)" }
 
@@ -197,7 +202,7 @@ final class ObjectEditor {
             repeat {
                 needsInfo = false
                 do {
-                    let r: ObjectShowResult = try await connection.call("object.show", ["name": .string(doc.ref.name)])
+                    let r: ObjectShowResult = try await connection.call("object.show", ["name": .string(doc.ref.name), "doc": true])
                     guard app.document === doc else { break }
                     let firstLoad = info == nil
                     info = r

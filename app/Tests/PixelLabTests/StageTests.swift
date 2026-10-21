@@ -207,3 +207,115 @@ import Testing
         #expect(!(d.isZero))
     }
 }
+
+/// Ambient loops on the timeline, and ACTIONS (docs/intents/2026-10-rust-engine/spec.md, R23, D10).
+@Suite @MainActor struct AmbientAndActionTests {
+    /// A `scene.show --doc` result.
+    private func scene(_ json: String) throws -> SceneShowMotion {
+        try JSONDecoder().decode(SceneShowMotion.self, from: Data(json.utf8))
+    }
+
+    private let cloud = #"{ "object": "cloud", "at": { "tile": [0, 0, 0] }, "ambient": { "duration": 16000, "keys": [{ "t": 0, "move": [0, 0] }] } }"#
+    private let frog = #"{ "object": "frog", "at": { "tile": [1, 0, 0] }, "actions": { "hop": { "duration": 480, "keys": [] }, "croak": { "duration": 1500, "keys": [] } } }"#
+
+    @Test func testR23TimelineLengthIsTheLongestOfMotionAndAmbientLoops() {
+        #expect(Animation.timelineLength(motion: nil, ambient: []) == nil)
+        #expect(Animation.timelineLength(motion: 3000, ambient: []) == 3000)
+        #expect(Animation.timelineLength(motion: nil, ambient: [8000, 16000]) == 16000)
+        #expect(Animation.timelineLength(motion: 20000, ambient: [8000]) == 20000)
+        #expect(Animation.timelineLength(motion: 3000, ambient: [16000]) == 16000)
+    }
+
+    @Test func testR23TimelineLengthIsCappedAtSixtySeconds() {
+        #expect(Animation.timelineLength(motion: nil, ambient: [600_000]) == 60_000)
+        #expect(Animation.timelineLength(motion: 90_000, ambient: [10_000]) == 60_000)
+        #expect(Animation.timelineLength(motion: 60_000, ambient: []) == 60_000)
+    }
+
+    @Test func testR23ASceneWithAmbientLoopsButNoMotionGetsTheTimeline() throws {
+        let t = TimelineModel()
+        try t.load(scene(#"{ "name": "meadow", "doc": { "items": [\#(cloud)] } }"#))
+        #expect(t.hasMotion)
+        #expect(t.duration == 16000)
+        #expect(t.motionDuration == nil)
+        #expect(t.hasAmbient)
+        #expect(t.renderTime == 0)
+        t.scrub(to: 5230)
+        #expect(t.renderTime == 5200)
+    }
+
+    @Test func testR23MotionAloneAndNothingAtAll() throws {
+        let t = TimelineModel()
+        try t.load(scene(#"{ "name": "a", "doc": { "motion": { "duration": 4000, "tracks": [] }, "items": [] } }"#))
+        #expect(t.duration == 4000)
+        #expect(!t.hasAmbient)
+        try t.load(scene(#"{ "name": "a", "doc": { "items": [\#(frog)] } }"#))
+        #expect(!t.hasMotion)
+        #expect(t.duration == nil)
+    }
+
+    @Test func testR23AmbientLoopsOnObjectMapLayersCountToo() throws {
+        let t = TimelineModel()
+        let tree = #"{ "object": "tree", "at": { "tile": [2, 0, 0] } }"#
+        let pine = #"{ "group": { "class": "forest" }, "items": [\#(tree)] }"#
+        let sway = Animation.layers(of: try JSONDecoder().decode(JSONValue.self, from: Data(#"{ "layers": [{ "map": ["a"] }, { "map": ["a"], "ambient": { "duration": 4000, "keys": [] } }] }"#.utf8)))
+        try t.load(scene(#"{ "name": "a", "doc": { "motion": { "duration": 1000, "tracks": [] }, "items": [\#(pine)] } }"#), objects: ["tree": sway])
+        #expect(t.itemObject["0.0"] == "tree")
+        #expect(t.ambientDuration == 4000)
+        #expect(t.duration == 4000)
+    }
+
+    @Test func testD10ActionsRowsForAnItem() throws {
+        let t = TimelineModel()
+        try t.load(scene(#"{ "name": "a", "doc": { "items": [\#(cloud), \#(frog)] } }"#))
+        #expect(t.actionRows(forItem: "0").isEmpty)
+        let rows = t.actionRows(forItem: "1")
+        #expect(rows.map(\.name) == ["croak", "hop"])
+        #expect(rows.map(\.durationLabel) == ["1.5 s", "480 ms"])
+    }
+
+    @Test func testD10ActionsRowsJoinTheItemsAndItsObjectsLayersByName() throws {
+        let t = TimelineModel()
+        let layers = Animation.layers(of: try JSONDecoder().decode(JSONValue.self, from: Data(#"{ "layers": [{ "map": ["a"], "actions": { "hop": { "duration": 600, "keys": [] }, "wave": { "duration": 900, "keys": [] } } }] }"#.utf8)))
+        try t.load(scene(#"{ "name": "a", "doc": { "items": [\#(frog)] } }"#), objects: ["frog": layers])
+        let rows = t.actionRows(forItem: "0")
+        #expect(rows.map(\.name) == ["croak", "hop", "wave"])
+        #expect(rows.first { $0.name == "hop" }?.duration == 600, "a name both carry shows once, as long as the longer")
+        #expect(rows.first { $0.name == "wave" }?.source == "layer 1")
+    }
+
+    @Test func testD10ActionsRowsForAnObjectLayer() throws {
+        let app = AppModel()
+        let doc = DocumentModel(ref: DocRef(.object, "frog"))
+        app.document = doc
+        let source = try JSONDecoder().decode(JSONValue.self, from: Data(#"{ "layers": [{ "map": ["a"] }, { "map": ["a"], "actions": { "hop": { "duration": 480, "keys": [] } } }] }"#.utf8))
+        app.objectEditor.info = ObjectShowResult(name: "frog", kind: "sprite", size: [1, 1], layers: [ObjectLayerInfo(index: 0, frames: 1), ObjectLayerInfo(index: 1, frames: 1)], frames: 1, colors: 1, anchor: [0, 0], usedColors: [], doc: source)
+        app.objectEditor.layer = 0
+        #expect(app.objectEditor.actionRows.isEmpty)
+        app.objectEditor.layer = 1
+        #expect(app.objectEditor.actionRows.map(\.name) == ["hop"])
+    }
+
+    @Test func testD10ActionSampleTimesStayInsideTheAction() {
+        #expect(Animation.sampleTimes(duration: 480) == Array(stride(from: 0, to: 480, by: 40)))
+        #expect(Animation.sampleTimes(duration: 30) == [0])
+        let long = Animation.sampleTimes(duration: 600_000)
+        #expect(long.count <= Animation.maxFrames)
+        #expect((long.last ?? 0) < 600_000)
+    }
+
+    @Test func testR23ReduceMotionShowsTheRestFrameAndSaysSo() async throws {
+        let app = AppModel()
+        let doc = DocumentModel(ref: DocRef(.scene, "a"))
+        app.document = doc
+        let t = app.timeline
+        try t.load(scene(#"{ "name": "a", "doc": { "items": [\#(frog)] } }"#))
+        t.reduceMotionOverride = true
+        await t.playAction(ActionRow(name: "hop", duration: 480, source: "item"))
+        #expect(t.lastAnnouncement == "hop: shown at rest")
+        #expect(t.lastPlay == "hop: shown at rest")
+        #expect(!t.actionActive, "no frames play: the stage stays on the rest frame")
+        #expect(t.playingAction == nil)
+        #expect(t.renderTime == 0)
+    }
+}
