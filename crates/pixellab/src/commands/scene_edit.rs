@@ -165,12 +165,27 @@ fn place_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
         } else if given(&params, "at") {
             json!({ "tile": params["at"].clone() })
         } else {
-            // SceneMode/Lab.open: the cursor starts on the tile at the middle of the view.
-            let vb = doc.get("viewBox").and_then(Value::as_array).cloned();
-            let Some(vb) = vb else { return Err(Error::Internal("doc.viewBox is not iterable".into())) };
-            let n = |i: usize| vb.get(i).and_then(Value::as_f64).unwrap_or(f64::NAN);
-            let tile = engine::iso::px_to_tile([(n(0) + n(2) / 2.0).floor(), (n(1) + n(3) / 2.0).floor()], 0.0, eng::origin_of(doc));
-            json!({ "tile": tile.iter().map(|&x| engine::jsnum::num(x)).collect::<Vec<_>>() })
+            // SceneMode/Lab.open: the cursor starts on the tile at the middle of the view. A scene without a
+            // viewBox has no view: it starts at the middle of what is in it now, or the origin tile when empty.
+            let middle = match doc.get("viewBox").and_then(Value::as_array) {
+                Some(vb) => {
+                    let n = |i: usize| vb.get(i).and_then(Value::as_f64).unwrap_or(f64::NAN);
+                    Some([(n(0) + n(2) / 2.0).floor(), (n(1) + n(3) / 2.0).floor()])
+                }
+                None => {
+                    let mut probe = loaded.sources.clone();
+                    probe.scenes.insert(name.clone(), doc.clone());
+                    let painted = eng::resolve_frame(&probe, &name).ok().and_then(|f| f.painted);
+                    painted.map(|[x, y, w, h]| [(x as f64 + w as f64 / 2.0).floor(), (y as f64 + h as f64 / 2.0).floor()])
+                }
+            };
+            match middle {
+                Some(px) => {
+                    let tile = engine::iso::px_to_tile(px, 0.0, eng::origin_of(doc));
+                    json!({ "tile": tile.iter().map(|&x| engine::jsnum::num(x)).collect::<Vec<_>>() })
+                }
+                None => json!({ "tile": [0, 0, 0] }),
+            }
         };
         let new_group = params.get("newGroup").and_then(Value::as_object).filter(|_| given(&params, "newGroup"));
         let r = if given(&params, "group") || new_group.is_some() {

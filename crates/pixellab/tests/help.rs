@@ -182,7 +182,7 @@ fn group_help_pixellab_scene_help_pixellab_help_scene() {
     assert_eq!(code, 0);
     assert!(out.lines().any(|l| l == "pixellab scene: 27 commands"), "{out}");
     assert!(out.lines().any(|l| l
-        == "  pixellab scene render <name> [--scale <n>] [--time <n>] [--theme <light|dark>] [--play <text>] [--show <text>] [--hide <text,…>] [--focus <text>] [--out <file.png>]"));
+        == "  pixellab scene render <name> [--scale <n>] [--time <n>] [--theme <light|dark>] [--play <text>] [--view <n,…>] [--show <text>] [--hide <text,…>] [--focus <text>] [--out <file.png>]"));
     assert!(out.lines().any(|l| l == "  pixellab scene list"));
     assert_eq!(spawn_cli(&["help", "scene"]).1, out);
     let bare = spawn_cli(&["scene"]);

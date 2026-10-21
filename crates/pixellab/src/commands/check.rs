@@ -224,7 +224,12 @@ fn run(ctx: &mut Ctx, params: Params) -> Result<Value> {
         } else if let Some(scene) = sources.scenes.get(&target.name) {
             let items = scene.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
             let objects = files.iter().filter(|f| f.starts_with("objects/")).count();
-            let vb = |i: usize| str_of(scene.get("viewBox").and_then(|v| v.get(i)));
+            // The size it publishes at: its own viewBox, else the fit to what it paints (scene-canvas spec R7).
+            let frame = engine::engine::resolve_frame(sources, &target.name).ok();
+            let vb = |i: usize| match &frame {
+                Some(f) => f.view_box[i].to_string(),
+                None => str_of(scene.get("viewBox").and_then(|v| v.get(i))),
+            };
             let output = match scene.get("output") {
                 Some(o) if engine::engine::truthy(Some(o)) => format!("output {}", str_of(Some(o))),
                 _ => "preview only".to_string(),
