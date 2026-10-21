@@ -184,15 +184,3 @@ final class ChatTextView: NSTextView {
         insertText("\n", replacementRange: selectedRange())
     }
 }
-
-/// What goes with the message (PR 3 makes it the chips, pins and the disclosure).
-struct ChatContextArea: View {
-    var chat: ChatModel
-    var body: some View {
-        HStack {
-            SectionLabel(title: "Context")
-            Spacer()
-            Text(chat.contextSummary).font(.system(size: 11)).foregroundStyle(Theme.inkMuted)
-        }
-    }
-}
