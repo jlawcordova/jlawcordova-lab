@@ -65,10 +65,12 @@ Starts the app with `PIXELLAB_SNAPSHOT`, which opens the doc, waits until it's r
 ## acceptance.sh
 
 ```sh
-scripts/acceptance.sh [out-dir]
+scripts/acceptance.sh [--only <name>[,<name>...]] [out-dir]
 ```
 
 The acceptance pass, end to end on a temp copy of the site (the real checkout is only copied, migrated to format 2 with the program and sorted into depth order after it is copied, because the engine draws by where items stand): scene edits, save and publish (six SVGs into the temp site), then object painting and save (`acceptance/scene-object.txt`); an agent over MCP saving two proposals through the bundled program (`acceptance/mcp-agent.mjs`); the Agent window ghosting, approving and rejecting them (`acceptance/agent.txt`); a doc with unsaved edits changed on disk by the CLI and merged, reloaded and kept, then another agent's proposal (`acceptance/stale-agent.mjs`) approved into an unsaved copy (`acceptance/stale.txt`); Save As to a copy, reopening it and publishing from it into a folder (`acceptance/document.txt`); scene layers, with the hero island's SVG byte-identical before and after they're saved (`acceptance/layers.txt`); the example documents' layers, on temp copies of `examples/` (`acceptance/examples-harbor.txt`, `examples-town.txt`); depth, moving the pine behind the red house on a temp copy of the harbor and checking the wall's pixel (`acceptance/examples-depth.txt`); ambient loops and actions on the stage (`acceptance/actions.txt`); the app opening a copy left in format 1, offering Migrate…, and Cancel and Migrate working (`acceptance/migrate.txt`); and the Agent chat against the fake Claude Code in `fake-claude/` (`acceptance/chat-setup.txt`, `chat.txt`, `chat-harbor.txt`, and `chat-relaunch-1/2/3.txt` across three launches), never the owner's Claude Code or plan. It needs `build/Pixel Lab.app`. Exits 0 only if every step passed, and leaves logs, snapshots and the temp site in `out-dir`.
+
+`--only` (or `PIXELLAB_ACCEPT_ONLY`) runs only the named stages: a file in `acceptance/` without its extension, such as `layers`, `examples-town` or `mcp-agent`. The shared setup always runs. An unknown name fails at once and lists the valid ones; a filtered run prints what it skipped and ends by saying it was a partial pass.
 
 Its `expect` lines pin the site's art as it was on 2026-10-21 (28 scenes, 204 objects, the house at px -59,59). When the art changes, a failing `expect` means updating the scripts, not the app.
 

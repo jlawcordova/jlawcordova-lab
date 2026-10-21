@@ -52,7 +52,7 @@ The app never orders items itself: the server puts a scene in depth order after 
 2. Model the result in `Server/Protocol.swift` (or next to the model that uses it) and call it from the model: `AppModel`, `SceneEditor`, `ObjectEditor` or `AgentModel`. Views call model methods; they don't call the server.
 3. Add the view, with colors from `Theme`, labels, focus and a keyboard path. Shortcuts live in `PixelLabCommands` or the stage's key handling (`SceneEditor.handleKey`, `ObjectEditor`).
 4. Add script-hook actions or `expect`s to `Support/ScriptRunner.swift` if the feature needs them, and a unit test in `Tests/PixelLabTests/` for any pure logic (geometry, pixel math).
-5. Prove it: `swift build`, `scripts/test-app.sh`, `scripts/build-app.sh`, a script-hook run with `expect` lines, snapshots in dark and light, and `scripts/acceptance.sh`. The commands are in [Testing](../docs/testing.md).
+5. Prove it: `swift build`, `scripts/test-app.sh`, `scripts/build-app.sh`, a script-hook run with `expect` lines, snapshots in dark and light, and `scripts/acceptance.sh --only` with the stages it touches. The commands are in [Testing](../docs/testing.md).
 
 ## Running it against a test document
 
