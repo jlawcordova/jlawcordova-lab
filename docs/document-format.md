@@ -148,13 +148,20 @@ Either kind of layer may also carry an `ambient` loop and `actions` (below).
 | Key | Meaning |
 |---|---|
 | `output` | The SVG's file name (`kebab-case.svg`), unique across scenes. A scene without one is only for the app and previews. |
-| `viewBox` | `[x, y, width, height]`, whole numbers, in pixels. |
+| `viewBox` | `[x, y, width, height]`, whole numbers, in pixels. Optional: with one, the scene publishes at exactly that box (fixed); without, it fits what it paints (see [Size](#size)). `scene new` writes none. |
+| `margin` | Whole pixels, 0 or more, left around the painted pixels of a scene without a `viewBox`. Default 0; a fixed `viewBox` ignores it. |
 | `origin` | `[x, y]`, the pixel of tile `[0, 0, 0]`'s anchor. |
 | `image` | `{ "file": "rest.png", "scale": 5 }`: `art build` also renders the viewBox on the manifest's preview card color at `scale` (1 to 16) and writes it to `publish.images`. The file is a plain `name.png`, and the manifest needs `publish.images`. |
 | `layers` | Named parts of the scene for the editor: `{ "id", "name", "parent" }`. They never change paint order or the SVG. |
 | `items` | Objects and groups, listed back to front. |
 | `motion` | Scene motion: `{ "duration", "tracks" }`, each track `{ "item", "keys" }` for an item with an `id`. A key is `{ "t", "move", "show", "pose" }`. |
 | `notes` | A list of strings. |
+
+### Size
+
+A scene with a `viewBox` publishes at exactly that box, whatever it paints (the art it cuts off stays cut off; `pixellab check` warns, with a count of the pixels outside). A scene without one publishes at the smallest whole-pixel box that holds everything it paints, plus its `margin` on every side. "Everything it paints" covers the scene over its whole loop: the items at rest, every place scene motion takes a moving item, every frame of a frame loop, and how far ambient loops and actions move an element, so the published SVG never draws outside its box at any time. A scene with nothing in it is one tile around the origin, `[-16, -8, 32, 16]`. `origin` does not change: the box moves with the content, the art never moves inside it. A scene's `image`, its previews and renders, `art build`, `pixellab scene show` and `scene list` all use this one resolved box. `pixellab scene frame <name>` reports it, `--box x,y,w,h` fixes it, `--fit` takes the `viewBox` off again and `--margin n` sets the margin.
+
+A fit box moves with the content, so a page that places a scene's SVG against other content sees its size change when something is added far from the rest; fix the size to keep a scene still. With a margin of 0 the box is exactly the pixels, so an effect the page draws outside the SVG (a CSS drop shadow, say) needs room from the page or a `margin`.
 
 ### Items
 
@@ -198,7 +205,7 @@ How a page plays an action is in [the site contract](site-contract.md#actions). 
 Every file in a document is stored in one **canonical form**, so a hand edit and a save give small, comparable diffs. Saving in the app or with `pixellab` writes it, and `pixellab check` warns about a file that isn't in it (`isn't in canonical form`):
 
 - two-space indentation, no trailing commas, and a final newline;
-- keys in a fixed order for each kind of file (for example a sprite's `notes`, `kind`, `extends`, `anchor`, `footprint`, `keys`, `rows`, `layers`; a scene's `notes`, `output`, `image`, `viewBox`, `origin`, `layers`, `items`, `motion`); keys the order doesn't know come after;
+- keys in a fixed order for each kind of file (for example a sprite's `notes`, `kind`, `extends`, `anchor`, `footprint`, `keys`, `rows`, `layers`; a scene's `notes`, `output`, `image`, `viewBox`, `margin`, `origin`, `layers`, `items`, `motion`); keys the order doesn't know come after;
 - a list of numbers on one line (`"size": [1, 1, 1]`);
 - any other list one element per line, so a map's rows are one string per line;
 - one line for each placed item, scene layer, motion key and ambient or action key, and for a scene's `image`, so a scene diffs a line per item;
