@@ -5,7 +5,8 @@
 //! the default, `~/Library/Application Support/Pixel Lab/`.
 //!
 //! ```text
-//! proposals/<id>.json   { id, number, doc, baseHash, source, summary, createdAt, agent, chat? }
+//! proposals/<id>.json   { id, number, format, doc, baseHash, source, summary, createdAt, agent, chat? }
+//! retired-proposals/    proposals from before format 2, moved here when the state dir is opened (R25, D11)
 //! proposal-numbers.log  one proposal id per line, appended when a proposal is first written
 //! activity.jsonl        one { time, tool, args, ok, summary, agent?, chat? } per line
 //! ```
@@ -162,6 +163,9 @@ pub fn parse_iso_time(text: &str) -> Option<f64> {
     Some((days * 86_400_000 + h * 3_600_000 + mi * 60_000 + s * 1000 + ms - offset * 60_000) as f64)
 }
 
+/// The proposal format this program writes (`"format": 2`). A proposal file without it is retired.
+pub const PROPOSAL_FORMAT: u64 = 2;
+
 const ID_LEN: usize = 22;
 
 /// `ID`: `/^[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$/`.
@@ -254,13 +258,54 @@ fn js_string(v: Option<&Value>) -> String {
 }
 
 impl State {
+    /// Opens a state dir, first retiring any proposal from before format 2 (R25, D11).
     pub fn new(dir: impl Into<PathBuf>) -> State {
         let dir = dir.into();
-        State {
+        let state = State {
             proposals_dir: dir.join("proposals"),
             activity_file: dir.join("activity.jsonl"),
             numbers_file: dir.join("proposal-numbers.log"),
             dir,
+        };
+        state.retire_old_proposals();
+        state
+    }
+
+    /// Moves every proposal file without `"format": 2` to `retired-proposals/<id>.json` and logs one
+    /// activity line. Nothing is logged when there is nothing to retire. The numbers log, the
+    /// activity log and everything else in the dir are left alone.
+    fn retire_old_proposals(&self) {
+        let Ok(entries) = fs::read_dir(&self.proposals_dir) else {
+            return;
+        };
+        let old: Vec<String> = entries
+            .filter_map(|e| e.ok())
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|f| f.ends_with(".json") && is_proposal_id(&f[..f.len() - 5]))
+            .filter(|f| {
+                let current = fs::read(self.proposals_dir.join(f))
+                    .ok()
+                    .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+                    .is_some_and(|v| v.get("format").and_then(Value::as_u64) == Some(PROPOSAL_FORMAT));
+                !current
+            })
+            .collect();
+        let retired_dir = self.dir.join("retired-proposals");
+        let mut moved = 0;
+        for f in old {
+            if fs::create_dir_all(&retired_dir).is_ok() && fs::rename(self.proposals_dir.join(&f), retired_dir.join(&f)).is_ok() {
+                moved += 1;
+            }
+        }
+        if moved > 0 {
+            let summary = format!("retired {moved} proposal{} from before the format change", if moved == 1 { "" } else { "s" });
+            let mut entry = Map::new();
+            entry.insert("time".into(), Value::String(iso_time(now_ms())));
+            entry.insert("tool".into(), Value::String("proposal_retire".into()));
+            entry.insert("args".into(), Value::Object(Map::new()));
+            entry.insert("ok".into(), Value::Bool(true));
+            entry.insert("summary".into(), Value::String(summary));
+            let _ = self.append_activity(&Value::Object(entry));
         }
     }
 
@@ -310,8 +355,12 @@ impl State {
         if let Some(n) = number.filter(|n| *n != 0.0 && !n.is_nan()) {
             out.insert("number".into(), engine::jsnum::num(n));
         }
+        out.insert("format".into(), Value::from(PROPOSAL_FORMAT));
         if let Some(map) = proposal.as_object() {
             for (k, v) in map {
+                if k == "format" {
+                    continue;
+                }
                 out.insert(k.clone(), v.clone());
             }
         }

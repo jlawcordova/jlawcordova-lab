@@ -666,6 +666,7 @@ fn parity_renders_match_nodes_pixel_for_pixel() {
                 theme: if o.get("theme").and_then(Value::as_str) == Some("dark") { Theme::Dark } else { Theme::Light },
                 hide: set("hide"),
                 focus: set("focus"),
+                play: None,
             };
             render_scene_image(&sources, name, "#1C1712", &options).unwrap()
         } else {
@@ -674,6 +675,7 @@ fn parity_renders_match_nodes_pixel_for_pixel() {
                 time: get("time"),
                 frame: get("frame").unwrap_or(0.0) as usize,
                 layers: o.get("layers").map(|a| a.as_array().unwrap().iter().map(|n| n.as_u64().unwrap() as usize).collect()),
+                play: None,
             };
             render_object_image(&sources, name, &options).unwrap()
         };

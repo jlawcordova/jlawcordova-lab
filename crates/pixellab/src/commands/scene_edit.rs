@@ -348,7 +348,7 @@ fn snap_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
 fn changed_pixels(sources: &Sources, name: &str) -> engine::Result<usize> {
     let draw = |order: Order| -> engine::Result<_> {
         let rendered = render_scene(sources, name, order)?;
-        Ok(composite(&rendered.root, CompositeOptions { first_variant: true, frame: 0, time: Some(0.0) }))
+        Ok(composite(&rendered.root, CompositeOptions { first_variant: true, frame: 0, time: Some(0.0), play: None }))
     };
     let (was, now) = (draw(Order::List)?, draw(Order::Depth)?);
     let mut n = 0;

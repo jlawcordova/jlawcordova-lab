@@ -323,11 +323,11 @@ fn r11_r12_check_warns_with_a_code_off_the_grid_a_scene_out_of_depth_order_and_t
         if tracks.as_array().is_some_and(|t| !t.is_empty()) {
             doc["motion"] = json!({ "duration": 10000, "tracks": tracks });
         }
-        doc.to_string()
+        engine::format::serialize(&doc)
     };
     let doc = make_document();
-    doc.write("objects/house.json", &house.to_string());
-    doc.write("objects/walker.json", &walker.to_string());
+    doc.write("objects/house.json", &engine::format::serialize(&house));
+    doc.write("objects/walker.json", &engine::format::serialize(&walker));
     // The walker at tile 0,1,0 is behind the house's walls at 1,1,1, but is listed after them.
     doc.write(
         "scenes/out-of-order.json",

@@ -36,6 +36,8 @@ export const PAGES = /** @type {Page[]} */ ([
   { section: 'Code', file: 'app/README.md', title: 'Mac app' },
   { section: 'Code', file: 'scripts/README.md', title: 'Scripts' },
   { section: 'Code', file: 'examples/README.md', title: 'Example documents' },
+  { section: 'Reference', file: 'docs/document-format.md', title: 'Document format' },
+  { section: 'Reference', file: 'docs/site-contract.md', title: 'Site contract' },
   { section: 'Reference', file: 'docs/cli.md', title: 'Commands and protocols' },
   { section: 'Reference', file: 'CLAUDE.md', title: 'CLAUDE.md' },
 ]);

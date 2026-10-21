@@ -14,7 +14,7 @@ use std::process::Command;
 use serde_json::Value;
 
 use crate::deflate::gzip;
-use crate::engine::{load_sources, render_scene, validate, Order, Sources};
+use crate::engine::{load_sources, render_scene_with, validate, Order, Sources};
 use crate::format::{read_docs, stringify};
 use crate::motion::items_by_id;
 use crate::omap::{OMap, OSet};
@@ -443,6 +443,8 @@ pub struct Compiled {
     pub gzip: u64,
     pub over: bool,
     pub budget: Budget,
+    /// Why the scene is over budget, if it is (R4): a warning, never a failure.
+    pub warnings: Vec<String>,
     pub report: String,
 }
 
@@ -450,8 +452,16 @@ fn hex_of(sources: &Sources) -> impl Fn(&str) -> String + '_ {
     |color: &str| sources.colors.get(color).map_or_else(|| "undefined".to_string(), |c| c.hex.clone())
 }
 
+/// `PIXELLAB_LEGACY_SVG=1` makes the compiler write the SVGs as the Node CLI
+/// did, unscoped and with no frame loops in them, so the parity check (spec
+/// R3) can still compare them until cutover. Test-only; read here alone.
+fn legacy_svg() -> bool {
+    std::env::var("PIXELLAB_LEGACY_SVG").is_ok_and(|v| v == "1")
+}
+
 fn rect_svg(sources: &Sources, name: &str, order: Order) -> Result<String> {
-    Ok(to_rect_svg(&render_scene(sources, name, order)?, &hex_of(sources)))
+    let scope = if legacy_svg() { None } else { Some(name) };
+    Ok(to_rect_svg(&render_scene_with(sources, name, order, scope)?, &hex_of(sources)))
 }
 
 /// Renders a scene and runs it through the optimizer, lossless check and
@@ -463,18 +473,52 @@ pub fn compile_scene(sources: &Sources, name: &str, budgets: &Budgets, order: Or
     verify_lossless(&rects, &output).map_err(EngineError)?;
     let (raw, gz) = (output.len() as u64, gzip(output.as_bytes()).len() as u64);
     let (src_raw, src_gz) = (rects.len() as u64, gzip(rects.as_bytes()).len() as u64);
-    let file = sources.scenes.get(name).and_then(|s| s.get("output")).and_then(Value::as_str).filter(|f| !f.is_empty());
-    let budget = file.and_then(|f| budgets.get(f)).copied().unwrap_or(BUDGET);
-    let over = raw > budget.raw || gz > budget.gzip;
+    let budget = scene_budget(sources, name, budgets);
+    let warnings = budget_warnings(budget, raw, gz);
+    let over = !warnings.is_empty();
     let report = format!(
         "{} / {} gzip → {} / {} gzip, lossless{}",
         kb(src_raw),
         kb(src_gz),
         kb(raw),
         kb(gz),
-        if over { " — OVER BUDGET" } else { "" }
+        if over { format!(" — {} (warning)", warnings.join(" and ")) } else { String::new() }
     );
-    Ok(Compiled { output, raw, gzip: gz, over, budget, report })
+    Ok(Compiled { output, raw, gzip: gz, over, budget, warnings, report })
+}
+
+/// A budget in KB, without a needless ".0" ("750 KB", "12.5 KB").
+fn budget_kb(bytes: u64) -> String {
+    if bytes.is_multiple_of(1024) {
+        format!("{} KB", bytes / 1024)
+    } else {
+        kb(bytes)
+    }
+}
+
+/// The warnings for a scene's raw and gzip size against its budget (R4):
+/// "over its 750 KB budget", "over its 150 KB gzip budget". Empty when within.
+pub fn budget_warnings(budget: Budget, raw: u64, gz: u64) -> Vec<String> {
+    let mut out = Vec::new();
+    if raw > budget.raw {
+        out.push(format!("over its {} budget", budget_kb(budget.raw)));
+    }
+    if gz > budget.gzip {
+        out.push(format!("over its {} gzip budget", budget_kb(budget.gzip)));
+    }
+    out
+}
+
+/// The budget a scene's output has: the manifest's, else the engine's.
+pub fn scene_budget(sources: &Sources, name: &str, budgets: &Budgets) -> Budget {
+    let file = sources.scenes.get(name).and_then(|s| s.get("output")).and_then(Value::as_str).filter(|f| !f.is_empty());
+    file.and_then(|f| budgets.get(f)).copied().unwrap_or(BUDGET)
+}
+
+/// A scene's budget warnings, without the lossless check (`check` and `art sizes`).
+pub fn scene_budget_warnings(sources: &Sources, name: &str, budgets: &Budgets) -> Result<Vec<String>> {
+    let (_, raw, gz) = measure(sources, name)?;
+    Ok(budget_warnings(scene_budget(sources, name, budgets), raw, gz))
 }
 
 /// One scene written to the publish folder.
@@ -485,6 +529,7 @@ pub struct Output {
     pub raw: u64,
     pub gzip: u64,
     pub over: bool,
+    pub warnings: Vec<String>,
     pub report: String,
 }
 
@@ -495,6 +540,7 @@ pub struct PreviewOnly {
     pub raw: u64,
     pub gzip: u64,
     pub over: bool,
+    pub warnings: Vec<String>,
     pub report: String,
 }
 
@@ -513,10 +559,9 @@ pub fn compile_all(sources: &Sources, problems: &[String], out: &Path, budgets: 
     if !problems.is_empty() {
         return Ok(Build { ok: false, outputs: vec![], preview_only: vec![], problems: problems.to_vec() });
     }
-    let (mut outputs, mut preview_only, mut over) = (Vec::new(), Vec::new(), false);
+    let (mut outputs, mut preview_only) = (Vec::new(), Vec::new());
     for (name, scene) in &sources.scenes {
         let c = compile_scene(sources, name, budgets, Order::Depth)?;
-        over |= c.over;
         match scene.get("output").and_then(Value::as_str).filter(|f| !f.is_empty()) {
             Some(file) => {
                 std::fs::create_dir_all(out).map_err(|e| EngineError(e.to_string()))?;
@@ -527,13 +572,56 @@ pub fn compile_all(sources: &Sources, problems: &[String], out: &Path, budgets: 
                     raw: c.raw,
                     gzip: c.gzip,
                     over: c.over,
+                    warnings: c.warnings,
                     report: c.report,
                 });
             }
-            None => preview_only.push(PreviewOnly { scene: name.clone(), raw: c.raw, gzip: c.gzip, over: c.over, report: c.report }),
+            None => preview_only.push(PreviewOnly {
+                scene: name.clone(),
+                raw: c.raw,
+                gzip: c.gzip,
+                over: c.over,
+                warnings: c.warnings,
+                report: c.report,
+            }),
         }
     }
-    Ok(Build { ok: !over, outputs, preview_only, problems: vec![] })
+    Ok(Build { ok: true, outputs, preview_only, problems: vec![] })
+}
+
+/// A scene image written by `compile_images`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ImageOut {
+    pub file: String,
+    pub scene: String,
+    pub raw: u64,
+}
+
+/// The scenes that declare an `image`: (scene, file, scale).
+pub fn scene_images(sources: &Sources) -> Vec<(String, String, u32)> {
+    let mut list = Vec::new();
+    for (name, scene) in &sources.scenes {
+        let Some(image) = scene.get("image").and_then(Value::as_object) else { continue };
+        let Some(file) = image.get("file").and_then(Value::as_str) else { continue };
+        let scale = image.get("scale").and_then(Value::as_f64).map_or(1, |s| s as u32);
+        list.push((name.clone(), file.to_string(), scale));
+    }
+    list
+}
+
+/// Renders each scene's `image`: its viewBox on the card color at `scale`,
+/// the same pixels as `render_preview` + `encode_png`, written to `dir`
+/// (R18, D5). Call it only when the sources have no problems.
+pub fn compile_images(sources: &Sources, dir: &Path, colors: crate::preview::PreviewColors) -> Result<Vec<ImageOut>> {
+    let mut out = Vec::new();
+    for (scene, file, scale) in scene_images(sources) {
+        let (image, _) = crate::preview::render_preview(sources, crate::preview::Target::Scene(&scene), colors)?;
+        let bytes = crate::preview::encode_png(&image, scale);
+        std::fs::create_dir_all(dir).map_err(|e| EngineError(e.to_string()))?;
+        std::fs::write(dir.join(&file), &bytes).map_err(|e| EngineError(e.to_string()))?;
+        out.push(ImageOut { file, scene, raw: bytes.len() as u64 });
+    }
+    Ok(out)
 }
 
 /// How many items a scene places, groups flattened (`countItems`).

@@ -67,7 +67,9 @@ const note = (/** @type {string} */ text) => {
 
 /** A clean env: a temp HOME and state dir, no document from the environment. */
 const envFor = (/** @type {string} */ base) => {
-  const env = { ...process.env, HOME: join(base, 'home'), PIXELLAB_STATE: join(base, 'state') };
+  // PIXELLAB_LEGACY_SVG=1: the program writes today's SVGs, before spec R11–R15, so R3 still compares them
+  // (plan.md, "Departures"). The Node CLI ignores it.
+  const env = { ...process.env, HOME: join(base, 'home'), PIXELLAB_STATE: join(base, 'state'), PIXELLAB_LEGACY_SVG: '1' };
   delete env.PIXELLAB_DOC;
   delete env.PIXELLAB_SITE;
   mkdirSync(env.HOME, { recursive: true });
@@ -195,6 +197,36 @@ function normalize(/** @type {any} */ v, /** @type {[string, string][]} */ roots
     return out;
   }
   return v;
+}
+
+/**
+ * R4's expected change, narrowly: over budget warns and never fails, so the
+ * program's `art build` result gains `kind` and `warnings` on each output (and
+ * a top-level `warnings`), words the over-budget report as a warning, and
+ * stays ok where Node said `ok: false`; `art sizes` gains `warnings`. Each is
+ * removed from the program's result only where it applies, and a scene the
+ * program warns about must be one Node called over budget.
+ * @param {string} command @param {any} node @param {any} rust
+ */
+function acceptR4(command, node, rust) {
+  if (!rust || typeof rust !== 'object' || !node || typeof node !== 'object') return;
+  if (command === 'art.sizes' && Array.isArray(rust.warnings) && !('warnings' in node)) delete rust.warnings;
+  if (command !== 'art.build') return;
+  let over = false;
+  for (const list of ['outputs', 'previewOnly']) {
+    for (const [i, o] of (rust[list] ?? []).entries()) {
+      if (list === 'outputs' && o.kind === 'svg') delete o.kind;
+      if (!Array.isArray(o.warnings)) continue;
+      if (o.warnings.length) {
+        if (!node[list]?.[i]?.over) continue;
+        over = true;
+        o.report = o.report.replace(/ — over its .* \(warning\)$/, ' — OVER BUDGET');
+      }
+      delete o.warnings;
+    }
+  }
+  if (Array.isArray(rust.warnings) && (rust.warnings.length === 0 || over)) delete rust.warnings;
+  if (over && node.ok === false && rust.ok === true) rust.ok = false;
 }
 
 /** Compares two results; returns a difference's text or null. */
@@ -347,8 +379,12 @@ async function main() {
     rmSync(out2, { recursive: true, force: true });
     const b1 = nodeCli(['art', 'build', '--dir', out1, '--json', '--document', format1], env);
     const b2 = rustCli(['art', 'build', '--dir', out2, '--json', '--document', format2], env);
-    if (b1.status !== b2.status) differ(name, 'art build exit code', `node ${b1.status}, rust ${b2.status}`);
-    const built = compare(JSON.parse(b1.stdout || '{}'), JSON.parse(b2.stdout || '{}'), [[out1, '<out>'], ...nodeRoots], [[out2, '<out>'], ...rustRoots]);
+    const [built1, built2] = [JSON.parse(b1.stdout || '{}'), JSON.parse(b2.stdout || '{}')];
+    acceptR4('art.build', built1, built2);
+    // R4: Node exited 1 over budget; the program exits 0 (acceptR4 made ok false again, the exit code follows it).
+    const overBudget = built2.ok === false && built1.ok === false && b1.status === 1 && b2.status === 0 && (built1.problems ?? []).length === 0;
+    if (b1.status !== b2.status && !overBudget) differ(name, 'art build exit code', `node ${b1.status}, rust ${b2.status}`);
+    const built = compare(built1, built2, [[out1, '<out>'], ...nodeRoots], [[out2, '<out>'], ...rustRoots]);
     if (built) differ(name, 'art build result', built);
     const svgs = filesIn(out1);
     if (JSON.stringify(svgs) !== JSON.stringify(filesIn(out2))) differ(name, 'art build files', `node ${svgs.join(', ')}; rust ${filesIn(out2).join(', ')}`);
@@ -376,6 +412,7 @@ async function main() {
       const reply = /** @type {any} */ (await rust.call(command, params));
       const rustResult = reply.error ? { error: { code: reply.error.data?.code ?? 'internal', message: reply.error.message } } : reply.result;
       compared++;
+      acceptR4(command, nodeResult, rustResult);
       const d = compare(nodeResult, rustResult, nodeRoots, rustRoots);
       if (d) differ(name, `${command} ${JSON.stringify(params)}`, d);
     }
@@ -424,6 +461,17 @@ async function fixtureChecks(/** @type {string} */ base, /** @type {any} */ env,
   };
   const n = await mcp(['node', NODE_CLI, 'serve', '--mcp', '--document', format1]);
   const r = await mcp([PROGRAM, 'serve', '--mcp', '--document', format2]);
+  // PR 3 adds the four ambient and action tools and gives scene_render and object_render a play param (R24, D8):
+  // those six tools are left out of both lists; every other tool and every other message is compared as it is.
+  const CHANGED_TOOLS = ['scene_ambient', 'scene_action', 'object_ambient', 'object_action', 'scene_render', 'object_render'];
+  for (const lines of [n, r]) {
+    for (let i = 0; i < lines.length; i++) {
+      const message = JSON.parse(lines[i]);
+      if (!Array.isArray(message.result?.tools)) continue;
+      message.result.tools = message.result.tools.filter((/** @type {any} */ t) => !CHANGED_TOOLS.includes(t.name));
+      lines[i] = JSON.stringify(message);
+    }
+  }
   for (let i = 0; i < Math.max(n.length, r.length); i++) {
     // Format 2 names its source files .json.
     if (n[i] !== undefined) n[i] = n[i].split('starter.mjs').join('starter.rs').split('.mjs').join('.json');
@@ -505,22 +553,33 @@ async function fixtureChecks(/** @type {string} */ base, /** @type {any} */ env,
     if (norm(a.stderr, e1) !== norm(b.stderr, e2)) differ('sample', `${argv.join(' ')} stderr`, `node ${norm(a.stderr, e1).slice(0, 400)}\n  rust ${norm(b.stderr, e2).slice(0, 400)}`);
   }
   note(`sample: human output and exit codes of ${reads.length} read commands and ${FAILING.length} failing calls compared`);
-  // The CLI reference: the Node script's docs/cli.md and the program's help --markdown.
-  const md1 = run(['node', join(REPO, 'scripts/docs-cli.mjs'), '--stdout'], env);
+  // The CLI reference: the Node CLI's (scripts/docs-cli-node.mjs, what docs/cli.md was before the program wrote it)
+  // and the program's help --markdown, apart from what PR 3 adds or changes on purpose.
+  const { renderCliDocs } = await import('./docs-cli-node.mjs');
+  const md1 = { stdout: renderCliDocs().replace(/\n{3,}/g, '\n\n').replace(/\n*$/, '\n') };
   const md2 = rustCli(['help', '--markdown'], env);
-  // document migrate is new in the program (R8): its row and its section aren't in the Node reference.
-  md2.stdout = md2.stdout
-    .split('\n')
-    .filter((l) => !l.startsWith('| [`document migrate`]'))
-    .join('\n')
-    .replace(/\n#### document\.migrate\n[\s\S]*?(?=\n#### )/, '')
-    .replace(/; `document_migrate` \([^)]*\)/, '');
-  const ref = (md1.status === 0 && md1.stdout.startsWith('#') ? md1.stdout : readFileSync(join(REPO, 'docs/cli.md'), 'utf8')).split('starter.mjs').join('starter.rs').replace(/\b(palette|(?:objects|scenes)\/[^\s`"'*)\]]+)\.mjs/g, '$1.json');
+  // New commands and the commands PR 3 changes: art build (images, warnings; R4, R18), scene render and object render
+  // (--play; R24), document migrate (R8) and the four ambient and action commands (R24, D8). Their index rows, their
+  // reference sections (cut from the "#### name" heading to the next heading) and document_migrate's MCP sentence go
+  // from both sides; nothing else is filtered.
+  const NEW = ['document.migrate', 'scene.ambient', 'scene.action', 'object.ambient', 'object.action'];
+  const CHANGED = ['art.build', 'scene.render', 'object.render'];
+  const without = (/** @type {string} */ text) => {
+    let t = text
+      .split('\n')
+      .filter((l) => !NEW.some((name) => l.startsWith(`| [\`${name.replace('.', ' ')}\`]`)))
+      .join('\n')
+      .replace(/; `document_migrate` \([^)]*\)/, '');
+    for (const name of [...NEW, ...CHANGED]) t = t.replace(new RegExp(`\\n#### ${name.replace('.', '\\.')}\\n[\\s\\S]*?(?=\\n#### |\\n### |$)`), '');
+    return t;
+  };
+  md2.stdout = without(md2.stdout);
+  const ref = without(md1.stdout).split('starter.mjs').join('starter.rs').replace(/\b(palette|(?:objects|scenes)\/[^\s`"'*)\]]+)\.mjs/g, '$1.json');
   if (ref !== md2.stdout) {
     const at = [...ref].findIndex((ch, k) => ch !== md2.stdout[k]);
     differ('sample', 'help --markdown', `node …${ref.slice(Math.max(0, at - 150), at + 200)}…\n  rust …${md2.stdout.slice(Math.max(0, at - 150), at + 200)}…`);
   }
-  note('sample: help --markdown compared with docs/cli.md');
+  note('sample: help --markdown compared with the Node CLI reference');
   void execFileSync;
 }
 

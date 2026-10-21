@@ -40,6 +40,8 @@ fn budgets(manifest: &serde_json::Value) -> Budgets {
 #[test]
 fn every_scene_compiles_byte_identical() {
     let Some(dir) = common::goldens("every_scene_compiles_byte_identical") else { return };
+    // Node's SVGs are today's, before spec R11–R15 (plan.md, "Departures").
+    std::env::set_var("PIXELLAB_LEGACY_SVG", "1");
     let mut differ = Vec::new();
     for (name, format2, goldens) in common::corpus(&dir) {
         let (sources, manifest) = open(&format2);

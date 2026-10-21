@@ -3,6 +3,7 @@
 //! (ports cli/lib/commands/check.mjs): off_grid motion, out_of_order scenes
 //! and the copies a moving item is drawn in.
 
+use engine::compile::{scene_budget_warnings, Budgets};
 use engine::engine::{describe_object, is_in_depth_order, motion_copies, resolve, validate, Sources};
 use engine::omap::{OMap, OSet};
 use serde_json::{json, Map, Value};
@@ -131,7 +132,25 @@ fn depth_warnings(sources: &Sources, all: &[String], n: &str) -> Vec<Value> {
     inner().unwrap_or_default()
 }
 
-fn warnings_of(sources: &Sources, all: &[String], names: &[String]) -> Vec<Value> {
+/// A published scene's size against its budget (R4): a warning, never a problem.
+fn budget_warnings(sources: &Sources, all: &[String], n: &str, budgets: &Budgets) -> Vec<Value> {
+    let Some(output) = sources.scenes.get(n).and_then(|s| s.get("output")).and_then(Value::as_str).filter(|o| !o.is_empty()) else {
+        return vec![];
+    };
+    let deps = dependencies(sources, DocKind::Scene, n);
+    if deps.iter().any(|f| all.iter().any(|p| file_of(p) == *f)) {
+        return vec![];
+    }
+    let Ok(over) = scene_budget_warnings(sources, n, budgets) else { return vec![] };
+    over.into_iter()
+        .map(|w| {
+            let text = format!("{}: {output} is {w}", engine::format::scene_file(n));
+            with(entry(&text), vec![("code", json!("over_budget")), ("scene", json!(n)), ("output", json!(output))])
+        })
+        .collect()
+}
+
+fn warnings_of(sources: &Sources, all: &[String], names: &[String], budgets: &Budgets) -> Vec<Value> {
     let mut out = Vec::new();
     for n in names {
         if let Some(scene) = sources.scenes.get(n) {
@@ -141,8 +160,25 @@ fn warnings_of(sources: &Sources, all: &[String], names: &[String]) -> Vec<Value
             }
         }
         out.extend(depth_warnings(sources, all, n));
+        out.extend(budget_warnings(sources, all, n, budgets));
     }
     out
+}
+
+/// The sources on disk whose text isn't what saving them writes (`serialize(parse(text)) != text`),
+/// among `only` when it is given (the files a check of one doc covers).
+fn canonical_warnings(ctx: &mut Ctx, only: Option<&OSet<String>>) -> Result<Vec<Value>> {
+    let dir = ctx.document()?.source_dir.clone();
+    let mut out = Vec::new();
+    for file in ctx.files()?.keys().filter(|f| f.ends_with(".json") && only.is_none_or(|o| o.has(*f))) {
+        let Ok(text) = std::fs::read_to_string(dir.join(file)) else { continue };
+        let Ok(doc) = engine::format::parse(&text) else { continue };
+        if engine::format::serialize_file(file, &doc) != text {
+            let message = "isn't in canonical form; saving it in Pixel Lab or pixellab rewrites it";
+            out.push(with(entry(&format!("{file}: {message}")), vec![("code", json!("not_canonical"))]));
+        }
+    }
+    Ok(out)
 }
 
 fn count_items(items: &[Value]) -> usize {
@@ -160,16 +196,22 @@ fn count_items(items: &[Value]) -> usize {
 
 fn run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let loaded = ctx.sources()?;
+    let budgets = ctx.document()?.budgets.clone();
     let sources = &loaded.sources;
+    let query = opt_str(&params, "name");
+    let not_canonical = if query.is_none() { Some(canonical_warnings(ctx, None)?) } else { None };
     let all: Vec<String> = loaded.load_errors.iter().cloned().chain(validate(sources)).collect();
-    let Some(query) = opt_str(&params, "name") else {
+    let Some(query) = query else {
         let names: Vec<String> = sources.scenes.keys().cloned().collect();
         return Ok(Value::Object(obj(vec![
             ("ok", json!(all.is_empty())),
             ("target", Value::Null),
             ("checked", json!(1 + sources.objects.len() + sources.scenes.len())),
             ("problems", Value::Array(all.iter().map(|p| Value::Object(entry(p))).collect())),
-            ("warnings", Value::Array(warnings_of(sources, &all, &names))),
+            (
+                "warnings",
+                Value::Array(warnings_of(sources, &all, &names, &budgets).into_iter().chain(not_canonical.unwrap_or_default()).collect()),
+            ),
         ])));
     };
     let target = ctx.find(query, opt_str(&params, "kind").and_then(DocKind::parse))?;
@@ -190,7 +232,9 @@ fn run(ctx: &mut Ctx, params: Params) -> Result<Value> {
             summary = Some(format!("{}×{} · {} items · {objects} objects · {output}", vb(2), vb(3), count_items(&items)));
         }
     }
-    let warnings = if target.kind == DocKind::Scene { warnings_of(sources, &all, std::slice::from_ref(&target.name)) } else { vec![] };
+    let mut warnings =
+        if target.kind == DocKind::Scene { warnings_of(sources, &all, std::slice::from_ref(&target.name), &budgets) } else { vec![] };
+    warnings.extend(canonical_warnings(ctx, Some(&files))?);
     let mut out = obj(vec![
         ("ok", json!(mine.is_empty())),
         ("target", json!({ "kind": target.kind.as_str(), "name": target.name, "file": target.file })),

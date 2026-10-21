@@ -235,6 +235,10 @@ fn record_into(map: &Map<String, Value>, table: &[&str], by_key: fn(&str) -> Sha
 
 /// One line. A record's keys follow `table` when one is given; an item's
 /// `at` drops a level of 0.
+/// Not a key order: an item's `actions`, a record of named actions, each in
+/// the loop's order.
+const ACTIONS: &[&str] = &["\u{0}actions"];
+
 fn inline_into(v: &Value, table: Option<&[&str]>, out: &mut String) {
     match v {
         Value::Array(list) => {
@@ -243,15 +247,16 @@ fn inline_into(v: &Value, table: Option<&[&str]>, out: &mut String) {
                 if i > 0 {
                     out.push_str(", ");
                 }
-                inline_into(e, None, out);
+                // A list of records (a loop's keys) puts each in the table's order.
+                inline_into(e, table, out);
             }
             out.push(']');
         }
         Value::Object(map) if map.is_empty() => out.push_str("{}"),
         Value::Object(map) => {
             let names = match table {
-                Some(t) => order::table_keys(map, t),
-                None => keys(map),
+                Some(t) if t != ACTIONS => order::table_keys(map, t),
+                _ => keys(map),
             };
             out.push_str("{ ");
             let mut first = true;
@@ -268,6 +273,10 @@ fn inline_into(v: &Value, table: Option<&[&str]>, out: &mut String) {
                 out.push_str(": ");
                 let inner = match (table, k.as_str()) {
                     (Some(t), "at") if t == order::ITEM => Some(order::AT),
+                    (Some(t), "ambient") if t == order::ITEM => Some(order::LOOP),
+                    (Some(t), "actions") if t == order::ITEM => Some(ACTIONS),
+                    (Some(t), _) if t == ACTIONS => Some(order::LOOP),
+                    (Some(t), "keys") if t == order::LOOP => Some(order::KEY),
                     _ => None,
                 };
                 inline_into(value, inner, out);
@@ -320,7 +329,8 @@ fn track_key(k: &str) -> Shape {
 fn layer_key(k: &str) -> Shape {
     match k {
         "ambient" => Shape::Record(order::LOOP, loop_key),
-        "actions" => Shape::Pretty,
+        // Named actions, each written as an ambient loop is.
+        "actions" => Shape::Record(&[], |_| Shape::Record(order::LOOP, loop_key)),
         _ => Shape::Pretty,
     }
 }

@@ -180,9 +180,9 @@ fn bare_pixellab_prints_help_to_stderr_with_exit_code_2() {
 fn group_help_pixellab_scene_help_pixellab_help_scene() {
     let (code, out, _) = spawn_cli(&["scene", "--help"]);
     assert_eq!(code, 0);
-    assert!(out.lines().any(|l| l == "pixellab scene: 25 commands"), "{out}");
+    assert!(out.lines().any(|l| l == "pixellab scene: 27 commands"), "{out}");
     assert!(out.lines().any(|l| l
-        == "  pixellab scene render <name> [--scale <n>] [--time <n>] [--theme <light|dark>] [--show <text>] [--hide <text,…>] [--focus <text>] [--out <file.png>]"));
+        == "  pixellab scene render <name> [--scale <n>] [--time <n>] [--theme <light|dark>] [--play <text>] [--show <text>] [--hide <text,…>] [--focus <text>] [--out <file.png>]"));
     assert!(out.lines().any(|l| l == "  pixellab scene list"));
     assert_eq!(spawn_cli(&["help", "scene"]).1, out);
     let bare = spawn_cli(&["scene"]);
@@ -467,17 +467,7 @@ fn help_markdown_is_the_cli_reference() {
         let end = text.find("## Command reference").unwrap();
         text[start..end].to_string()
     };
-    // Format 2's source files are .json (R26), and document migrate is new and left out of MCP (R8):
-    // the Node reference doesn't say either until the cutover regenerates it.
-    let docs = docs.replace("scenes/hero-island.mjs", "scenes/hero-island.json");
-    let out_fixed = match out.find("; `document_migrate` (") {
-        Some(at) => {
-            let end = at + out[at..].find(')').unwrap() + 1;
-            format!("{}{}", &out[..at], &out[end..])
-        }
-        None => out.clone(),
-    };
-    assert_eq!(between(&out_fixed), between(&docs));
+    assert_eq!(between(&out), between(&docs));
     assert!(out.ends_with("\n") && !out.ends_with("\n\n"));
     assert!(out.contains("#### scene.render\n\nRender a scene to a PNG.\n"), "{out}");
     assert!(out.contains("| `name` (positional) | string | required | scene name (or scenes/<name>) |"), "{out}");
@@ -489,24 +479,7 @@ fn help_markdown_is_the_cli_reference() {
 
 #[test]
 fn docs_cli_md_is_generated_from_the_registry_and_up_to_date() {
-    // docs/cli.md is Node's reference until the cutover regenerates it. The Rust reference
-    // differs from it in exactly three ways, all of format 2 (R26, R8): source files are
-    // .json (and starter.rs), and document migrate is new (left out of MCP). Undo those
-    // and the two must be equal.
+    // scripts/docs-cli.mjs writes docs/cli.md from the program's help --markdown (plan.md, PR 3).
     let docs = std::fs::read_to_string(common::repo().join("docs/cli.md")).unwrap();
-    let docs = docs
-        .replace("scenes/hero-island.mjs", "scenes/hero-island.json")
-        .replace("(palette.mjs,", "(palette.json,")
-        .replace("writes manifest.json, palette.mjs", "writes manifest.json, palette.json")
-        .replace("Writes manifest.json, palette.mjs", "Writes manifest.json, palette.json")
-        .replace("(starter.mjs)", "(starter.rs)");
-    let mut out = markdown(&registry());
-    out = out.lines().filter(|l| !l.starts_with("| [`document migrate`]")).collect::<Vec<_>>().join("\n") + "\n";
-    let sentence = "; `document_migrate` (migrating the document is for a person, in Pixel Lab or with pixellab document migrate)";
-    out = out.replace(sentence, "");
-    if let Some(at) = out.find("#### document.migrate\n") {
-        let end = out[at + 1..].find("\n#### ").map(|i| at + 1 + i + 1).unwrap();
-        out.replace_range(at..end, "");
-    }
-    assert_eq!(out, docs, "docs/cli.md is out of date: run npm run docs:cli");
+    assert_eq!(markdown(&registry()), docs, "docs/cli.md is out of date: run npm run docs:cli");
 }

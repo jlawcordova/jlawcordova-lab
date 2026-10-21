@@ -26,28 +26,41 @@ pub fn to_rect_svg(scene: &Rendered, hex_of: &dyn Fn(&str) -> String) -> String 
         })
         .collect();
     let mut out = format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" aria-hidden=\"true\" viewBox=\"{}\" shape-rendering=\"crispEdges\">",
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" aria-hidden=\"true\" viewBox=\"{}\" shape-rendering=\"crispEdges\"",
         view_box.join(" ")
     );
+    // A compiled SVG names its scene, which its style's selectors start from (spec D7).
+    if let Some(scope) = &scene.scope {
+        let _ = write!(out, " data-pixellab=\"{}\"", escape(scope));
+    }
+    out.push('>');
     if let Some(style) = scene.style.as_deref().filter(|s| !s.is_empty()) {
         let _ = write!(out, "<style>{style}</style>");
     }
-    children(&scene.root, hex_of, &mut out);
+    children(&scene.root, hex_of, scene.scope.as_deref(), &mut out);
     out.push_str("</svg>");
     out
 }
 
-fn children(group: &Group, hex_of: &dyn Fn(&str) -> String, out: &mut String) {
+fn children(group: &Group, hex_of: &dyn Fn(&str) -> String, scope: Option<&str>, out: &mut String) {
     for child in &group.children {
         match child {
             Child::Layer(l) => layer(l, hex_of, out),
             Child::Group(g) => {
                 out.push_str("<g");
                 for (k, v) in &g.attrs {
-                    let _ = write!(out, " {k}=\"{}\"", escape(v));
+                    match scope {
+                        // The engine's own classes are the scene's (spec R15); a document's pass through.
+                        Some(scope) if g.generated && k == "class" => {
+                            let _ = write!(out, " {k}=\"{}--{}\"", escape(scope), escape(v));
+                        }
+                        _ => {
+                            let _ = write!(out, " {k}=\"{}\"", escape(v));
+                        }
+                    }
                 }
                 out.push('>');
-                children(g, hex_of, out);
+                children(g, hex_of, scope, out);
                 out.push_str("</g>");
             }
         }

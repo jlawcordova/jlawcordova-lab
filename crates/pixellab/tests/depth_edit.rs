@@ -658,7 +658,7 @@ fn pixels_that_change(s: &mut Session, name: &str) -> usize {
     let loaded = Ctx::new(s).sources().unwrap();
     let draw = |order: Order| {
         let rendered = render_scene(&loaded.sources, name, order).unwrap();
-        composite(&rendered.root, CompositeOptions { first_variant: true, frame: 0, time: Some(0.0) })
+        composite(&rendered.root, CompositeOptions { first_variant: true, frame: 0, time: Some(0.0), play: None })
     };
     let (was, now) = (draw(Order::List), draw(Order::Depth));
     now.iter().filter(|(p, c)| was.get(*p) != Some(*c)).count() + was.keys().filter(|p| !now.has(*p)).count()

@@ -331,6 +331,8 @@ fn every_command_is_well_formed_and_has_a_group() {
         "document.copy",
         "document.migrate", // new in the Rust program (R8); not in the Node registry
         "document.new",
+        "object.action",
+        "object.ambient",
         "object.animate",
         "object.erase",
         "object.fill",
@@ -350,6 +352,8 @@ fn every_command_is_well_formed_and_has_a_group() {
         "object.still",
         "proposal.apply",
         "proposal.reject",
+        "scene.action",
+        "scene.ambient",
         "scene.duplicate",
         "scene.group.set",
         "scene.key.delete",

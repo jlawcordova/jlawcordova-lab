@@ -422,7 +422,7 @@ impl Fx {
         let doc = common::make_document();
         let state = common::temp_dir("pixellab-state-");
         for (name, scene) in [("moving", moving()), ("still", still())] {
-            doc.write(&format!("scenes/{name}.json"), &engine::format::stringify_pretty(&scene));
+            doc.write(&format!("scenes/{name}.json"), &engine::format::serialize(&scene));
         }
         Fx { doc, state }
     }

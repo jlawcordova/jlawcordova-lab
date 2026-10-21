@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use engine::compile::{compile_all, drop_head, head_sources, scene_sizes};
+use engine::compile::{compile_all, compile_images, drop_head, head_sources, scene_images, scene_sizes};
 use engine::engine::{load_sources, validate, Sources};
 use engine::omap::OMap;
 use engine::preview::{encode_png, preview_colors, render_palette, render_preview, Target};
@@ -54,12 +54,29 @@ fn build_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
         )
         .into());
     };
-    // The files on disk, not anyone's unsaved working copies.
+    // The files on disk, not anyone's unsaved working copies. Images go to the
+    // manifest's publish.images, else to --dir when given.
+    let images_dir: Option<PathBuf> =
+        doc.images_dir.clone().or_else(|| opt_str(&params, "dir").filter(|d| !d.is_empty()).map(|_| out.clone()));
     let docs = doc.load_docs();
     let budgets = doc.budgets.clone();
     let sources = load_sources(docs.palette.unwrap_or(Value::Null), docs.objects, docs.scenes);
     let problems: Vec<String> = docs.load_errors.into_iter().chain(validate(&sources)).collect();
+    if problems.is_empty() && images_dir.is_none() && !scene_images(&sources).is_empty() {
+        return Err(CommandError::new(
+            "this document has no publish folder for images: add \"publish\": { \"images\": \"<folder>\" } to its manifest.json, or pass --dir <folder>",
+            "no_publish_dir",
+        )
+        .into());
+    }
     let r = compile_all(&sources, &problems, &out, &budgets)?;
+    let images = match (&images_dir, r.ok) {
+        (Some(dir), true) => {
+            let colors = preview_colors(doc.preview_card.as_deref(), doc.preview_grid.as_deref()).map_err(Error::Internal)?;
+            compile_images(&sources, dir, colors)?
+        }
+        _ => vec![],
+    };
     let unsaved: Vec<Value> = match ctx.session.as_deref() {
         Some(s) => s.list().into_iter().filter(|st| st["dirty"] == json!(true)).map(|st| st["doc"].clone()).collect(),
         None => vec![],
@@ -67,19 +84,28 @@ fn build_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let outputs: Vec<Value> = r
         .outputs
         .iter()
-        .map(|o| json!({ "file": o.file, "scene": o.scene, "raw": o.raw, "gzip": o.gzip, "over": o.over, "report": o.report }))
+        .map(|o| {
+            json!({ "file": o.file, "scene": o.scene, "kind": "svg", "raw": o.raw, "gzip": o.gzip, "over": o.over, "report": o.report, "warnings": o.warnings })
+        })
+        .collect();
+    let outputs: Vec<Value> = outputs
+        .into_iter()
+        .chain(images.iter().map(|i| json!({ "file": i.file, "scene": i.scene, "kind": "png", "raw": i.raw, "warnings": [] })))
         .collect();
     let preview_only: Vec<Value> = r
         .preview_only
         .iter()
-        .map(|p| json!({ "scene": p.scene, "raw": p.raw, "gzip": p.gzip, "over": p.over, "report": p.report }))
+        .map(|p| json!({ "scene": p.scene, "raw": p.raw, "gzip": p.gzip, "over": p.over, "report": p.report, "warnings": p.warnings }))
         .collect();
+    // Every output's warnings in one list, "<file>: <warning>" (R4).
+    let warnings: Vec<String> = r.outputs.iter().flat_map(|o| o.warnings.iter().map(move |w| format!("{}: {w}", o.file))).collect();
     Ok(Value::Object(obj(vec![
         ("ok", json!(r.ok)),
         ("publishDir", json!(path_text(&out))),
         ("outputs", Value::Array(outputs)),
         ("previewOnly", Value::Array(preview_only)),
         ("problems", json!(r.problems)),
+        ("warnings", json!(warnings)),
         ("ms", json!(started.elapsed().as_millis() as u64)),
         ("unsaved", Value::Array(unsaved)),
     ])))
@@ -93,7 +119,11 @@ fn build_format(r: &Value, _: &Params) -> String {
     let list = |k: &str| r[k].as_array().cloned().unwrap_or_default();
     let mut lines: Vec<String> = Vec::new();
     for o in list("outputs") {
-        lines.push(format!("{}: {}", str_of(o.get("file")), str_of(o.get("report"))));
+        if o["kind"] == "png" {
+            lines.push(format!("{}: PNG, {} bytes", str_of(o.get("file")), str_of(o.get("raw"))));
+        } else {
+            lines.push(format!("{}: {}", str_of(o.get("file")), str_of(o.get("report"))));
+        }
     }
     for p in list("previewOnly") {
         lines.push(format!("{} (preview only, not written): {}", str_of(p.get("scene")), str_of(p.get("report"))));
@@ -103,11 +133,9 @@ fn build_format(r: &Value, _: &Params) -> String {
     let outputs = list("outputs").len();
     if !problems.is_empty() {
         lines.push(format!("{}; nothing written.", plural(problems.len(), "problem")));
-    } else if r["ok"] == json!(true) {
+    } else {
         let secs = engine::jsnum::to_fixed(r["ms"].as_f64().unwrap_or(0.0) / 1000.0, 1);
         lines.push(format!("published {} to {} in {secs} s", plural(outputs, "file"), str_of(r.get("publishDir"))));
-    } else {
-        lines.push(format!("published {} to {}, but some are OVER BUDGET", plural(outputs, "file"), str_of(r.get("publishDir"))));
     }
     let unsaved = list("unsaved");
     if !unsaved.is_empty() {
@@ -260,6 +288,8 @@ fn sizes_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     };
     let head_objects = before.as_ref().map(object_rows);
     let head_colors = before.as_ref().map(color_rows);
+    let budget = engine::compile::scene_budget(sources, &target.name, &ctx.document()?.budgets);
+    let warnings = engine::compile::budget_warnings(budget, now.raw, now.gzip);
     Ok(Value::Object(obj(vec![
         ("scene", json!(target.name)),
         ("output", output),
@@ -267,6 +297,7 @@ fn sizes_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
         ("head", head_value),
         ("objects", Value::Array(rows(&object_rows(&now), head_objects.as_ref(), "object"))),
         ("colors", Value::Array(rows(&color_rows(&now), head_colors.as_ref(), "color"))),
+        ("warnings", json!(warnings)),
     ])))
 }
 
@@ -361,6 +392,8 @@ fn sizes_format(r: &Value, _: &Params) -> String {
     let colors = r["colors"].as_array().cloned().unwrap_or_default();
     table(&mut lines, "object", "Bytes each object adds (the scene compiled without it), against HEAD:", &objects, true);
     table(&mut lines, "color", "Bytes each color's path takes, against HEAD:", &colors, false);
+    let warnings = r["warnings"].as_array().cloned().unwrap_or_default();
+    lines.extend(warnings.iter().map(|w| format!("warning: {}: {}", str_of(r.get("scene")), str_of(Some(w)))));
     lines.join("\n")
 }
 
@@ -375,9 +408,11 @@ pub fn commands() -> Vec<Command> {
     );
     build.description = Some(concat!(
         "Validates the document's files on disk (unsaved working copies aren't in it; unsaved lists them), renders each scene with an `output` to a rect SVG, ",
-        "merges each color group into one <path>, checks the result lossless and within its budget (100 KB raw / 25 KB gzip, or the manifest's), and writes <publish dir>/<output>. ",
+        "merges each color group into one <path>, checks the result lossless, and writes <publish dir>/<output>. ",
+        "A scene with an `image` is also rendered on the preview card color to a PNG, written to the manifest's publish.images (else --dir). ",
+        "Over the budget (100 KB raw / 25 KB gzip, or the manifest's) is a warning, never a failure: the SVG is still written and the result is still ok. ",
         "The publish folder is the manifest's publish.dir (relative to the document), or --dir; with neither it refuses. Nothing is written when any source has a problem. ",
-        "Returns { ok, publishDir, outputs: [{ file, scene, raw, gzip, over, report }], previewOnly: [{ scene, raw, gzip, over, report }], problems, ms, unsaved }."
+        "Returns { ok, publishDir, outputs: [{ file, scene, kind (svg or png), raw, gzip, over, report, warnings }], previewOnly: [{ scene, raw, gzip, over, report, warnings }], problems, warnings (each \"<file>: <warning>\"), ms, unsaved }; a PNG has no gzip, over or report."
     ));
     build.writes_direct = true;
     build.examples = vec!["pixellab art build", "pixellab art build --dir ~/Desktop/art"];

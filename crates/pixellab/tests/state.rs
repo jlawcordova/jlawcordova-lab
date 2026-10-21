@@ -134,7 +134,7 @@ fn proposal_numbering_carries_on_across_writes_and_a_rewrite_keeps_its_number() 
     assert_eq!(b["number"], 2);
     // key order: id, number, then the proposal's own keys
     let keys: Vec<&String> = a.as_object().unwrap().keys().collect();
-    assert_eq!(keys, ["id", "number", "baseHash", "source", "summary", "agent", "doc", "createdAt"]);
+    assert_eq!(keys, ["id", "number", "format", "baseHash", "source", "summary", "agent", "doc", "createdAt"]);
     let again = state.write_proposal(&base("20261019-112830-aaaaaa", "scene:a2", "2026-10-19T11:28:30.100Z")).unwrap();
     assert_eq!(again["number"], 1);
     assert_eq!(state.number_of("20261019-112830-aaaaaa"), Some(1));

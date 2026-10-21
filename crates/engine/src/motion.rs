@@ -324,7 +324,7 @@ pub fn shown_items(items: &[Value]) -> Vec<Value> {
         .collect()
 }
 
-fn px(v: f64) -> String {
+pub(crate) fn px(v: f64) -> String {
     if v == 0.0 {
         "0".into()
     } else {
@@ -338,7 +338,7 @@ pub fn pct_of(t: f64, duration: f64) -> f64 {
     jsnum::fixed((t / duration) * 100.0, 3)
 }
 
-fn pct(t: f64, duration: f64) -> String {
+pub(crate) fn pct(t: f64, duration: f64) -> String {
     format!("{}%", jsnum::to_string(pct_of(t, duration)))
 }
 
@@ -461,9 +461,89 @@ fn copy_stops(windows: &[(f64, f64)]) -> Vec<(f64, bool)> {
 /// item id in the order they were found, the copies of each item drawn in
 /// several places.
 pub fn motion_css(motion: &Value, ids: &OMap<String, Value>, copies: &OMap<String, Vec<Copy>>) -> String {
+    let rules = motion_rules(motion, ids, copies, None);
+    if rules.is_empty() {
+        return String::new();
+    }
+    rules.concat() + "@media (prefers-reduced-motion:reduce){[class^=\"mv-\"],[class*=\" mv-\"]{animation:none}}"
+}
+
+/// A frame loop a scene plays: its class, its frames' class prefix, and how
+/// many frames its art has.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FrameLoop {
+    pub name: String,
+    pub prefix: String,
+    pub frames: usize,
+}
+
+/// The rules that play a frame loop in a compiled SVG (spec R11, D7), as
+/// pixel-art.css plays the site's loops: its cycle (`LOOP_CYCLES`, else 200
+/// ms a frame) over its frame count (`SITE_LOOPS`, else the art's), frame
+/// `k` shown from `k / n` of the cycle.
+fn frame_loop_rules(scope: &str, l: &FrameLoop) -> Vec<String> {
+    let n = SITE_LOOPS.iter().find(|s| s.name == l.name).map_or(l.frames, |s| s.frames).max(1);
+    let cycle = LOOP_CYCLES.iter().find(|(name, _)| *name == l.name).map_or(200.0 * n as f64, |(_, c)| *c);
+    let at = format!("[data-pixellab=\"{scope}\"] .{}", l.name);
+    let mut rules = vec![
+        format!("@keyframes {scope}--{}{{0%{{opacity:1}}{}{{opacity:0}}100%{{opacity:0}}}}", l.name, pct(cycle / n as f64, cycle)),
+        format!("{at}{{opacity:0;animation:{scope}--{} {}ms step-end infinite}}", l.name, jsnum::to_string(cycle)),
+    ];
+    for k in 1..l.frames {
+        let delay = cycle * (n as f64 - k as f64) / n as f64;
+        rules.push(format!("{at}.{}{k}{{animation-delay:-{}ms}}", l.prefix, jsnum::to_string(delay)));
+    }
+    rules
+}
+
+/// A compiled SVG's whole `<style>` (spec D7): the scene's motion with its
+/// names scoped to `scope`, its elements' ambient loops and actions, its
+/// frame loops, and one reduced-motion rule that stops them all and shows
+/// each loop's first frame. Empty when the scene plays nothing.
+pub fn scene_css(
+    scope: &str,
+    motion: Option<(&Value, &OMap<String, Value>, &OMap<String, Vec<Copy>>)>,
+    loops: &[FrameLoop],
+    elements: &[std::rc::Rc<crate::ambient::Moves>],
+) -> String {
+    let mut rules = motion.map(|(m, ids, copies)| motion_rules(m, ids, copies, Some(scope))).unwrap_or_default();
+    rules.extend(crate::ambient::elements_css(scope, elements));
+    let generated = !rules.is_empty();
+    for l in loops {
+        rules.extend(frame_loop_rules(scope, l));
+    }
+    if rules.is_empty() {
+        return String::new();
+    }
+    let at = format!("[data-pixellab=\"{scope}\"]");
+    let mut stop: Vec<String> = Vec::new();
+    if generated {
+        stop.push(format!("{at} [class*=\"{scope}--\"]"));
+    }
+    stop.extend(loops.iter().map(|l| format!("{at} .{}", l.name)));
+    let mut reduced = format!("{}{{animation:none}}", stop.join(","));
+    if !loops.is_empty() {
+        let first: Vec<String> = loops.iter().map(|l| format!("{at} .{}.{}0", l.name, l.prefix)).collect();
+        reduced.push_str(&format!("{}{{opacity:1}}", first.join(",")));
+    }
+    rules.push(format!("@media (prefers-reduced-motion:reduce){{{reduced}}}"));
+    rules.concat()
+}
+
+/// The motion rules, unscoped as the Node CLI wrote them, or with every
+/// generated name `<scope>--…` and every selector under `[data-pixellab]`.
+fn motion_rules(motion: &Value, ids: &OMap<String, Value>, copies: &OMap<String, Vec<Copy>>, scope: Option<&str>) -> Vec<String> {
+    let named = |name: &str| match scope {
+        Some(s) => format!("{s}--{name}"),
+        None => name.to_string(),
+    };
+    let sel = |name: &str| match scope {
+        Some(s) => format!("[data-pixellab=\"{s}\"] .{s}--{name}"),
+        None => format!(".{name}"),
+    };
     let duration = motion.get("duration").and_then(Value::as_f64).unwrap_or(f64::NAN);
     let ms = jsnum::to_string(duration);
-    let run = |name: &str, timing: &str| format!("animation:{name} {ms}ms {timing} infinite");
+    let run = |name: &str, timing: &str| format!("animation:{} {ms}ms {timing} infinite", named(name));
     let mut rules: Vec<String> = Vec::new();
     for track in motion.get("tracks").and_then(Value::as_array).into_iter().flatten() {
         let id = js_string(track.get("item"));
@@ -489,19 +569,19 @@ pub fn motion_css(motion: &Value, ids: &OMap<String, Value>, copies: &OMap<Strin
                     format!("{}{{transform:translate({},{}){timing}}}", pct(key.t, duration), px(key.moved[0] - rx), px(key.moved[1] - ry))
                 })
                 .collect();
-            rules.push(format!("@keyframes {cls}{{{}}}", frames.concat()));
-            animations.push(format!("{cls} {ms}ms step-end infinite"));
+            rules.push(format!("@keyframes {}{{{}}}", named(&cls), frames.concat()));
+            animations.push(format!("{} {ms}ms step-end infinite", named(&cls)));
         }
         if shows {
             let frames: Vec<String> =
                 keys.iter().map(|k| format!("{}{{opacity:{}}}", pct(k.t, duration), if k.show { 1 } else { 0 })).collect();
-            rules.push(format!("@keyframes {cls}-s{{{}}}", frames.concat()));
-            animations.push(format!("{cls}-s {ms}ms step-end infinite"));
+            rules.push(format!("@keyframes {}-s{{{}}}", named(&cls), frames.concat()));
+            animations.push(format!("{}-s {ms}ms step-end infinite", named(&cls)));
         }
         let base = if keys[0].show { "" } else { "opacity:0;" };
         if !animations.is_empty() || !base.is_empty() {
             let anim = if animations.is_empty() { String::new() } else { format!("animation:{}", animations.join(",")) };
-            rules.push(format!(".{cls}{{{base}{anim}}}"));
+            rules.push(format!("{}{{{base}{anim}}}", sel(&cls)));
         }
         let poses = poses_of(track, &object);
         if poses.len() > 1 {
@@ -511,8 +591,13 @@ pub fn motion_css(motion: &Value, ids: &OMap<String, Value>, copies: &OMap<Strin
                     .iter()
                     .map(|key| format!("{}{{opacity:{}}}", pct(key.t, duration), if key.pose == *pose { 1 } else { 0 }))
                     .collect();
-                rules.push(format!("@keyframes {name}{{{}}}", frames.concat()));
-                rules.push(format!(".{name}{{{}{}}}", if keys[0].pose == *pose { "" } else { "opacity:0;" }, run(&name, "step-end")));
+                rules.push(format!("@keyframes {}{{{}}}", named(&name), frames.concat()));
+                rules.push(format!(
+                    "{}{{{}{}}}",
+                    sel(&name),
+                    if keys[0].pose == *pose { "" } else { "opacity:0;" },
+                    run(&name, "step-end")
+                ));
             }
         }
         if let Some(list) = copies.get(&id) {
@@ -522,14 +607,10 @@ pub fn motion_css(motion: &Value, ids: &OMap<String, Value>, copies: &OMap<Strin
                     .iter()
                     .map(|(at, on)| format!("{}%{{opacity:{}}}", jsnum::to_string(*at), if *on { 1 } else { 0 }))
                     .collect();
-                rules.push(format!("@keyframes {name}{{{}}}", frames.concat()));
-                rules.push(format!(".{name}{{{}{}}}", if k == 0 { "" } else { "opacity:0;" }, run(&name, "step-end")));
+                rules.push(format!("@keyframes {}{{{}}}", named(&name), frames.concat()));
+                rules.push(format!("{}{{{}{}}}", sel(&name), if k == 0 { "" } else { "opacity:0;" }, run(&name, "step-end")));
             }
         }
     }
-    if rules.is_empty() {
-        return String::new();
-    }
-    rules.push("@media (prefers-reduced-motion:reduce){[class^=\"mv-\"],[class*=\" mv-\"]{animation:none}}".into());
-    rules.concat()
+    rules
 }

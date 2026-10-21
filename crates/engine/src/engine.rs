@@ -14,6 +14,7 @@ use std::rc::Rc;
 
 use serde_json::{Map, Value};
 
+use crate::ambient::{self, Moves};
 use crate::depth::{self, Bounds, Box3, Copy, Mark, Node};
 use crate::iso::{self, Pixel, TILE_H, TILE_W};
 use crate::motion;
@@ -350,7 +351,7 @@ const OBJECT_PROPS: [&str; 8] = ["notes", "kind", "extends", "anchor", "footprin
 const BLOCK_PROPS: [&str; 6] = ["notes", "kind", "size", "faces", "surface", "sides"];
 const SIDES_PROPS: [&str; 3] = ["keys", "left", "right"];
 const FACES: [&str; 4] = ["top", "left", "right", "edge"];
-const MAP_LAYER_PROPS: [&str; 2] = ["class", "map"];
+const MAP_LAYER_PROPS: [&str; 4] = ["class", "map", "ambient", "actions"];
 const FRAME_LAYER_PROPS: [&str; 3] = ["loop", "prefix", "frames"];
 
 fn is_string_list(v: &Value) -> bool {
@@ -488,6 +489,7 @@ fn validate_object_shape(sources: &Sources, name: &str, problems: &mut Vec<Strin
             if has(l, "class") && !l.get("class").and_then(Value::as_str).is_some_and(is_class_list) {
                 add(format!("{place}: class must be lowercase class names separated by single spaces"));
             }
+            ambient::validate(&place, l, &mut add);
             vec![l.get("map")]
         };
         for (fi, map) in layer_maps.into_iter().enumerate() {
@@ -795,7 +797,31 @@ fn extends_chain(sources: &Sources, name: &str) -> (Vec<String>, bool) {
 }
 
 const DEPTHS: [&str; 2] = ["front", "back"];
-const SCENE_PROPS: [&str; 7] = ["notes", "output", "viewBox", "origin", "layers", "items", "motion"];
+const SCENE_PROPS: [&str; 8] = ["notes", "output", "image", "viewBox", "origin", "layers", "items", "motion"];
+const IMAGE_PROPS: [&str; 2] = ["file", "scale"];
+
+/// `image: { file: "name.png", scale: 1..16 }` (R18, D5).
+fn validate_image(image: Option<&Value>, add: &mut dyn FnMut(String)) {
+    let Some(i) = image.and_then(Value::as_object) else {
+        return add("image must be { file: \"<name>.png\", scale: <1 to 16> }".into());
+    };
+    for key in keys(i) {
+        if !IMAGE_PROPS.contains(&key.as_str()) {
+            add(format!("image: unknown property {}", qs(key)));
+        }
+    }
+    let plain = |f: &str| {
+        f.strip_suffix(".png")
+            .is_some_and(|stem| !stem.is_empty() && stem.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+    };
+    if !i.get("file").and_then(Value::as_str).is_some_and(plain) {
+        add("image.file must be a plain file name ending in .png".into());
+    }
+    if has(i, "scale") && !i.get("scale").is_some_and(|v| is_int(v) && (1.0..=16.0).contains(&v.as_f64().unwrap_or(0.0))) {
+        add("image.scale must be a whole number from 1 to 16".into());
+    }
+}
+
 const LAYER_PROPS: [&str; 3] = ["id", "name", "parent"];
 
 /// A scene's layers: returns the ids of the valid ones.
@@ -882,6 +908,9 @@ fn validate_scene(sources: &Sources, name: &str, outputs: &mut HashMap<String, S
             _ => add("output must be a kebab-case file name ending in .svg".into()),
         }
     }
+    if has(s, "image") {
+        validate_image(s.get("image"), &mut add);
+    }
     let vb = s.get("viewBox");
     if !is_whole(vb, 4) || num_at(vb.unwrap(), 2) <= 0.0 || num_at(vb.unwrap(), 3) <= 0.0 {
         add("viewBox must be four whole numbers: x, y, width, height (width and height above 0)".into());
@@ -897,6 +926,58 @@ fn validate_scene(sources: &Sources, name: &str, outputs: &mut HashMap<String, S
         motion::validate_motion(sources, scene, &mut add);
         validate_copy_classes(sources, name, scene, &mut add);
     }
+    validate_scene_moves(sources, scene, items, &mut add);
+}
+
+/// D6 across a scene: an item with scene motion can't also have an ambient
+/// loop (their transforms would fight), and an action's name plays one move
+/// in a scene, since its keyframes are `<scene>--<action>`.
+fn validate_scene_moves(sources: &Sources, scene: &Value, items: &[Value], add: &mut dyn FnMut(String)) {
+    let tracked: HashSet<String> = tracks_of(scene).keys().cloned().collect();
+    let mut actions: Vec<(String, ambient::Action, String)> = Vec::new();
+    let mut note =
+        |name: &str, action: &ambient::Action, place: String, add: &mut dyn FnMut(String)| match actions.iter().find(|(n, _, _)| n == name)
+        {
+            Some((_, other, at)) if other != action => {
+                add(format!("action '{name}' plays one move on {at} and another on {place}; one name is one move in a scene"))
+            }
+            Some(_) => {}
+            None => actions.push((name.to_string(), action.clone(), place)),
+        };
+    fn walk(
+        sources: &Sources,
+        list: &[Value],
+        path: &str,
+        tracked: &HashSet<String>,
+        note: &mut dyn FnMut(&str, &ambient::Action, String, &mut dyn FnMut(String)),
+        add: &mut dyn FnMut(String),
+    ) {
+        for (i, item) in list.iter().enumerate() {
+            let place = format!("{path}[{i}]");
+            if item.get("group").is_some() {
+                let inner = item.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
+                walk(sources, &inner, &format!("{place}.items"), tracked, note, add);
+                continue;
+            }
+            if item.get("ambient").is_some() && item.get("id").and_then(track_key).is_some_and(|k| tracked.contains(&k)) {
+                add(format!("{place}: has scene motion and an ambient loop; their moves would fight, so give it one of them"));
+            }
+            if let Some(m) = ambient::moves_of(item) {
+                for (name, a) in &m.actions {
+                    note(name, a, place.clone(), add);
+                }
+            }
+            let object = js_string(item.get("object"));
+            if let Ok(obj) = resolve(sources, &object) {
+                for (li, m) in obj.layer_moves.iter().enumerate() {
+                    for (name, a) in m.iter().flat_map(|m| m.actions.iter()) {
+                        note(name, a, format!("{object}'s layer {li}"), add);
+                    }
+                }
+            }
+        }
+    }
+    walk(sources, items, "items", &tracked, &mut note, add);
 }
 
 /// `^(.+)-z(\d+)$`.
@@ -986,13 +1067,14 @@ fn validate_items(
             continue;
         }
         for key in keys(it) {
-            if !["object", "id", "class", "layer", "depth", "at"].contains(&key.as_str()) {
+            if !["object", "id", "class", "layer", "depth", "at", "ambient", "actions"].contains(&key.as_str()) {
                 add(format!("{place}: unknown property {}", qs(key)));
             }
         }
         if has(it, "depth") && !it["depth"].as_str().is_some_and(|d| DEPTHS.contains(&d)) {
             add(format!("{place}: depth must be 'front' or 'back'"));
         }
+        ambient::validate(&place, it, add);
         if has(it, "layer") && !it["layer"].as_str().is_some_and(|l| layers.contains(l)) {
             add(format!("{place}: layer {} is no layer of this scene", q(it.get("layer"))));
         }
@@ -1078,6 +1160,8 @@ pub struct Resolved {
     /// Key → color name, in the order the keys paint.
     pub keys: OMap<String, String>,
     pub layers: Vec<SpriteLayer>,
+    /// Each layer's ambient loop and actions (D6), beside `layers`.
+    pub layer_moves: Vec<Option<Rc<Moves>>>,
     pub width: i64,
     pub height: i64,
 }
@@ -1146,6 +1230,7 @@ fn resolve_seen(sources: &Sources, name: &str, seen: &[String]) -> Result<Resolv
             .iter()
             .map(|l| sprite_layer(name, l))
             .collect::<Result<Vec<_>>>()?;
+        let layer_moves = obj.get("layers").and_then(Value::as_array).into_iter().flatten().map(ambient::moves_of).collect();
         let first = layers.first().ok_or_else(|| shape_error(name, "it has no layers"))?;
         let first = layer_maps(first).first().map(|m| (*m).clone()).unwrap_or_default();
         let width = first.first().map_or(0, |r| js_len(r)) as i64;
@@ -1157,6 +1242,7 @@ fn resolve_seen(sources: &Sources, name: &str, seen: &[String]) -> Result<Resolv
             footprint: own_footprint(obj).unwrap_or([1, 1]),
             keys: string_record(obj.get("keys")),
             layers,
+            layer_moves,
             width,
             height: first.len() as i64,
         });
@@ -1200,6 +1286,7 @@ fn resolve_seen(sources: &Sources, name: &str, seen: &[String]) -> Result<Resolv
         footprint: own_footprint(obj).unwrap_or(base.footprint),
         keys: js_ordered(keys),
         layers,
+        layer_moves: base.layer_moves.clone(),
         width: base.width,
         height: base.height,
     })
@@ -1234,6 +1321,7 @@ fn resolve_block(name: &str, obj: &Value) -> Result<Resolved> {
         footprint: [size[0], size[1]],
         keys: string_record(surface.and_then(|s| s.get("keys"))),
         layers,
+        layer_moves: vec![],
         width,
         height,
     })
@@ -1372,6 +1460,13 @@ pub struct Group {
     pub frames: Option<usize>,
     pub hidden: bool,
     pub children: Vec<Child>,
+    /// A group the engine made to play motion (a moving item, a pose, a
+    /// copy, an element with ambient loops or actions): a compiled SVG
+    /// scopes its class to the scene (spec R15).
+    pub generated: bool,
+    /// What the element this group draws plays (D6): renders at a time move
+    /// it, and a compiled SVG plays it.
+    pub moves: Option<Rc<Moves>>,
 }
 
 /// A group's child: paint, or a group.
@@ -1382,11 +1477,14 @@ pub enum Child {
 }
 
 /// A rendered scene: its viewBox, its tree, and its motion's CSS.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Rendered {
     pub view_box: Vec<Value>,
     pub root: Group,
     pub style: Option<String>,
+    /// The scene a compiled SVG is scoped to (`data-pixellab`, spec D7), or
+    /// None for the unscoped output (`render_scene`).
+    pub scope: Option<String>,
 }
 
 /// The order a scene's items paint in: depth order, or as the file lists
@@ -1416,16 +1514,34 @@ fn open_layer(group: &mut Group) -> &mut Layer {
 
 /// Interns color names, so every pixel of one color shares its name.
 #[derive(Default)]
-struct Names(HashMap<String, ColorName>);
+struct Names {
+    colors: HashMap<String, ColorName>,
+    /// The elements with ambient loops or actions drawn so far, each once:
+    /// element `n` (from 1) has the class `a<n>`.
+    elements: Vec<Rc<Moves>>,
+}
 
 impl Names {
     fn get(&mut self, name: &str) -> ColorName {
-        if let Some(n) = self.0.get(name) {
+        if let Some(n) = self.colors.get(name) {
             return n.clone();
         }
         let n: ColorName = Rc::from(name);
-        self.0.insert(name.to_string(), n.clone());
+        self.colors.insert(name.to_string(), n.clone());
         n
+    }
+
+    /// The group an element with these moves draws into (`a<n>`, the same
+    /// for every element that plays the same).
+    fn element(&mut self, moves: &Rc<Moves>) -> Group {
+        let n = match self.elements.iter().position(|m| **m == **moves) {
+            Some(i) => i + 1,
+            None => {
+                self.elements.push(moves.clone());
+                self.elements.len()
+            }
+        };
+        Group { attrs: vec![("class".into(), format!("a{n}"))], generated: true, moves: Some(moves.clone()), ..Group::default() }
     }
 }
 
@@ -1473,6 +1589,8 @@ fn frame_group(loop_name: &str, prefix: &str, i: usize, count: usize, layer: Lay
         frames: Some(count),
         hidden: false,
         children: vec![Child::Layer(layer)],
+        generated: false,
+        moves: None,
     })
 }
 
@@ -1541,23 +1659,39 @@ fn draw(obj: &Resolved, ox: i32, oy: i32, group: &mut Group, names: &mut Names) 
     if let Some(block) = &obj.block {
         return draw_block(block, &obj.keys, ox, oy, group, names);
     }
-    for layer in &obj.layers {
-        match layer {
-            SpriteLayer::Frames { loop_name, prefix, frames } => {
+    for (li, layer) in obj.layers.iter().enumerate() {
+        let moves = obj.layer_moves.get(li).cloned().flatten();
+        match (layer, moves) {
+            (SpriteLayer::Frames { loop_name, prefix, frames }, _) => {
                 for (i, map) in frames.iter().enumerate() {
                     let mut out = Layer::default();
                     paint(&mut out, map, &obj.keys, (ox, oy), None, names);
                     group.children.push(frame_group(loop_name, prefix, i, frames.len(), out));
                 }
             }
-            SpriteLayer::Map { class: Some(class), map } => {
+            // A map layer that plays an ambient loop or actions draws into its element (D6).
+            (SpriteLayer::Map { class, map }, Some(moves)) => {
+                let mut out = Layer::default();
+                paint(&mut out, map, &obj.keys, (ox, oy), None, names);
+                let mut element = names.element(&moves);
+                element.children.push(Child::Layer(out));
+                match class {
+                    Some(class) => {
+                        let mut g = class_group(class.clone());
+                        g.children.push(Child::Group(element));
+                        group.children.push(Child::Group(g));
+                    }
+                    None => group.children.push(Child::Group(element)),
+                }
+            }
+            (SpriteLayer::Map { class: Some(class), map }, None) => {
                 let mut out = Layer::default();
                 paint(&mut out, map, &obj.keys, (ox, oy), None, names);
                 let mut g = class_group(class.clone());
                 g.children.push(Child::Layer(out));
                 group.children.push(Child::Group(g));
             }
-            SpriteLayer::Map { class: None, map } => paint(open_layer(group), map, &obj.keys, (ox, oy), None, names),
+            (SpriteLayer::Map { class: None, map }, None) => paint(open_layer(group), map, &obj.keys, (ox, oy), None, names),
         }
     }
     Ok(())
@@ -2011,6 +2145,13 @@ fn items_of(scene: &Value) -> Vec<Value> {
 /// frame loops (`renderScene`). Every list of items paints in depth order,
 /// back to front; a scene with motion also returns the CSS that plays it.
 pub fn render_scene(sources: &Sources, name: &str, order: Order) -> Result<Rendered> {
+    render_scene_with(sources, name, order, None)
+}
+
+/// `render_scene`, scoped to `scope` for a compiled SVG (spec D7): the
+/// style plays the motion and the frame loops under `[data-pixellab]`, with
+/// generated names `<scope>--…`, and a scene with nothing to play has none.
+pub fn render_scene_with(sources: &Sources, name: &str, order: Order, scope: Option<&str>) -> Result<Rendered> {
     let scene = scene_or_err(sources, name)?;
     let mut root = Group::default();
     let tracks = tracks_of(scene);
@@ -2030,12 +2171,39 @@ pub fn render_scene(sources: &Sources, name: &str, order: Order) -> Result<Rende
     let mut names = Names::default();
     place_items(sources, &list, &mut root, origin, &tracks, &mut names)?;
     let view_box = scene.get("viewBox").and_then(Value::as_array).cloned().unwrap_or_default();
-    if tracks.is_empty() {
-        return Ok(Rendered { view_box, root, style: None });
-    }
     let ids = motion::items_by_id(scene.get("items").unwrap_or(&Value::Null));
-    let style = motion::motion_css(scene.get("motion").unwrap_or(&Value::Null), &ids, &copies);
-    Ok(Rendered { view_box, root, style: Some(style) })
+    let motion = scene.get("motion").unwrap_or(&Value::Null);
+    if let Some(scope) = scope {
+        let mut loops = Vec::new();
+        frame_loops(&root, &mut loops);
+        let style = motion::scene_css(scope, if tracks.is_empty() { None } else { Some((motion, &ids, &copies)) }, &loops, &names.elements);
+        return Ok(Rendered { view_box, root, style: Some(style).filter(|s| !s.is_empty()), scope: Some(scope.to_string()) });
+    }
+    if tracks.is_empty() {
+        return Ok(Rendered { view_box, root, style: None, scope: None });
+    }
+    let style = motion::motion_css(motion, &ids, &copies);
+    Ok(Rendered { view_box, root, style: Some(style), scope: None })
+}
+
+/// The frame loops a tree plays, in the order they first appear: (loop, frame class prefix, frame count).
+fn frame_loops(group: &Group, out: &mut Vec<motion::FrameLoop>) {
+    for child in &group.children {
+        if let Child::Group(g) = child {
+            if let (Some(frame), Some(count)) = (g.frame, g.frames) {
+                let class = g.attrs.iter().find(|(k, _)| k == "class").map(|(_, v)| v.as_str()).unwrap_or("");
+                let mut words = class.split(' ');
+                let name = words.next().unwrap_or("").to_string();
+                let word = words.next().unwrap_or("");
+                let prefix = word.strip_suffix(frame.to_string().as_str()).unwrap_or(word).to_string();
+                match out.iter_mut().find(|l| l.name == name) {
+                    Some(l) => l.frames = l.frames.max(count),
+                    None => out.push(motion::FrameLoop { name, prefix, frames: count }),
+                }
+            }
+            frame_loops(g, out);
+        }
+    }
 }
 
 /// Every item that moves among others into several places of the depth
@@ -2157,7 +2325,7 @@ fn place_items(
     for e in list {
         match e {
             Entry::Copy(class, inner) => {
-                let mut copy = class_group(class.clone());
+                let mut copy = Group { generated: true, ..class_group(class.clone()) };
                 place_items(sources, std::slice::from_ref(inner), &mut copy, origin, tracks, names)?;
                 group.children.push(Child::Group(copy));
             }
@@ -2177,6 +2345,22 @@ fn place_items(
 }
 
 fn place_item(
+    sources: &Sources,
+    item: &Value,
+    group: &mut Group,
+    origin: [f64; 2],
+    tracks: &OMap<String, Value>,
+    names: &mut Names,
+) -> Result<()> {
+    // An item that plays an ambient loop or actions draws into its element (D6).
+    let Some(moves) = ambient::moves_of(item) else { return place_item_art(sources, item, group, origin, tracks, names) };
+    let mut element = names.element(&moves);
+    place_item_art(sources, item, &mut element, origin, tracks, names)?;
+    group.children.push(Child::Group(element));
+    Ok(())
+}
+
+fn place_item_art(
     sources: &Sources,
     item: &Value,
     group: &mut Group,
@@ -2205,14 +2389,19 @@ fn place_item(
     let rest = motion::filled_keys(track, &object).into_iter().next().ok_or_else(|| EngineError("a track has no keys".into()))?;
     x += rest.moved[0];
     y += rest.moved[1];
-    let mut moving = Group { attrs: vec![("class".into(), motion::motion_class(&id))], hidden: !rest.show, ..Group::default() };
+    let mut moving =
+        Group { attrs: vec![("class".into(), motion::motion_class(&id))], hidden: !rest.show, generated: true, ..Group::default() };
     let poses = motion::poses_of(track, &object);
     if poses.len() == 1 {
         draw_into(&object, &mut moving, x, y, names)?;
     } else {
         for (k, pose) in poses.iter().enumerate() {
-            let mut posed =
-                Group { attrs: vec![("class".into(), motion::pose_class(&id, k))], hidden: *pose != rest.pose, ..Group::default() };
+            let mut posed = Group {
+                attrs: vec![("class".into(), motion::pose_class(&id, k))],
+                hidden: *pose != rest.pose,
+                generated: true,
+                ..Group::default()
+            };
             draw_into(pose, &mut posed, x, y, names)?;
             moving.children.push(Child::Group(posed));
         }
@@ -2233,11 +2422,14 @@ pub fn render_object(sources: &Sources, name: &str) -> Result<Group> {
 
 /// What `composite` shows: only the first of each run of variant groups,
 /// each loop on `frame`, or on the frame it shows at `time`.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct CompositeOptions {
     pub first_variant: bool,
     pub frame: usize,
     pub time: Option<f64>,
+    /// An action playing, and ms into it (D6): at a `time`, its elements take
+    /// its move instead of their ambient loop.
+    pub play: Option<(String, f64)>,
 }
 
 /// Flattens a tree to what shows (`composite`): pixel → color name, later
@@ -2246,12 +2438,12 @@ pub fn composite(root: &Group, options: CompositeOptions) -> OMap<Pixel, ColorNa
     fn is_variant(c: &Child) -> bool {
         matches!(c, Child::Group(g) if g.attrs.iter().any(|(k, _)| k == "data-class"))
     }
-    fn walk(group: &Group, options: &CompositeOptions, out: &mut OMap<Pixel, ColorName>) {
+    fn walk(group: &Group, options: &CompositeOptions, shift: Pixel, out: &mut OMap<Pixel, ColorName>) {
         for (i, child) in group.children.iter().enumerate() {
             match child {
                 Child::Layer(l) => {
-                    for (p, color) in l.pixels.iter() {
-                        out.set(*p, color.clone());
+                    for ((x, y), color) in l.pixels.iter() {
+                        out.set((x + shift.0, y + shift.1), color.clone());
                     }
                 }
                 Child::Group(g) => {
@@ -2270,13 +2462,21 @@ pub fn composite(root: &Group, options: CompositeOptions) -> OMap<Pixel, ColorNa
                     if options.first_variant && is_variant(child) && i > 0 && is_variant(&group.children[i - 1]) {
                         continue;
                     }
-                    walk(g, options, out);
+                    // An element at a time stands where its ambient loop (or the action playing) has it.
+                    let shift = match (&g.moves, options.time) {
+                        (Some(m), Some(t)) => {
+                            let [dx, dy] = ambient::move_at(m, t, options.play.as_ref().map(|(a, at)| (a.as_str(), *at)));
+                            (shift.0 + dx as i32, shift.1 + dy as i32)
+                        }
+                        _ => shift,
+                    };
+                    walk(g, options, shift, out);
                 }
             }
         }
     }
     let mut out = OMap::new();
-    walk(root, &options, &mut out);
+    walk(root, &options, (0, 0), &mut out);
     out
 }
 
