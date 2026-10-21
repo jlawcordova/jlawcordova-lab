@@ -30,5 +30,6 @@ pub mod serve;
 pub mod server_mcp;
 pub mod server_stdio;
 pub mod session;
+pub mod sorting;
 pub mod state;
 pub mod watch;
