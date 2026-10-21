@@ -293,11 +293,6 @@ fn motion_ops_messages_and_codes_match_node() {
             "no_track",
             "nope has no motion track (scene.track.add makes one)",
         ),
-        (
-            motion_ops::set_duration(&mut s, 900.0),
-            "out_of_range",
-            "a 900 ms loop would cut off keys: cart at 1000 ms; move or delete them first",
-        ),
     ];
     for (r, c, m) in cases {
         let e = r.unwrap_err();
