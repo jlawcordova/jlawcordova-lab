@@ -168,6 +168,7 @@ impl Registry {
 pub fn registry() -> Registry {
     let mut list = Vec::new();
     list.extend(commands::document::commands());
+    list.extend(commands::migrate::commands());
     list.extend(commands::scene::commands());
     list.extend(commands::scene_edit::commands());
     list.extend(commands::scene_layers::commands());
