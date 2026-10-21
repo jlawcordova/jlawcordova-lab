@@ -400,6 +400,22 @@ fn serve_stdio_proposals_changed_and_activity_appended_when_the_state_dir_change
 }
 
 #[test]
+fn r25_d11_serve_stdio_proposal_list_does_not_list_retired_proposals() {
+    let site = make_site();
+    let state = temp_dir("pixellab-state-");
+    let id = "20261019-112830-aaaaaa";
+    fs::create_dir_all(state.join("proposals")).unwrap();
+    let old = json!({ "id": id, "doc": "scene:sample-preview", "baseHash": null, "source": "{}", "summary": [], "createdAt": "2026-10-19T11:28:30.100Z", "agent": null });
+    fs::write(state.join("proposals").join(format!("{id}.json")), old.to_string()).unwrap();
+    let mut server = start_server(&["--stdio", "--site", site.root.to_str().unwrap()], &site.env(), &state);
+    let listed = server.request("proposal.list", json!({}))["result"]["proposals"].clone();
+    assert_eq!(listed, json!([]));
+    assert!(state.join("retired-proposals").join(format!("{id}.json")).is_file());
+    let activity = server.request("activity.list", json!({}));
+    assert!(activity.to_string().contains("retired 1 proposal from before the format change"), "{activity}");
+}
+
+#[test]
 fn serve_stdio_shutdown_answers_then_the_server_exits_0() {
     let mut f = stdio_fixture();
     let r = f.server.request("shutdown", json!({}));
@@ -536,7 +552,7 @@ fn serve_mcp_tools_call_edit_then_doc_save_writes_a_proposal_and_leaves_the_site
     assert_eq!(files, [format!("{proposal}.json")]);
     let p = read_json(&state.join("proposals").join(&files[0]));
     // A number (#n) too (docs/intents/2026-10-agent-chat/spec.md, R24); no chat from a terminal.
-    assert_eq!(keys(&p), ["id", "number", "doc", "baseHash", "source", "summary", "createdAt", "agent"]);
+    assert_eq!(keys(&p), ["id", "number", "format", "doc", "baseHash", "source", "summary", "createdAt", "agent"]);
     assert_eq!(p["doc"], "scene:sample");
     assert_eq!(p["agent"], "test-agent 9.9");
     assert_eq!(p["summary"], json!(["pebble placed at column 1, row 0, level 0"]));

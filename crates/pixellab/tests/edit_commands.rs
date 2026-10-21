@@ -121,7 +121,8 @@ fn propose_mode_doc_save_writes_a_proposal_not_the_document_apply_and_reject() {
     assert_eq!(fs::read_to_string(doc.root.join("scenes/sample.json")).unwrap(), disk, "the document is untouched");
     let proposal: Value = serde_json::from_str(&fs::read_to_string(saved["file"].as_str().unwrap()).unwrap()).unwrap();
     let keys: Vec<&String> = proposal.as_object().unwrap().keys().collect();
-    assert_eq!(keys, ["id", "number", "doc", "baseHash", "source", "summary", "createdAt", "agent"]);
+    assert_eq!(keys, ["id", "number", "format", "doc", "baseHash", "source", "summary", "createdAt", "agent"]);
+    assert_eq!(proposal["format"], 2, "R25: a proposal the program writes is format 2");
     assert_eq!(proposal["agent"], "test-agent 1.0");
 
     let mut person = session(&doc, Mode::Direct);
