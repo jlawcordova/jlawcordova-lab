@@ -5,11 +5,14 @@
 //! JSON. The CLI, the app server and the MCP server all list and call
 //! commands from here, and all check params with the same `check_params`.
 
+#![allow(clippy::result_large_err)]
+
 use serde_json::{Map, Value};
 
 use crate::commands;
 use crate::context::Ctx;
-use crate::errors::Result;
+use crate::errors::{CommandError, Result};
+use crate::params::{check_params, suggest};
 
 /// A command's params, checked and with defaults filled in.
 pub type Params = Map<String, Value>;
@@ -72,6 +75,41 @@ impl Command {
     }
 }
 
+/// `NAME`: `/^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)*$/`.
+fn is_command_name(name: &str) -> bool {
+    name.split('.').all(|word| {
+        let mut chars = word.chars();
+        chars.next().is_some_and(|c| c.is_ascii_lowercase()) && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+    })
+}
+
+/// Panics if a command definition is malformed: caught by the tests, never
+/// at a user (`checkDefinition`).
+fn check_definition(cmd: &Command) {
+    let fail = |msg: String| -> ! { panic!("command {}: {msg}", cmd.name) };
+    if !is_command_name(cmd.name) {
+        fail("name must be dotted lowercase words, like scene.place".into());
+    }
+    if cmd.summary.is_empty() {
+        fail("summary is required".into());
+    }
+    let props = cmd.params.get("properties").and_then(Value::as_object);
+    if cmd.params.get("type").and_then(Value::as_str) != Some("object") || props.is_none() {
+        fail("params must be a JSON Schema object with properties".into());
+    }
+    let props = props.unwrap();
+    for arg in &cmd.args {
+        if !props.contains_key(*arg) {
+            fail(format!("args names {arg}, which isn't a param"));
+        }
+    }
+    for req in cmd.params.get("required").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
+        if !props.contains_key(req) {
+            fail(format!("required names {req}, which isn't a param"));
+        }
+    }
+}
+
 /// The registry: every command, by name, in name order.
 pub struct Registry {
     pub commands: Vec<Command>,
@@ -81,8 +119,16 @@ impl Registry {
     /// Builds a registry; panics on a malformed definition
     /// (`checkDefinition`), which the tests catch.
     pub fn new(list: Vec<Command>) -> Registry {
-        let _ = list;
-        todo!("U21: port registry.mjs createRegistry")
+        let mut commands: Vec<Command> = Vec::new();
+        for cmd in list {
+            check_definition(&cmd);
+            if commands.iter().any(|c| c.name == cmd.name) {
+                panic!("command {} is defined twice", cmd.name);
+            }
+            commands.push(cmd);
+        }
+        commands.sort_by(|a, b| a.name.cmp(b.name));
+        Registry { commands }
     }
 
     pub fn get(&self, name: &str) -> Option<&Command> {
@@ -95,14 +141,26 @@ impl Registry {
 
     /// Commands grouped by their first word, in name order.
     pub fn groups(&self) -> Vec<(String, Vec<&Command>)> {
-        todo!("U21: port registry.mjs groups")
+        let mut out: Vec<(String, Vec<&Command>)> = Vec::new();
+        for cmd in &self.commands {
+            let group = cmd.name.split('.').next().unwrap_or("");
+            match out.iter_mut().find(|(g, _)| g == group) {
+                Some((_, list)) => list.push(cmd),
+                None => out.push((group.to_string(), vec![cmd])),
+            }
+        }
+        out
     }
 
     /// Checks params against the command's schema, then runs it (`call`).
     /// `coerce`: params are strings from a command line.
     pub fn call(&self, ctx: &mut Ctx, name: &str, params: Value, coerce: bool) -> Result<Value> {
-        let _ = (ctx, name, params, coerce);
-        todo!("U21: port registry.mjs call")
+        let Some(cmd) = self.get(name) else {
+            let names: Vec<&str> = self.commands.iter().map(|c| c.name).collect();
+            return Err(CommandError::not_found(format!("no command {name}{}", suggest(name, &names))).into());
+        };
+        let checked = check_params(&cmd.params, &params, coerce, Some(name))?;
+        (cmd.run)(ctx, checked)
     }
 }
 
