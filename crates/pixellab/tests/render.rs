@@ -641,6 +641,10 @@ fn parity_renders_match_nodes_pixel_for_pixel() {
         if let Some(o) = v.as_object_mut() {
             o.shift_remove("png");
             o.shift_remove("focusPng");
+            // `frame` came after the Node port (scene-canvas spec R7); the scenes here all keep their viewBox.
+            if o.get("frame").is_some_and(|f| f == "fixed") {
+                o.shift_remove("frame");
+            }
         }
         v
     };
@@ -667,6 +671,7 @@ fn parity_renders_match_nodes_pixel_for_pixel() {
                 hide: set("hide"),
                 focus: set("focus"),
                 play: None,
+                view: None,
             };
             render_scene_image(&sources, name, "#1C1712", &options).unwrap()
         } else {

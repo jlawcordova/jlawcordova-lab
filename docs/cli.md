@@ -66,7 +66,9 @@
 | [`proposal show`](#proposalshow) | Show a proposal: its edits, the source, and a diff from the file as it is now | read |
 | [`scene action`](#sceneaction) | Add, change or delete a scene item's action: a one-shot move the page plays by name | edit |
 | [`scene ambient`](#sceneambient) | Set or clear a scene item's ambient loop: a move that repeats on its own | edit |
+| [`scene drop`](#scenedrop) | Drop an item onto whatever it stands over: down to the top of the block under it, or the ground | edit |
 | [`scene duplicate`](#sceneduplicate) | Duplicate an item one column over, where the copy stands in depth order | edit |
+| [`scene frame`](#sceneframe) | Show a scene's published size, fix it (--box), fit it to its content (--fit) or set its margin | edit |
 | [`scene group set`](#scenegroupset) | Set or remove a group's class and data attributes, or set its data-x and data-y to its first item's foot | edit |
 | [`scene items`](#sceneitems) | List a scene's items in depth order (back to front), with stable paths | read |
 | [`scene key delete`](#scenekeydelete) | Delete a key of an item's track (not the one at 0: remove the track for that) | edit |
@@ -135,7 +137,7 @@ The server holds a **session**: docs open as in-memory working copies with undo 
 
 **Results** are the command's JSON. The shapes the app needs most:
 
-- `scene.render` / `object.render`: `{ png, scale, viewBox: [x, y, w, h], width, height, time | frame, items: [{ path, object, at, id?, pose?, bounds: [x, y, w, h] }] }`. `png` is a base64 PNG with a transparent background at an integer `scale`; `bounds` are in output pixels (scale included), for hit-testing; `path` is the item's dotted path (`"5.2"`). An object render's item has `path: null` and the result has its `anchor`.
+- `scene.render` / `object.render`: `{ png, scale, viewBox: [x, y, w, h], frame?, width, height, time | frame, items: [{ path, object, at, id?, pose?, bounds: [x, y, w, h] }] }`. `png` is a base64 PNG with a transparent background at an integer `scale`; `bounds` are in output pixels (scale included), for hit-testing; `path` is the item's dotted path (`"5.2"`). An object render's item has `path: null` and the result has its `anchor`. A scene render's `viewBox` is the box the scene publishes at (its own, or the fit to what it paints: `frame` says `"fixed"` or `"fit"`), or the `view` window asked for; a scene without a `viewBox` has no edge, so the app asks for the window it shows. `scene.show` and `scene.list` give the resolved `viewBox` and `frame` too.
 - Edits: `{ doc: "scene:<name>" | "object:<name>", changed, summary, ... }`; scene item edits add `path` (the item's path after the edit) and `item`; paint edits add `pixels` (how many changed).
 - `DocStatus` (in `doc.changed`, `session.info` and `doc.status` without a doc): `{ doc, dirty, canUndo, canRedo }`. `doc.status` with a doc adds `file, exists, stale` (the file changed on disk since the doc was opened or last matched it), `undo: [edit summaries]`, `redo: [...]`, `edits` (the edits since the doc last matched its file: what a proposal would list), `proposal?`, `synced?` and `unsavedInApp` (see MCP).
 - `doc.save`: `{ doc, file, wrote, hash, bytes, diff, dirty, canUndo, canRedo }` (`wrote` is false when the file already held exactly this text).
@@ -348,7 +350,7 @@ Validate the sources with the engine, all of them or one doc.
 pixellab check [name] [--kind <object|scene>]
 ```
 
-Problems are the engine's "<file>: <where>: <rule>" lines. With a name, only the problems in that doc and the files it uses (palette.json, the objects it places or extends) are listed. On the command line, the exit code is 1 when there are problems. Warnings don't fail the check, and each has a code. off_grid: a scene's key-to-key moves (the loop back to the first key included) whose steps aren't 1 px straight, 1:1 or 2:1, so the item jumps instead of walking the grid; scene.motion.path makes on-grid keys. out_of_order: a scene whose file lists its items out of depth order (it still publishes in depth order; scene.sort writes the file in order), with how many items would move. copies: a moving item that takes several places among the others as it moves is drawn once for each place in the SVG, which adds to its size; the warning says how many.
+Problems are the engine's "<file>: <where>: <rule>" lines. With a name, only the problems in that doc and the files it uses (palette.json, the objects it places or extends) are listed. On the command line, the exit code is 1 when there are problems. Warnings don't fail the check, and each has a code. off_grid: a scene's key-to-key moves (the loop back to the first key included) whose steps aren't 1 px straight, 1:1 or 2:1, so the item jumps instead of walking the grid; scene.motion.path makes on-grid keys. out_of_order: a scene whose file lists its items out of depth order (it still publishes in depth order; scene.sort writes the file in order), with how many items would move. copies: a moving item that takes several places among the others as it moves is drawn once for each place in the SVG, which adds to its size; the warning says how many. cropped: a scene with a fixed viewBox paints pixels outside it, which the published SVG cuts off; the warning says how many (scene.frame --fit fits it to its content). empty: a scene with nothing in it and no viewBox, which publishes one tile around the origin.
 
 read-only · MCP tool `check`
 
@@ -1184,6 +1186,29 @@ pixellab scene ambient meadow cloud --duration 16000 --keys '[{"t":0,"move":[0,0
 pixellab scene ambient meadow cloud --clear
 ```
 
+#### scene.drop
+
+Drop an item onto whatever it stands over: down to the top of the block under it, or the ground.
+
+```
+pixellab scene drop <name> <item> [--keep-group]
+```
+
+As the lab's Drop key: the item's level becomes the one where it rests on the highest block under its column and row (a block of height h rests with its bottom on it), or level 0, the ground, when nothing is under it. It never moves up; an item already resting stays. One undo step. The item's group's data-x/data-y follow, as scene.move keeps them (--no-keep-group leaves them), and the scene is put in depth order.
+
+edits docs · MCP tool `scene_drop`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id |
+| `--keep-group` | boolean | default `true` | keep the item's group in step: data-x/data-y that were its placement point or foot, and data-col/data-row that were its tile, follow it |
+
+```sh
+pixellab scene drop hero-island 12
+pixellab scene drop hero-island crate --dry-run
+```
+
 #### scene.duplicate
 
 Duplicate an item one column over, where the copy stands in depth order.
@@ -1200,6 +1225,31 @@ edits docs · MCP tool `scene_duplicate`
 | --- | --- | --- | --- |
 | `name` (positional) | string | required | scene name (or scenes/<name>) |
 | `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id |
+
+#### scene.frame
+
+Show a scene's published size, fix it (--box), fit it to its content (--fit) or set its margin.
+
+```
+pixellab scene frame <name> [--box <n,…>] [--fit] [--margin <n>]
+```
+
+A scene with a viewBox publishes at exactly that box (fixed). One without publishes at the smallest whole-pixel box that holds everything it paints, over its whole loop (scene motion, ambient loops and actions included), plus its margin (fit). --box x,y,w,h fixes the size; --fit removes the viewBox so the scene fits its content again; --margin n sets the pixels left around a fit scene's art (a fixed box ignores it). With none of them it reports the frame: { frame: "fixed" | "fit", viewBox, size: [w, h], margin }. One undo step; over MCP a proposal like every edit.
+
+edits docs · MCP tool `scene_frame`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `--box` | list of integer |  | fix the size: x,y,w,h in scene pixels (w and h above 0) |
+| `--fit` | boolean | default `false` | take the fixed size off, so the scene publishes at the box that fits what is in it |
+| `--margin` | integer |  | pixels left around the painted pixels of a fit scene (0 or more; 0 takes it off) (at least 0) |
+
+```sh
+pixellab scene frame hero-island
+pixellab scene frame hero-island --box -16,-16,272,200
+pixellab scene frame hero-island --fit --margin 2
+```
 
 #### scene.group.set
 
@@ -1520,10 +1570,10 @@ edits docs · MCP tool `scene_new`
 Place an object on a tile (or at a pixel point) in a scene.
 
 ```
-pixellab scene place <name> <object> [--at <n,…>] [--px <n,…>] [--level <n>] [--class <text>] [--id <text>] [--group <text>] [--new-group <json>] [--foot] [--layer <text>]
+pixellab scene place <name> <object> [--at <n,…>] [--px <n,…>] [--level <n>] [--on-top] [--class <text>] [--id <text>] [--group <text>] [--new-group <json>] [--foot] [--layer <text>]
 ```
 
-Like the lab's Place tool, but the item goes where it stands: it is added to its list and the scene's items are put in depth order, so it draws behind what is in front of it and over what is behind (scene.items shows the order). With neither --at nor --px, it goes on the level-0 tile at the middle of the view, where the lab's cursor starts. --px takes --level, how high the item stands (default 0), which is only for depth: its pixel point is where its foot is drawn. --group puts it inside an existing group (the group's path, or an item inside it); --new-group wraps it in a new group with those attributes (class and data-*, like {"class": "enter", "data-enter": "object"}), and --foot sets that group's data-x and data-y to the item's foot. --layer puts it in a scene layer (its id or name; layers are apart from groups and never change paint order). Returns the new item's path after the sort, and its group's; reordered says which other paths the sort moved.
+Like the lab's Place tool, but the item goes where it stands: it is added to its list and the scene's items are put in depth order, so it draws behind what is in front of it and over what is behind (scene.items shows the order). With neither --at nor --px, it goes on the tile at the middle of the view, where the lab's cursor starts (the middle of the scene's content when it has no viewBox). With no level given (--at col,row, or no position) it stands on top of whatever block covers that tile: on the highest one there, in whole levels, or on the ground (level 0); a block of height h rests with its bottom on that top. --at col,row,level is used as given unless --on-top is set, which also works for --px. --px takes --level, how high the item stands (default 0), which is only for depth: its pixel point is where its foot is drawn. --group puts it inside an existing group (the group's path, or an item inside it); --new-group wraps it in a new group with those attributes (class and data-*, like {"class": "enter", "data-enter": "object"}), and --foot sets that group's data-x and data-y to the item's foot. --layer puts it in a scene layer (its id or name; layers are apart from groups and never change paint order). Returns the new item's path after the sort, and its group's; reordered says which other paths the sort moved.
 
 edits docs · MCP tool `scene_place`
 
@@ -1531,9 +1581,10 @@ edits docs · MCP tool `scene_place`
 | --- | --- | --- | --- |
 | `name` (positional) | string | required | scene name (or scenes/<name>) |
 | `object` (positional) | string | required | the object to place |
-| `--at` | list of integer |  | a tile: col,row,level |
+| `--at` | list of integer |  | a tile: col,row[,level]; without a level the item goes on top of what stands there |
 | `--px` | list of integer |  | a point in scene pixels: x,y |
 | `--level` | integer |  | with --px: how high the item stands, for depth order (default 0) |
+| `--on-top` | boolean | default `false` | put the item on top of the block on its tile, whatever level --at or --px give |
 | `--class` | string |  | a class list for the item |
 | `--id` | string |  | an id for the item (lowercase kebab-case, unique in the scene) |
 | `--group` | string |  | an existing group to place it in: its path, or an item (path or id) inside it |
@@ -1569,10 +1620,10 @@ edits docs · MCP tool `scene_remove`
 Render a scene to a transparent PNG, with item bounds.
 
 ```
-pixellab scene render <name> [--scale <n>] [--time <n>] [--theme <light|dark>] [--play <text>] [--show <text>] [--hide <text,…>] [--focus <text>] [--out <file.png>]
+pixellab scene render <name> [--scale <n>] [--time <n>] [--theme <light|dark>] [--play <text>] [--view <n,…>] [--show <text>] [--hide <text,…>] [--focus <text>] [--out <file.png>]
 ```
 
-Returns { png (base64), scale, viewBox, width, height, time, items: [{ path, object, at, id, bounds: [x, y, w, h] }] }. Bounds are in output pixels (scale included), for hit-testing. Of each run of data-class variant groups only the first shows, or the one holding --show. --hide leaves out the items in those layers (and the layers inside them), as hiding them in Pixel Lab does; --focus adds focusPng, the same render with only that layer's items. Ambient loops are placed at --time; --play <action>@<ms> places the elements that have that action where it has them <ms> into it. On the command line, --out <file.png> writes the PNG.
+Returns { png (base64), scale, viewBox, frame, width, height, time, items: [{ path, object, at, id, bounds: [x, y, w, h] }] }. viewBox is the box the scene publishes at (its own, or the fit to what it paints; frame says which: "fixed" or "fit"), or the --view window when one is given. Bounds are in output pixels (scale included), for hit-testing. Of each run of data-class variant groups only the first shows, or the one holding --show. --hide leaves out the items in those layers (and the layers inside them), as hiding them in Pixel Lab does; --focus adds focusPng, the same render with only that layer's items. Ambient loops are placed at --time; --play <action>@<ms> places the elements that have that action where it has them <ms> into it. On the command line, --out <file.png> writes the PNG.
 
 read-only · MCP tool `scene_render`
 
@@ -1583,6 +1634,7 @@ read-only · MCP tool `scene_render`
 | `--time` | integer |  | ms into the animation: frame loops and motion tracks (default 0, the rest frame) (at least 0) |
 | `--theme` | `light` \| `dark` | default `"light"` | dark draws as the site's dark theme: the hero island's drop shadow (data-enter="shadow") takes the dark page color |
 | `--play` | string |  | an action and the ms into it, like hop@120: the elements that have it are placed where it has them then, instead of on their ambient loop |
+| `--view` | list of integer |  | a window of the scene to render instead of its whole box: x,y,w,h in scene pixels (the result's viewBox is then the window) |
 | `--show` | string |  | an item path whose variant group to show, like 12.0 |
 | `--hide` | list of string |  | layers (ids or names) whose items are left out |
 | `--focus` | string |  | a layer: the result adds focusPng, the render of only its items (and those of the layers inside it) |

@@ -35,10 +35,15 @@ fn codes(r: &Value) -> Vec<String> {
 #[test]
 fn r20_check_warns_about_a_source_file_that_is_not_in_canonical_form_and_stays_ok() {
     let doc = make_document();
+    // The sample's pebble stands partly outside its viewBox, which `check` now warns about (scene-canvas
+    // spec R11); a wider box keeps this test about the canonical form.
+    let wide = json!({ "output": "sample.svg", "viewBox": [-64, -64, 192, 128], "items": [
+        { "object": "block", "at": { "tile": [0, 0, 0] } }, { "object": "pebble", "at": { "tile": [0, 0, 1] } }] });
+    doc.write("scenes/sample.json", &engine::format::serialize_scene(&wide));
     let clean = call(&doc, json!({}));
     assert_eq!(clean["warnings"], json!([]), "the sample is canonical");
     // The same scene, hand-edited out of canonical form: one line, different spacing.
-    doc.write("scenes/sample.json", r#"{"output":"sample.svg","viewBox":[-16,-16,64,48],"items":[{"object":"block","at":{"tile":[0,0,0]}},{"object":"pebble","at":{"tile":[0,0,1]}}]}"#);
+    doc.write("scenes/sample.json", r#"{"output":"sample.svg","viewBox":[-64,-64,192,128],"items":[{"object":"block","at":{"tile":[0,0,0]}},{"object":"pebble","at":{"tile":[0,0,1]}}]}"#);
     let r = call(&doc, json!({}));
     assert_eq!(r["ok"], true);
     assert_eq!(codes(&r), vec!["not_canonical"]);

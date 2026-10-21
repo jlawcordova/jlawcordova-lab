@@ -13,6 +13,10 @@ Every compiled SVG's root `<svg>` carries:
 
 The compiler **never gives the root a `class`**. A page may add its own, by a string replace or with script, and the SVG will not have one to clash with.
 
+## The root's size
+
+A scene that fixes its `viewBox` publishes with exactly that `viewBox`. A scene that does not publishes with the smallest box that holds everything it paints over its loop, plus its `margin`, so the `viewBox` changes when the art changes. A page that depends on a scene's size should have the document fix it (`pixellab scene frame <scene> --box x,y,w,h`). A release before this one rejects a scene without a `viewBox`, so the site pins a release that has it before its document gets such a scene.
+
 ## Classes and data attributes from the document
 
 A group in a scene's `items` gives its attributes in `group` (`class` and `data-*` only), and an item may carry a `class`. The compiler writes them to the output **unchanged**, so a page can target and read them:

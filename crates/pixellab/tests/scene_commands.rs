@@ -291,13 +291,13 @@ fn r6_scene_raise_and_scene_lower_are_gone_cli_door() {
 }
 
 #[test]
-fn scene_new() {
+fn r1_scene_new_writes_no_viewbox() {
     let mut lab = lab();
     let made = lab.call("scene.new", json!({ "name": "zz-made" })).unwrap();
     assert_eq!(made["file"], "scenes/zz-made.json");
     assert_eq!(made["changed"], true);
     let doc = Ctx::new(&mut lab.session).doc(DocKind::Scene, "zz-made").unwrap();
-    assert_eq!(doc, json!({ "viewBox": [-64, -64, 128, 128], "origin": [0, 0], "items": [] }));
+    assert_eq!(doc, json!({ "origin": [0, 0], "items": [] }));
     let again = lab.call("scene.new", json!({ "name": "zz-made" })).unwrap_err();
     assert_eq!(again.exit_code, 1);
     assert!(again.message.contains("already an object or scene called zz-made"), "{}", again.message);
@@ -305,14 +305,14 @@ fn scene_new() {
 }
 
 #[test]
-fn scene_new_and_object_new_cli_door() {
+fn r1_scene_new_and_object_new_cli_door_write_no_viewbox() {
     let doc = cli_doc();
     let (code, dry, err) = cli(&doc, &["scene", "new", "zz-made", "--dry-run"]);
     assert_eq!(code, 0, "{err}");
     assert!(dry.contains("+++ b/scenes/zz-made.json\n@@ -0,0 +1,"), "{dry}");
     assert!(!doc.root.join("scenes/zz-made.json").exists());
     assert_eq!(cli(&doc, &["scene", "new", "zz-made"]).0, 0);
-    assert_eq!(read_doc(&doc, "scenes/zz-made.json"), json!({ "viewBox": [-64, -64, 128, 128], "origin": [0, 0], "items": [] }));
+    assert_eq!(read_doc(&doc, "scenes/zz-made.json"), json!({ "origin": [0, 0], "items": [] }));
     let (code, _, err) = cli(&doc, &["scene", "new", "zz-made"]);
     assert_eq!(code, 1);
     assert!(err.contains("already an object or scene called zz-made"), "{err}");

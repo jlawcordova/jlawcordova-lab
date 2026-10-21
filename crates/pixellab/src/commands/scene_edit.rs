@@ -163,15 +163,53 @@ fn place_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
             }
             Value::Object(at)
         } else if given(&params, "at") {
-            json!({ "tile": params["at"].clone() })
+            // col,row,level: a level given is used as given. col,row alone leaves the level to stacking.
+            let mut tile = params["at"].as_array().cloned().unwrap_or_default();
+            tile.truncate(3);
+            while tile.len() < 3 {
+                tile.push(json!(0));
+            }
+            json!({ "tile": tile })
         } else {
-            // SceneMode/Lab.open: the cursor starts on the tile at the middle of the view.
-            let vb = doc.get("viewBox").and_then(Value::as_array).cloned();
-            let Some(vb) = vb else { return Err(Error::Internal("doc.viewBox is not iterable".into())) };
-            let n = |i: usize| vb.get(i).and_then(Value::as_f64).unwrap_or(f64::NAN);
-            let tile = engine::iso::px_to_tile([(n(0) + n(2) / 2.0).floor(), (n(1) + n(3) / 2.0).floor()], 0.0, eng::origin_of(doc));
-            json!({ "tile": tile.iter().map(|&x| engine::jsnum::num(x)).collect::<Vec<_>>() })
+            // SceneMode/Lab.open: the cursor starts on the tile at the middle of the view. A scene without a
+            // viewBox has no view: it starts at the middle of what is in it now, or the origin tile when empty.
+            let middle = match doc.get("viewBox").and_then(Value::as_array) {
+                Some(vb) => {
+                    let n = |i: usize| vb.get(i).and_then(Value::as_f64).unwrap_or(f64::NAN);
+                    Some([(n(0) + n(2) / 2.0).floor(), (n(1) + n(3) / 2.0).floor()])
+                }
+                None => {
+                    let mut probe = loaded.sources.clone();
+                    probe.scenes.insert(name.clone(), doc.clone());
+                    let painted = eng::resolve_frame(&probe, &name).ok().and_then(|f| f.painted);
+                    painted.map(|[x, y, w, h]| [(x as f64 + w as f64 / 2.0).floor(), (y as f64 + h as f64 / 2.0).floor()])
+                }
+            };
+            match middle {
+                Some(px) => {
+                    let tile = engine::iso::px_to_tile(px, 0.0, eng::origin_of(doc));
+                    json!({ "tile": tile.iter().map(|&x| engine::jsnum::num(x)).collect::<Vec<_>>() })
+                }
+                None => json!({ "tile": [0, 0, 0] }),
+            }
         };
+        // Stacking (scene-canvas spec R17): no level given (a tile as col,row, or no position at all) puts
+        // the item on top of what stands there; --on-top says so for a level or a pixel point too.
+        let level_given = if given(&params, "px") {
+            true
+        } else if given(&params, "at") {
+            params["at"].as_array().is_some_and(|a| a.len() >= 3)
+        } else {
+            false
+        };
+        let mut at = at;
+        let mut over: Option<String> = None;
+        if flag(&params, "onTop") || !level_given {
+            let probe = json!({ "object": object, "at": at });
+            let stand = ops::stand_level(&loaded.sources, doc, &probe, None, None);
+            ops::put_level(&mut at, stand.level);
+            over = stand.over;
+        }
         let new_group = params.get("newGroup").and_then(Value::as_object).filter(|_| given(&params, "newGroup"));
         let r = if given(&params, "group") || new_group.is_some() {
             let group = match opt_str(&params, "group") {
@@ -212,6 +250,10 @@ fn place_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
         let message = match &layer {
             Some(l) => format!("{} in {}", str_of(r.get("message")), str_of(l.get("name"))),
             None => str_of(r.get("message")),
+        };
+        let message = match &over {
+            Some(o) => format!("{message}, on top of {o}"),
+            None => message,
         };
         let mut result = obj(vec![("path", json!(path_string(&path))), ("item", ops::item_at(doc, &path).cloned().unwrap_or(Value::Null))]);
         if let Some(g) = &item_group {
@@ -519,15 +561,114 @@ fn group_set_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     })
 }
 
+// ---- scene.drop ----
+
+fn drop_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
+    let loaded = ctx.sources()?;
+    move_edit(ctx, &params, |doc, path| Ok(ops::drop_item(&loaded.sources, doc, path)?), None)
+}
+
+// ---- scene.frame ----
+
+/// The frame a scene would publish at with this source, as result fields (scene-canvas spec R7, R8).
+fn frame_fields(sources: &Sources, name: &str, scene: &Value) -> Map<String, Value> {
+    let mut probe = sources.clone();
+    probe.scenes.insert(name.to_string(), scene.clone());
+    let frame = eng::resolve_frame(&probe, name);
+    let own = scene.get("viewBox").and_then(Value::as_array).cloned();
+    let fixed = own.is_some();
+    let view_box = match (&frame, own) {
+        (_, Some(vb)) => Some(Value::Array(vb)),
+        (Ok(f), None) => Some(json!(f.view_box)),
+        (Err(_), None) => None,
+    };
+    let mut out = Map::new();
+    out.insert("scene".into(), json!(name));
+    out.insert("frame".into(), json!(if fixed { "fixed" } else { "fit" }));
+    if let Some(vb) = view_box {
+        out.insert("size".into(), json!([vb.get(2).cloned().unwrap_or(Value::Null), vb.get(3).cloned().unwrap_or(Value::Null)]));
+        out.insert("viewBox".into(), vb);
+    }
+    out.insert("margin".into(), scene.get("margin").cloned().unwrap_or_else(|| json!(0)));
+    out
+}
+
+fn size_phrase(fields: &Map<String, Value>) -> String {
+    let size = match fields.get("size").and_then(Value::as_array) {
+        Some(s) => format!("{}×{}", str_of(s.first()), str_of(s.get(1))),
+        None => "?".to_string(),
+    };
+    let vb = fields.get("viewBox").map(|v| format!(" at {}", str_of(v.get(0)) + ", " + &str_of(v.get(1)))).unwrap_or_default();
+    if fields.get("frame").and_then(Value::as_str) == Some("fixed") {
+        format!("fixed {size}{vb}")
+    } else {
+        format!("fits its content: {size}{vb}, margin {}", str_of(fields.get("margin")))
+    }
+}
+
+fn frame_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
+    let fit = flag(&params, "fit");
+    if fit && given(&params, "box") {
+        return Err(CommandError::usage("scene.frame: give only one of --box, --fit").into());
+    }
+    let name = scene_name(ctx, text(&params, "name"))?;
+    let new_box: Option<Vec<i64>> = nums(&params, "box").map(|b| b.iter().map(|&n| n as i64).collect());
+    if let Some(b) = &new_box {
+        if b.len() != 4 || b[2] <= 0 || b[3] <= 0 {
+            return Err(CommandError::usage("scene.frame: --box must be x,y,w,h with w and h above 0").into());
+        }
+    }
+    let margin = params.get("margin").and_then(Value::as_i64);
+    if margin.is_some_and(|m| m < 0) {
+        return Err(CommandError::usage("scene.frame: --margin must be 0 or more").into());
+    }
+    if new_box.is_none() && !fit && margin.is_none() {
+        // No option: report the frame.
+        let loaded = ctx.sources()?;
+        let scene = ctx.doc(DocKind::Scene, &name)?;
+        let mut out = frame_fields(&loaded.sources, &name, &scene);
+        out.insert("changed".into(), json!(false));
+        out.insert("summary".into(), json!(format!("{name}: {}", size_phrase(&out))));
+        return Ok(Value::Object(out));
+    }
+    ctx.edit(DocKind::Scene, &name, None, |doc, loaded| {
+        let map = doc.as_object_mut().ok_or_else(|| Error::Internal("a scene is an object".into()))?;
+        if let Some(b) = &new_box {
+            map.insert("viewBox".into(), json!(b));
+        }
+        if fit {
+            map.shift_remove("viewBox");
+        }
+        if let Some(m) = margin {
+            if m == 0 {
+                map.shift_remove("margin");
+            } else {
+                map.insert("margin".into(), json!(m));
+            }
+        }
+        let mut out = frame_fields(&loaded.sources, &name, doc);
+        let message = format!("{name}: {}", size_phrase(&out));
+        out.insert("changed".into(), json!(true));
+        Ok(Edit::new(out, message))
+    })
+}
+
 /// This file's commands.
 pub fn commands() -> Vec<Command> {
     let mut place_props = Map::new();
     for (k, v) in [
         ("name", name_param()),
         ("object", json!({ "type": "string", "description": "the object to place" })),
-        ("at", tile_param()),
+        (
+            "at",
+            json!({ "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 3, "description": "a tile: col,row[,level]; without a level the item goes on top of what stands there" }),
+        ),
         ("px", px_param()),
         ("level", json!({ "type": "integer", "description": "with --px: how high the item stands, for depth order (default 0)" })),
+        (
+            "onTop",
+            json!({ "type": "boolean", "default": false, "description": "put the item on top of the block on its tile, whatever level --at or --px give" }),
+        ),
         ("class", json!({ "type": "string", "description": "a class list for the item" })),
         ("id", json!({ "type": "string", "description": "an id for the item (lowercase kebab-case, unique in the scene)" })),
         (
@@ -559,7 +700,10 @@ pub fn commands() -> Vec<Command> {
     place.description = Some(concat!(
         "Like the lab's Place tool, but the item goes where it stands: it is added to its list and the scene's items are put in depth order, ",
         "so it draws behind what is in front of it and over what is behind (scene.items shows the order). With neither --at nor --px, ",
-        "it goes on the level-0 tile at the middle of the view, where the lab's cursor starts. --px takes --level, how high the item stands ",
+        "it goes on the tile at the middle of the view, where the lab's cursor starts (the middle of the scene's content when it has no viewBox). ",
+        "With no level given (--at col,row, or no position) it stands on top of whatever block covers that tile: on the highest one there, ",
+        "in whole levels, or on the ground (level 0); a block of height h rests with its bottom on that top. --at col,row,level is used as given ",
+        "unless --on-top is set, which also works for --px. --px takes --level, how high the item stands ",
         "(default 0), which is only for depth: its pixel point is where its foot is drawn. ",
         "--group puts it inside an existing group (the group's path, or an item inside it); --new-group wraps it in a new group with those attributes ",
         r#"(class and data-*, like {"class": "enter", "data-enter": "object"}), and --foot sets that group's data-x and data-y to the item's foot. "#,
@@ -753,5 +897,51 @@ pub fn commands() -> Vec<Command> {
     ];
     group_set.format = Some(format_change);
 
-    vec![place, mv, set, duplicate, remove, snap, sort, create, group_set]
+    let mut drop = Command::new(
+        "scene.drop",
+        "Drop an item onto whatever it stands over: down to the top of the block under it, or the ground",
+        item_params(vec![("keepGroup", keep_group_param())]),
+        true,
+        drop_run,
+    );
+    drop.description = Some(concat!(
+        "As the lab's Drop key: the item's level becomes the one where it rests on the highest block under its column and row (a block of height h ",
+        "rests with its bottom on it), or level 0, the ground, when nothing is under it. It never moves up; an item already resting stays. ",
+        "One undo step. The item's group's data-x/data-y follow, as scene.move keeps them (--no-keep-group leaves them), and the scene is put in depth order."
+    ));
+    drop.args = vec!["name", "item"];
+    drop.examples = vec!["pixellab scene drop hero-island 12", "pixellab scene drop hero-island crate --dry-run"];
+    drop.format = Some(format_change);
+
+    let mut frame = Command::new(
+        "scene.frame",
+        "Show a scene's published size, fix it (--box), fit it to its content (--fit) or set its margin",
+        json!({
+            "type": "object",
+            "properties": {
+                "name": name_param(),
+                "box": { "type": "array", "items": { "type": "integer" }, "minItems": 4, "maxItems": 4, "description": "fix the size: x,y,w,h in scene pixels (w and h above 0)" },
+                "fit": { "type": "boolean", "default": false, "description": "take the fixed size off, so the scene publishes at the box that fits what is in it" },
+                "margin": { "type": "integer", "minimum": 0, "description": "pixels left around the painted pixels of a fit scene (0 or more; 0 takes it off)" }
+            },
+            "required": ["name"]
+        }),
+        true,
+        frame_run,
+    );
+    frame.description = Some(concat!(
+        "A scene with a viewBox publishes at exactly that box (fixed). One without publishes at the smallest whole-pixel box that holds everything it paints, ",
+        "over its whole loop (scene motion, ambient loops and actions included), plus its margin (fit). --box x,y,w,h fixes the size; ",
+        "--fit removes the viewBox so the scene fits its content again; --margin n sets the pixels left around a fit scene's art (a fixed box ignores it). ",
+        "With none of them it reports the frame: { frame: \"fixed\" | \"fit\", viewBox, size: [w, h], margin }. One undo step; over MCP a proposal like every edit."
+    ));
+    frame.args = vec!["name"];
+    frame.examples = vec![
+        "pixellab scene frame hero-island",
+        "pixellab scene frame hero-island --box -16,-16,272,200",
+        "pixellab scene frame hero-island --fit --margin 2",
+    ];
+    frame.format = Some(format_change);
+
+    vec![place, mv, set, duplicate, remove, snap, sort, create, group_set, drop, frame]
 }
