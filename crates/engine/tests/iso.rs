@@ -3,7 +3,10 @@
 
 use std::collections::{HashMap, HashSet};
 
+use engine::engine::{composite, load_sources, render_object, render_scene, resolve, CompositeOptions, Order};
 use engine::iso::{block_faces, block_size, footprint, px_to_tile, px_to_tile_exact, tile_pixels, tile_to_px};
+
+use serde_json::{json, Value};
 
 const SEEDS: [u32; 5] = [1, 7, 42, 2026, 31337];
 
@@ -181,12 +184,26 @@ fn r3_tile_placement_uses_the_grid_and_the_scene_origin_tile_to_px() {
     assert_eq!(tile_to_px([2.0, 1.0, 1.0], [5.0, 32.0]), [21.0, 40.0]);
 }
 
+/// Sources on the test palette from objects and scenes.
+fn sources_of(objects: Vec<(&str, Value)>, scenes: Vec<(&str, Value)>) -> engine::engine::Sources {
+    let palette = json!({
+        "world": { "ink": "#2E2418", "cream": "#F4EDE0", "grass-2": "#8FA56E", "grass-4": "#4E6B3A", "wood-3": "#7A4E2D" },
+        "outfit": { "teal-1": "#7FA89B" },
+    });
+    let map = |v: Vec<(&str, Value)>| v.into_iter().map(|(k, d)| (k.to_string(), d)).collect::<std::collections::BTreeMap<_, _>>();
+    load_sources(palette, map(objects), map(scenes))
+}
+
 #[test]
-#[ignore = "needs U3"]
 fn r3_tile_placement_uses_the_grid_and_the_scene_origin_px_placement_is_exact() {
-    // renderScene + composite: tile [1,0,1] at origin [2,30] paints 'grass-2'
-    // at 18,22, and px [3,4] paints 'ink' at 3,4.
-    todo!("needs render_scene and composite (U3)");
+    let dot = json!({ "kind": "sprite", "keys": { "g": "grass-2" }, "layers": [{ "map": ["g"] }] });
+    let ink = json!({ "kind": "sprite", "keys": { "i": "ink" }, "layers": [{ "map": ["i"] }] });
+    let items = json!([{ "object": "dot", "at": { "tile": [1, 0, 1] } }, { "object": "ink", "at": { "px": [3, 4] } }]);
+    let scene = json!({ "viewBox": [0, 0, 8, 8], "items": items, "origin": [2, 30] });
+    let sources = sources_of(vec![("dot", dot), ("ink", ink)], vec![("s", scene)]);
+    let root = render_scene(&sources, "s", Order::Depth).unwrap().root;
+    let drawn: Vec<((i32, i32), String)> = composite(&root, CompositeOptions::default()).iter().map(|(p, c)| (*p, c.to_string())).collect();
+    assert_eq!(drawn, vec![((18, 22), "grass-2".to_string()), ((3, 4), "ink".to_string())]);
 }
 
 #[test]
@@ -328,6 +345,16 @@ fn r3_a_flat_block_has_a_top_and_nothing_below_it_faces() {
 }
 
 #[test]
+fn r3_a_flat_block_has_a_top_and_nothing_below_it_render_object() {
+    // The renderObject half of 'R3: a flat block has a top and nothing below it'.
+    let flat = json!({ "kind": "block", "size": [1, 1, 0], "faces": { "top": "grass-2" } });
+    let sources = sources_of(vec![("tile", flat)], vec![]);
+    let faces = block_faces([1, 1, 0], [0, 0]);
+    let drawn = composite(&render_object(&sources, "tile").unwrap(), CompositeOptions::default());
+    assert_eq!(drawn.len(), faces.top.len());
+}
+
+#[test]
 fn r27_l4_a_blocks_computed_size_is_its_drawn_size_block_size() {
     // block_size against the drawn faces (the resolve half is below).
     for seed in SEEDS {
@@ -344,10 +371,21 @@ fn r27_l4_a_blocks_computed_size_is_its_drawn_size_block_size() {
 }
 
 #[test]
-#[ignore = "needs U3"]
 fn r27_l4_a_blocks_computed_size_is_its_drawn_size() {
-    // resolve(sources, 'blk') width and height equal the drawn faces' extent.
-    todo!("needs resolve (U3)");
+    for seed in SEEDS {
+        let mut r = rng(seed);
+        for _ in 0..6 {
+            let size = [1 + (r() * 3.0).floor() as i64, 1 + (r() * 3.0).floor() as i64, (r() * 3.0).floor() as i64];
+            let block = json!({ "kind": "block", "size": size, "faces": { "top": "grass-2", "left": "wood-3", "right": "grass-4", "edge": "ink" } });
+            let sources = sources_of(vec![("blk", block)], vec![]);
+            let resolved = resolve(&sources, "blk").unwrap();
+            let faces = block_faces(size, [0, 0]);
+            let all: Vec<_> = faces.top.iter().chain(&faces.left).chain(&faces.right).collect();
+            let (min_x, max_x) = (all.iter().map(|p| p.0).min().unwrap(), all.iter().map(|p| p.0).max().unwrap());
+            let (min_y, max_y) = (all.iter().map(|p| p.1).min().unwrap(), all.iter().map(|p| p.1).max().unwrap());
+            assert_eq!([resolved.width, resolved.height], [(max_x - min_x + 1) as i64, (max_y - min_y + 1) as i64], "size {size:?}");
+        }
+    }
 }
 
 #[test]

@@ -16,7 +16,7 @@ A unit's checks: `cargo fmt --check`, `cargo test` for its crate, its ported sui
 | U6 | `edit.mjs` → `edit.rs` | edit cases of `engine.test.mjs` | U3 | S | merged |
 | U7 | `compile.mjs` → `compile.rs` (budgets, lossless, `git` subprocess) | `compile.test.mjs`, corpus SVGs | U2–U5 | O | merged |
 | U8 | `preview.mjs` → `preview.rs` | preview cases of `render.test.mjs`, corpus PNGs | U1, U3 | S | merged |
-| U9 | the rest of `engine.test.mjs` | → `tests/engine.rs`, in two units by `describe` block | U3–U6 | S | waiting |
+| U9 | the rest of `engine.test.mjs` | → `tests/engine.rs`, in two units by `describe` block | U3–U6 | S | merged |
 | U10 | `errors.mjs`, `argv.mjs`, `params.mjs` | `params.test.mjs` | PR 1 | S | merged |
 | U11 | `jsonrpc.mjs` | its cases in `servers.test.mjs` | PR 1 | S | merged |
 | U12 | `state.mjs`, `activity-summary.mjs` | `activity-and-proposals.test.mjs` | U10 | S | merged |
