@@ -1,5 +1,5 @@
 # Intent: A canvas-first window, with a floating library
-Author: J. Law Cordova (owner). Status: draft.
+Author: J. Law Cordova (owner). Status: accepted (in chat on 2026-10-21, after reviewing the prototype; the spec follows in the same PR).
 
 ## Problem
 This started as a floating library and grew into the whole window. In the owner's words:
