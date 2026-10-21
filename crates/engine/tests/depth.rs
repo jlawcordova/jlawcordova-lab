@@ -3,7 +3,7 @@
 //! R8), and the engine drawing in depth order (R3, R9).
 //!
 //! Adapted: problems name `.json` files; the serializer tests check format 2's
-//! text (expected text from Node's `canonical` in scripts/goldens.mjs); the
+//! text (expected text from Node's `canonical`, kept here as data); the
 //! harbor tests run on a copy of examples/harbor.pixellab (format 2).
 //! Not here (they are program tests): "scene.items lists an item's depth…",
 //! "a document carries the depth module" (Node's module wiring, no Rust

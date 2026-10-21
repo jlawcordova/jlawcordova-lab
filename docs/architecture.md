@@ -1,6 +1,6 @@
 # Architecture
 
-How Pixel Lab fits together today. The design record, [`2026-10-mac-app/plan.md`](intents/2026-10-mac-app/plan.md), says why it's built this way and holds the look (board 03, "Field notebook"); this page is the map you need before changing the code. Each folder's README goes one level deeper: [the CLI](../cli/README.md), [the app](../app/README.md), [the scripts](../scripts/README.md).
+How Pixel Lab fits together today. The design record, [`2026-10-mac-app/plan.md`](intents/2026-10-mac-app/plan.md), says why it's built this way and holds the look (board 03, "Field notebook"); this page is the map you need before changing the code. Each folder's README goes one level deeper: [the CLI](../crates/pixellab/README.md), [the app](../app/README.md), [the scripts](../scripts/README.md).
 
 ## Three doors onto one registry
 
@@ -116,7 +116,7 @@ A SwiftPM executable (`app/`), SwiftUI with AppKit where a Mac editor needs it (
 
 | Folder | What | README |
 | --- | --- | --- |
-| `cli/` | The `pixellab` CLI, both servers and their tests | [cli/README.md](../cli/README.md) |
+| `cli/` | The `pixellab` CLI, both servers and their tests | [cli/README.md](../crates/pixellab/README.md) |
 | `app/` | The SwiftUI app and its unit tests | [app/README.md](../app/README.md) |
 | `scripts/` | Build, install, snapshot, acceptance, docs | [scripts/README.md](../scripts/README.md) |
 | `docs/` | These guides, the command reference, each change's intent, spec and plan, screenshots | [docs/README.md](README.md) |

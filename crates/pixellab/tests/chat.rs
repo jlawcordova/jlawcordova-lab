@@ -12,7 +12,6 @@ mod common;
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use pixellab::chat_context::{match_saved, selection_context, SelectionInput, GROUP_PATHS};

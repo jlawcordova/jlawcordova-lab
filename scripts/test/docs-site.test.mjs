@@ -6,13 +6,17 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
-import { buildSite, findIntents, outPath, PAGES, REPO_URL } from '../../scripts/docs-site/build.mjs';
-import { createSlugger, renderInline, renderMarkdown } from '../../scripts/docs-site/markdown.mjs';
-import { REPO, tempDir } from './helpers.mjs';
+import { buildSite, findIntents, outPath, PAGES, REPO_URL } from '../docs-site/build.mjs';
+import { createSlugger, renderInline, renderMarkdown } from '../docs-site/markdown.mjs';
+
+const REPO = fileURLToPath(new URL('../..', import.meta.url));
+const tempDir = (/** @type {string} */ prefix = 'pixellab-test-') => mkdtemp(join(tmpdir(), prefix));
 
 const cleanup = (/** @type {string} */ dir) => rm(dir, { recursive: true, force: true });
 
@@ -99,7 +103,7 @@ describe('docs site: build', () => {
   const read = (/** @type {string} */ file) => readFileSync(join(out, file), 'utf8');
 
   test('R1, R3: every README and doc is a page, with the intents found on their own', () => {
-    for (const file of ['README.md', 'docs/README.md', 'docs/architecture.md', 'docs/contributing.md', 'docs/testing.md', 'cli/README.md', 'app/README.md', 'scripts/README.md', 'docs/cli.md', 'CLAUDE.md']) {
+    for (const file of ['README.md', 'docs/README.md', 'docs/architecture.md', 'docs/contributing.md', 'docs/testing.md', 'crates/pixellab/README.md', 'app/README.md', 'scripts/README.md', 'docs/cli.md', 'CLAUDE.md']) {
       assert.ok(pages.some((p) => p.file === file), file);
     }
     for (const change of readdirSync(join(REPO, 'docs', 'intents'))) {
@@ -108,7 +112,7 @@ describe('docs site: build', () => {
       }
     }
     assert.equal(outPath('README.md'), 'index.html');
-    assert.equal(outPath('cli/README.md'), 'cli/index.html');
+    assert.equal(outPath('crates/pixellab/README.md'), 'crates/pixellab/index.html');
     assert.equal(outPath('docs/cli.md'), 'docs/cli.html');
     assert.equal(result.pages, pages.length);
     for (const p of pages) assert.ok(existsSync(join(out, outPath(p.file))), outPath(p.file));
@@ -122,17 +126,17 @@ describe('docs site: build', () => {
   test('R4: links become page links, GitHub links or copied images', () => {
     const home = read('index.html');
     assert.ok(home.includes('href="docs/cli.html"'), 'README → docs/cli.md');
-    assert.ok(home.includes('href="cli/index.html"'), 'README → cli/README.md');
+    assert.ok(home.includes('href="crates/pixellab/index.html"'), 'README → crates/pixellab/README.md');
     assert.ok(home.includes(`href="${REPO_URL}/blob/main/.github/workflows/release.yml"`), 'a source file goes to GitHub');
     assert.ok(home.includes('src="docs/screenshots/final-scene-dark.png"'), 'an image');
     assert.ok(statSync(join(out, 'docs/screenshots/final-scene-dark.png')).size > 0, 'the image is copied');
     const arch = read('docs/architecture.html');
-    assert.ok(arch.includes('href="../cli/index.html"'), 'docs/ → ../cli/README.md');
+    assert.ok(arch.includes('href="../crates/pixellab/index.html"'), 'docs/ → ../crates/pixellab/README.md');
     assert.ok(arch.includes('href="cli.html"'), 'a sibling page');
     assert.ok(arch.includes('href="contributing.html#ci"'), 'a page with an anchor');
     const cli = read('docs/cli.html');
     assert.ok(cli.includes('href="#sceneplace"') && cli.includes('id="sceneplace"'), 'the reference\'s own anchors');
-    assert.ok(read('cli/index.html').includes('href="../app/index.html#adding-a-feature"'));
+    assert.ok(read('crates/pixellab/index.html').includes('href="../../app/index.html#adding-a-feature"'));
   });
 
   test('R6: each page has the frame: nav with the current page, contents, source link, search', () => {
@@ -230,7 +234,7 @@ describe('docs site: workflow', () => {
     assert.match(yml, /^ {2}push:\n {4}branches: \[main\]$/m);
     assert.match(yml, /^ {2}workflow_dispatch:$/m);
     assert.match(yml, /^permissions:\n {2}contents: read$/m);
-    assert.match(yml, /node scripts\/docs-cli\.mjs --check[\s\S]*node --test cli\/test\/docs-site\.test\.mjs[\s\S]*npm run docs:site[\s\S]*actions\/upload-pages-artifact@/);
+    assert.match(yml, /node scripts\/docs-cli\.mjs --check[\s\S]*node --test scripts\/test\/docs-site\.test\.mjs[\s\S]*npm run docs:site[\s\S]*actions\/upload-pages-artifact@/);
     const deploy = yml.slice(yml.indexOf('\n  deploy:'));
     assert.match(deploy, /if: github\.event_name != 'pull_request' && github\.ref == 'refs\/heads\/main'/);
     assert.match(deploy, /permissions:\n {6}pages: write\n {6}id-token: write/);

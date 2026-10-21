@@ -7,8 +7,8 @@
 //! The two tests on the owner's site checkout are not ported as they were:
 //! - "R7: in list order, every committed SVG in the site checkout is what the ported compiler
 //!   produces from its sources" is dropped: its subject is the owner's committed SVGs. (The
-//!   corpus parity check, `tests/corpus.rs`, compares the compiler with Node's on the fixture
-//!   and the examples.)
+//!   parity check that compared the compiler with Node's on the fixture and the examples passed
+//!   before the Node CLI was removed.)
 //! - "R3: in depth order, every scene of the site's art compiles lossless…" is rewritten on
 //!   copies of the harbor and town examples (format 2), with the
 //!   engine's default budget since an example has no site budgets; it still lists, rather than
