@@ -339,6 +339,8 @@ flowchart TB
 - **`PIXELLAB_LEGACY_SVG=1`** is a test-only switch that makes the program write today's SVGs, so R3 stays runnable in `npm test` after R11–R15. It's read in one place, used only by `parity.mjs`, documented nowhere else, and deleted at cutover with a test that nothing reads it.
 - **The parity check also compares** `serve --mcp`'s `initialize` and `tools/list` and an edit replay, beyond R3's four comparisons.
 
+- **As built, PR 1:** the read commands' goldens are compared by the program's own corpus test (`crates/pixellab/tests/corpus.rs`), since the engine crate can't run commands; `crates/engine/tests/corpus.rs` compares the SVGs and preview PNGs. The number cases `jsnum.rs` is tested against are committed (`crates/engine/tests/data/jsnum.json`, written by `goldens.mjs --jsnum`), so `cargo test` needs no Node. A `rustfmt.toml` sets 140 columns. The canonical text writes an unknown key after the known ones instead of dropping it, as `serialize.mjs` did.
+
 If the owner wants any of these the spec's way, `spec.md` wins.
 
 ## Risks

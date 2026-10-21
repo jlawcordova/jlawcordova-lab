@@ -1,0 +1,20 @@
+[package]
+name = "pixellab"
+description = "Pixel Lab: the pixellab program, with its CLI, the app's stdio server and the MCP server."
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "pixellab"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pixellab"
+path = "src/main.rs"
+
+[dependencies]
+engine.workspace = true
+serde.workspace = true
+serde_json.workspace = true
