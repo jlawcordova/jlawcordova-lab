@@ -79,15 +79,47 @@ fn moved(doc: &mut Value, path: &[usize], edit: impl FnOnce(&mut Value)) -> Opti
 
 // ---- through the commands and a session (U14, U22) ----
 
-struct Session;
+mod common;
 
-fn session() -> Session {
-    unimplemented!("needs U14: a session over a document with the stone and the groups scene")
+use pixellab::context::Ctx;
+use pixellab::document::{open_document, OpenOptions};
+use pixellab::session::{Mode, Options};
+
+/// A session over a temp copy of the sample document with the stone and the groups scene added.
+struct Session {
+    session: pixellab::session::Session,
+    _doc: common::TempDocument,
 }
 
-#[allow(clippy::result_large_err)]
-fn call(_s: &mut Session, _name: &str, _params: Value) -> Result<Value, CommandError> {
-    unimplemented!("needs U22: the scene commands")
+fn session() -> Session {
+    let doc = common::make_document();
+    doc.write("objects/stone.json", &engine::format::stringify_pretty(&stone()));
+    doc.write("scenes/groups.json", &engine::format::stringify_pretty(&groups_scene()));
+    let state = common::temp_dir("pixellab-state-");
+    let mut env = doc.env();
+    env.insert("PIXELLAB_STATE".into(), state.to_string_lossy().into_owned());
+    let document = open_document(&OpenOptions {
+        doc: Some(doc.root.to_string_lossy().into_owned()),
+        site: None,
+        env: env.clone(),
+        cwd: doc.root.clone(),
+    })
+    .unwrap();
+    let session = pixellab::session::Session::new(document, Options { mode: Mode::Direct, env, ..Options::default() });
+    Session { session, _doc: doc }
+}
+
+/// Calls a command on the groups scene, as the Node suite's `call` does.
+fn call(s: &mut Session, name: &str, params: Value) -> Result<Value, CommandError> {
+    // `{ name: 'groups', ...params }`: the name goes first.
+    let mut merged = Map::new();
+    merged.insert("name".into(), json!("groups"));
+    merged.extend(params.as_object().unwrap().clone());
+    let params = Value::Object(merged);
+    pixellab::registry::registry().call(&mut Ctx::new(&mut s.session), name, params, false).map_err(|e| match e {
+        pixellab::errors::Error::Command(c) => c,
+        pixellab::errors::Error::Internal(m) => CommandError::new(m, "internal"),
+    })
 }
 
 fn groups(s: &mut Session) -> Vec<Value> {
@@ -95,7 +127,6 @@ fn groups(s: &mut Session) -> Vec<Value> {
 }
 
 #[test]
-#[ignore = "needs U22"]
 fn r9_a_cube_moved_by_tiles_takes_its_ground_groups_data_col_data_row_data_x_and_data_y_with_it() {
     let mut s = session();
     let r = call(&mut s, "scene.move", json!({ "item": "0.0", "by": [1, 0] })).unwrap();
@@ -107,7 +138,6 @@ fn r9_a_cube_moved_by_tiles_takes_its_ground_groups_data_col_data_row_data_x_and
 }
 
 #[test]
-#[ignore = "needs U22"]
 fn r9_a_sprite_placed_by_pixel_takes_its_groups_foot_with_it_scene_set_and_scene_snap_follow_too() {
     let mut s = session();
     let nudged = call(&mut s, "scene.move", json!({ "item": "rock", "nudge": [1, -1] })).unwrap();
@@ -129,7 +159,6 @@ fn r9_a_sprite_placed_by_pixel_takes_its_groups_foot_with_it_scene_set_and_scene
 }
 
 #[test]
-#[ignore = "needs U22"]
 fn r9_a_group_that_points_elsewhere_no_keep_group_and_a_keyed_move_leave_the_attributes_alone() {
     let mut s = session();
     let other = call(&mut s, "scene.move", json!({ "item": "2.0", "nudge": [1, 0] })).unwrap();
@@ -143,7 +172,6 @@ fn r9_a_group_that_points_elsewhere_no_keep_group_and_a_keyed_move_leave_the_att
 }
 
 #[test]
-#[ignore = "needs U22"]
 fn r10_sets_and_removes_attributes_by_group_path_or_by_an_item_inside_it() {
     let mut s = session();
     let r = call(&mut s, "scene.group.set", json!({ "group": "2", "attrs": { "data-enter": "sky", "data-x": "" } })).unwrap();
@@ -154,7 +182,6 @@ fn r10_sets_and_removes_attributes_by_group_path_or_by_an_item_inside_it() {
 }
 
 #[test]
-#[ignore = "needs U22"]
 fn r10_foot_sets_data_x_and_data_y_to_the_first_items_foot() {
     let mut s = session();
     let r = call(&mut s, "scene.group.set", json!({ "group": "2", "foot": true })).unwrap();
@@ -166,7 +193,6 @@ fn r10_foot_sets_data_x_and_data_y_to_the_first_items_foot() {
 }
 
 #[test]
-#[ignore = "needs U22"]
 fn r10_refuses_attributes_the_engine_would_a_top_level_item_and_a_call_with_nothing_to_set() {
     let mut s = session();
     assert!(call(&mut s, "scene.group.set", json!({ "group": "0", "attrs": { "style": "x" } }))
@@ -182,7 +208,6 @@ fn r10_refuses_attributes_the_engine_would_a_top_level_item_and_a_call_with_noth
 }
 
 #[test]
-#[ignore = "needs U22"]
 fn r11_into_an_existing_group_where_it_stands_among_that_groups_items() {
     let mut s = session();
     let r = call(&mut s, "scene.place", json!({ "object": "pebble", "at": [1, 0, 1], "group": "0" })).unwrap();
@@ -201,7 +226,6 @@ fn r11_into_an_existing_group_where_it_stands_among_that_groups_items() {
 }
 
 #[test]
-#[ignore = "needs U22"]
 fn r11_into_a_new_group_with_its_foot_the_group_goes_where_its_item_stands_among_the_groups() {
     let mut s = session();
     let r = call(
@@ -232,7 +256,6 @@ fn r11_into_a_new_group_with_its_foot_the_group_goes_where_its_item_stands_among
 }
 
 #[test]
-#[ignore = "needs U22"]
 fn r6_r11_a_top_level_item_goes_where_it_stands_index_is_gone_and_the_refusals() {
     let mut s = session();
     let r = call(&mut s, "scene.place", json!({ "object": "pebble", "at": [9, 9, 0] })).unwrap();
