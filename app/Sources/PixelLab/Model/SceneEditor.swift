@@ -291,6 +291,15 @@ final class SceneEditor {
 
     func mouseUp() {
         panning = false
+        // A ⌥-click that didn't become a drag selects every use (docs/intents/2026-10-agent-chat/spec.md, D6).
+        let every = app?.layers.everyUseClick
+        app?.layers.everyUseClick = nil
+        if let every, !(drag?.moved ?? false), !(app?.layers.drag?.moved ?? false) {
+            drag = nil
+            app?.layers.drag = nil
+            app?.layers.selectEveryUse(scenePixel: every.x, every.y, add: every.shift)
+            return
+        }
         if app?.layers.stageMouseUp() == true { return }
         guard let d = drag else { return }
         drag = nil
