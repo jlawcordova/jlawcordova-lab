@@ -33,7 +33,7 @@ A unit's checks: `cargo fmt --check`, `cargo test` for its crate, its ported sui
 | U23 | `commands/scene-layers.mjs`, `scene-motion.mjs` |  | U18, U19, U21 | S | merged |
 | U24 | `commands/object.mjs`, `object-edit.mjs` | `map-set.test.mjs`, object parts of `edit-commands.test.mjs` | U14, U21 | S | merged |
 | U25 | `commands/doc.mjs`, `document.mjs`, `proposal.mjs`, `check.mjs`, `art.mjs`, `common.mjs` | `art-commands.test.mjs` | U7, U14, U15, U21 | S | merged |
-| U26 | `commands/chat.mjs`, `chat-context.mjs` | `chat.test.mjs` | U14, U21 | S | waiting |
+| U26 | `commands/chat.mjs`, `chat-context.mjs` | `chat.test.mjs` | U14, U21 | S | merged |
 | U27 | `depth-edit.test.mjs`, the program parts of `depth-motion.test.mjs` | → program tests | U22–U24 | S | waiting |
 | U28 | `serve.mjs`, `server-stdio.mjs`, `server-mcp.mjs` | `servers.test.mjs`, transcripts replayed | U11, U14, U16, U21 | O | waiting |
 | U29 | `migrate.rs`, `document migrate` (D3, R8) | new tests: every refusal, notes, `colorNotes`, the legacy `source/` folder, the SVG check refusing, `--to`, in place; its output equals the bootstrap's for the corpus apart from `notes` | U7, U13, U25 | O | waiting |
