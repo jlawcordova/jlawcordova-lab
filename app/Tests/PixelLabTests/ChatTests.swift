@@ -215,3 +215,81 @@ import Testing
         #expect(ChatLinks.segments("rock 14.0", objectAt: { objects[$0] }, layers: []).allSatisfy { $0.target == nil })
     }
 }
+
+/// The chat's context (docs/intents/2026-10-agent-chat/spec.md, D5, D6): chips, the CONTEXT line,
+/// the placeholder's suggestion, every use of an object, and where a proposal came from.
+@Suite struct ChatContextTests {
+    let items = [
+        SceneItemInfo(path: "0", object: "pine", at: ItemAt(tile: [0, 0, 1])),
+        SceneItemInfo(path: "1", object: "pine", at: ItemAt(tile: [1, 0, 0]), layer: "trees"),
+        SceneItemInfo(path: "2", object: "pine", at: ItemAt(tile: [2, 0, 0]), layer: "grove"),
+        SceneItemInfo(path: "3", object: "block-road", at: ItemAt(tile: [3, 0, 0]), layer: "ground"),
+        SceneItemInfo(path: "4", object: "rock", at: ItemAt(tile: [4, 0, 0])),
+    ]
+    let layers = [
+        SceneLayerInfo(id: "trees", name: "Trees", items: 2),
+        SceneLayerInfo(id: "grove", name: "Grove", parent: "trees", items: 1),
+        SceneLayerInfo(id: "ground", name: "Ground", items: 1),
+    ]
+    var tree: LayerTree { LayerTree(items: items, layers: layers) }
+    var byPath: [String: SceneItemInfo] { Dictionary(uniqueKeysWithValues: items.map { ($0.path, $0) }) }
+
+    @Test func R9_pinsComeFirstThenTheSelectionAndGroupsShowTheirItemCount() {
+        let chips = ChatContext.chips(selection: [.layer("trees"), .item("4")], pins: [.item("4"), .item("0")], tree: tree, items: byPath, unsaved: ["0"])
+        #expect(chips.map(\.id) == ["4", "0", "layer:trees"])
+        #expect(chips.map(\.pinned) == [true, true, false])
+        #expect(chips[2].label == "Trees" && chips[2].sub == "2 items")
+        #expect(chips[1].sub == "0 · not saved" && chips[1].unsaved)
+        #expect(ChatContext.countLine(chips) == "1 group, 2 items · 2 pinned to this chat")
+        #expect(ChatContext.countLine([]) == "The whole scene")
+        #expect(chips.map(ChatContext.messageLabel) == ["rock 4", "pine 0 (not sent)", "Trees · 2 items"])
+        // A target the scene no longer has makes no chip.
+        #expect(ChatContext.chips(selection: [.item("9"), .layer("gone")], pins: [], tree: tree, items: byPath, unsaved: []).isEmpty)
+    }
+
+    @Test func R18_theSuggestionFitsTheSelectionAndMovesOnOnceAsked() {
+        let block = { (o: String) in o.hasPrefix("block") }
+        #expect(ChatContext.suggestion(objects: [], isBlock: block, asked: []) == nil)
+        #expect(ChatContext.suggestion(objects: ["block-road", "block"], isBlock: block, asked: []) == "Raise them a level")
+        #expect(ChatContext.suggestion(objects: ["block"], isBlock: block, asked: []) == "Raise it a level")
+        #expect(ChatContext.suggestion(objects: ["pine", "tree-small"], isBlock: block, asked: []) == "Make these taller")
+        #expect(ChatContext.suggestion(objects: ["pine"], isBlock: block, asked: ["make this taller"]) == "Swap it for another tree")
+        #expect(ChatContext.suggestion(objects: ["rock", "pine"], isBlock: block, asked: []) == "What are these?")
+        #expect(ChatContext.suggestion(objects: ["rock"], isBlock: block, asked: []) == "What is this?")
+        #expect(ChatContext.isTree("pine") && ChatContext.isTree("tree-small") && !ChatContext.isTree("pinecone-sign") && !ChatContext.isTree("street"))
+    }
+
+    @Test func R8_everyUseKeepsToWhatAClickCanReach() {
+        // At the top level, every pine, inside layers too: "every use" is about items.
+        #expect(tree.everyUse(of: "pine", items: items, inside: nil, hidden: [], locked: []) == ["0", "1", "2"])
+        // Inside Trees, only its pines; a hidden or locked layer below drops its items.
+        #expect(tree.everyUse(of: "pine", items: items, inside: "trees", hidden: [], locked: []) == ["1", "2"])
+        #expect(tree.everyUse(of: "pine", items: items, inside: nil, hidden: ["grove"], locked: []) == ["0", "1"])
+        #expect(tree.everyUse(of: "pine", items: items, inside: nil, hidden: [], locked: ["trees"]) == ["0"])
+        #expect(tree.everyUse(of: "pine", items: items, inside: "trees", hidden: [], locked: ["trees"]) == ["1", "2"], "a locked layer's contents are reached from inside it")
+    }
+
+    @Test func R21_aProposalSaysWhereItCameFrom() {
+        var p = ProposalSummary(id: "x", number: 12, doc: "scene:harbor", summary: ["a"], createdAt: "", agent: "claude-code 2.1.290", chat: ProposalChat(id: "c", title: "Pines"), baseMatches: true)
+        #expect(p.source == "Chat · Pines")
+        #expect(p.bannerTitle == "Previewing proposal #12 from the chat “Pines”")
+        #expect(p.numberLabel == "#12")
+        p.chat = nil
+        p.number = nil
+        #expect(p.source == "claude-code 2.1.290 · terminal")
+        #expect(p.bannerTitle == "Previewing proposal from claude-code 2.1.290")
+        // Older proposals and activity lines decode without the new fields.
+        let old = try? JSONDecoder().decode(ProposalSummary.self, from: Data(#"{"id":"x","doc":"scene:a","summary":[],"createdAt":"","agent":null,"baseMatches":true}"#.utf8))
+        #expect(old?.number == nil && old?.chat == nil)
+        let line = try? JSONDecoder().decode(ActivityEntry.self, from: Data(#"{"time":"t","tool":"scene_move","ok":true,"agent":"claude-code 2.1.290","chat":{"id":"c","title":"Pines"}}"#.utf8))
+        #expect(line?.who == "chat · Pines")
+    }
+
+    @Test func R16_aSavesResultBecomesACardTitledByItsEdits() {
+        let one = ChatModel.proposal(from: #"{"doc":"scene:harbor","proposal":"p1","number":3,"edits":["pine moved to column 4"]}"#)
+        #expect(one?.text == "Pine moved to column 4" && one?.edits == [] && one?.number == 3)
+        let two = ChatModel.proposal(from: #"{"doc":"scene:harbor","proposal":"p2","edits":["a","b"]}"#)
+        #expect(two?.text == "2 edits to harbor" && two?.edits == ["a", "b"])
+        #expect(ChatModel.proposal(from: #"{"doc":"scene:harbor","wrote":true}"#) == nil, "a direct save makes no card")
+    }
+}

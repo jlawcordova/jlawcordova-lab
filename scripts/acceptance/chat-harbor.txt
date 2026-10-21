@@ -1,0 +1,103 @@
+# The Agent chat, part 3 (docs/intents/2026-10-agent-chat/spec.md): the selection as context on a
+# temp copy of the harbor example, which has layers. acceptance.sh runs it with the fake Claude Code
+# installed and signed in (PIXELLAB_CLAUDE_HOME, FAKE_CLAUDE_SIGNED_IN=1).
+open scene:harbor
+appearance dark
+righttab agent
+expect setup ready
+# R9, R10: nothing selected is the whole scene
+select none
+expect chips none
+expect contextline The whole scene
+expect context (nothing selected: the whole scene is in view)
+expect placeholder Select something on the stage, then ask Claude
+# R7: a click picks the layer first; its chip has its name and item count
+click -16 79
+expect selection layer:trees
+expect chips Trees 8 items
+expect contextline 1 group
+expect context group trees "Trees" items=1.0,14.0,21.0,28.0,39.0,49.0,50.0,80.0
+expect suggestion Make these taller
+expect placeholder Make these taller
+# R18: Tab takes the suggestion while the input is empty
+chatkey tab
+expect draft Make these taller
+chat type
+# Inside the layer a click picks the item; R8: an Option-click picks every use of its object
+dblclick -16 79
+expect inside trees
+expect selection 80.0
+expect chips pine 80.0
+expect context item 80.0 object=pine at=tile 5,6,0 group=trees
+altclick -16 79
+expect selection 14.0,39.0,80.0
+expect contextline 3 items
+inside done
+select 51
+selectuses
+expect selection 51,85.0
+expect suggestion What are these?
+# R9: pin a chip; it stays while the selection changes, and belongs to this chat
+chip pin 51
+select layer:boat
+expect chips rock 51,Boat 1 item
+expect pinned 51
+expect contextline 1 group, 1 item · 1 pinned to this chat
+expect context item 51 object=rock at=tile 0,7,0 pinned
+snapshot @OUT@/chat-context-dark.png
+chat new
+expect pinned none
+chat open 2
+expect pinned 51
+chip remove 51
+expect pinned none
+# R15: a question about the trees, answered "every"
+select 14.0
+select add 39.0
+chat send Make these taller
+chat wait
+expect chatquestion pine is used 3 times in harbor. Make every pine taller, or only these 2?
+choose 2
+chat wait
+expect chosen Every pine (3)
+expect cards 1
+expect ghostchat Make these taller
+expect banner Previewing proposal #1 from the chat “Make these taller”
+snapshot @OUT@/chat-banner-dark.png
+appearance light
+snapshot @OUT@/chat-banner-light.png
+appearance dark
+# R17: another chat hides this chat's ghost
+chat new
+expect ghostchat off
+chat open 2
+card ghost
+expect ghostchat Make these taller
+card reject
+expect cardstatus Rejected
+expect lastnote You rejected #1 · nothing changed
+expect proposals 0
+# R6: Ask Claude about this, from the Inspector
+righttab inspector
+select 80.0
+askclaude
+expect righttab agent
+# R11: an item placed since the save is left out, its chip says so, Save now brings it in
+select none
+library rock
+place 0 0 1
+tool select
+expect unsavedcount 1
+expect context (1 selected item is left out: it isn't saved yet)
+snapshot @OUT@/chat-unsaved-dark.png
+appearance light
+snapshot @OUT@/chat-unsaved-light.png
+savenow
+expect unsaved none
+expect dirty false
+expect context object=rock at=tile 0,0,1
+appearance dark
+# Object mode: the whole object
+open object:pine
+expect contextline The whole object
+expect context <selection document="harbor" object="pine"
