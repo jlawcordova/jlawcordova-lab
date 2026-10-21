@@ -54,15 +54,15 @@ chat open 2
 expect pinned 51
 chip remove 51
 expect pinned none
-# R15: a question about the trees, answered "every"
+# R15: a question about the trees, answered "only these"
 select 14.0
 select add 39.0
 chat send Make these taller
 chat wait
 expect chatquestion pine is used 3 times in harbor. Make every pine taller, or only these 2?
-choose 2
+choose 1
 chat wait
-expect chosen Every pine (3)
+expect chosen Only these 2
 expect cards 1
 expect ghostchat Make these taller
 expect banner Previewing proposal #1 from the chat “Make these taller”

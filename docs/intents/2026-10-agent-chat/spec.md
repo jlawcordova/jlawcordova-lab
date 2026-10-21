@@ -102,7 +102,7 @@ Lines that aren't JSON go to the turn's diagnostics (shown with a failed turn), 
 
 **Stop** ends the process (SIGINT, then SIGTERM after 2 s) and notes "Stopped" ("· nothing was proposed" when no card came in the turn). **Quitting** the app stops a running turn the same way.
 
-**One turn at a time.** One turn runs at a time, app-wide. While it runs, the other chats' inputs say "Claude is working in “<title>”" and can't send.
+**One turn at a time.** One turn runs at a time, app-wide, counting a send that is still fetching its block (so Return twice, or Return and an answer, can't start two). While it runs, the other chats' inputs say "Claude is working in “<title>”" and can't send.
 
 ### D2. Finding Claude Code and the setup flow (R4)
 
@@ -186,7 +186,7 @@ With nothing: `  (nothing selected: the whole scene is in view)`. A group lists 
 
 - **The chat on the MCP side.** `serve --mcp` reads `PIXELLAB_CHAT` and `PIXELLAB_CHAT_TITLE` from its environment into the session. A proposal it writes gains `chat: { id, title }`. Each activity line gains `agent` (the MCP client's name and version) and, from a chat, `chat: { id, title }`.
 - **Numbers.** `state.writeProposal` gives a proposal a `number` the first time it's written: it appends the id to `proposal-numbers.log` in the state dir (one line per proposal, append-only, so two servers writing at once each get their own line) and the number is that line's position. A rewritten proposal keeps it. `proposal.list` and `proposal.show` return `number` and `chat`; older proposals have neither and show without a number.
-- **Cards.** A `doc_save` tool result with `proposal` adds a proposal message `{ proposal, number, doc, edits }`, titled with its one edit or "2 edits to harbor". It goes after Claude's next words (or at the turn's end), so the card follows the reply about it, as in the prototype. Its status: waiting while `proposal.list` has it; `applied` or `rejected` when the app approved or rejected it (from the card, the banner or the Agent window, which tell the chat model); `elsewhere` when it left the list otherwise ("Settled outside Pixel Lab"). Card buttons: **Approve** and **Reject** select it in `AgentModel` and run its `approve()` / `reject()` (the same questions and alerts); **Show on stage / Hide on stage** selects it with the ghost on, or turns the ghost off; **Diff in the Agent window** selects it and opens the window. The chat notes "You approved #12 · wrote scenes/harbor.mjs" or "You rejected #12 · nothing changed".
+- **Cards.** A `doc_save` tool result with `proposal` adds a proposal message `{ proposal, number, doc, edits }`, titled with its one edit or "2 edits to harbor". It goes after Claude's next words (or at the turn's end), so the card follows the reply about it, as in the prototype. Its status: waiting while `proposal.list` has it; `applied` or `rejected` when the app approved or rejected it (from the card, the banner or the Agent window, which tell the chat model); `elsewhere` when it left the list otherwise ("Settled elsewhere"): listed earlier in this launch and gone now, or, for a card from an earlier launch, not in the list at all (settled while Pixel Lab was closed). Approve or Reject on such a card marks it and notes "#3 isn't waiting any more: it was approved or rejected outside Pixel Lab." rather than doing nothing. Card buttons: **Approve** and **Reject** select it in `AgentModel` and run its `approve()` / `reject()` (the same questions and alerts); **Show on stage / Hide on stage** selects it with the ghost on, or turns the ghost off; **Diff in the Agent window** selects it and opens the window. The chat notes "You approved #12 · wrote scenes/harbor.mjs" or "You rejected #12 · nothing changed".
 - **Ghosts per chat.** When a turn in the open chat makes a proposal, it's selected with its ghost on. Opening another chat, or the Chats list, turns the ghost off if the selected proposal is from a different chat. The Agent window's own selection works as before.
 - **The banner** (`ProposalBanner`): for a chat proposal, "Previewing proposal #12 from the chat “Forest by the house”", the second line "2 edits · <summary>". Otherwise "Previewing proposal #11 from claude-code 2.1.0".
 - **Badges:** the toolbar's sparkle and the Dock count every waiting proposal, chats' included, as now.
@@ -279,7 +279,7 @@ New actions (in `ScriptRunner.swift` and `CLAUDE.md`):
 ```
 righttab inspector|agent          agentwindow open           askclaude   (the Inspector's button)
 setup check|install|signin|open|cancel|signout|copy|choose <path>|wait <state>
-chat new|list|open <n>|send [<text…>]|type <text…>|stop|wait
+chat new|list|open <n>|send [<text…>]|type <text…>|stop|wait|remember   (expect session same|new|none: R3)
 chatkey tab|shift+tab|return|shift+return|esc   (a real key event into the input)
 details on|off   steps expand <n>   choose <answer n> [<question n>]   link <text…>  (clicks the link with that text in the last reply)
 chip pin|unpin|remove <target>    savenow
@@ -332,4 +332,6 @@ README: an "Agent chat" section (setup, the tab, context and chips, ⌥-click, q
 - From the intent, how a question reaches the app: a pixellab tool, `chat_ask` (D8).
 - From the intent, checking and starting the sign-in without a terminal: `claude auth status --json` and `claude auth login --claudeai`, with a polled status (D2); flagged above.
 - From the intent, ⌥⌘A: it shows the Agent tab; ⇧⌥⌘A opens the Agent window (D13).
+- From the verification (for the owner): R2 keeps the owner's Claude Code settings, hooks, plugins and other MCP servers out of the chat (`--setting-sources ""`, `--strict-mcp-config`). The owner's own memory files (`~/.claude/CLAUDE.md`, auto-memory) may still load into a chat turn: `--bare` would skip them but also drops the CLI's own login, so it can't be used. As built they're allowed (they're the owner's own notes); say if the chat should be free of them too.
+- From the verification: when Claude Code has lost a chat's session (its files under `~/.claude/projects/` cleared), the next turn starts a new session once and says so (D1); `chat-relaunch-3.txt` tests it. Nothing more is planned.
 - From the intent's out-of-scope list, carried forward as follow-ups: object-mode context (a pixel region inside a sprite), and Claude seeing unsaved edits. Also new: deleting and renaming chats.

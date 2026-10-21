@@ -10,7 +10,17 @@
     ]
   },
   {
-    "match": "^(only|every)\\b",
+    "match": "^every\\b",
+    "steps": [
+      { "tool": "scene_items", "input": { "name": "{{scene}}" } },
+      { "tool": "object_show", "input": { "name": "{{first}}" } },
+      { "tool": "object_resize", "input": { "name": "{{first}}", "height": "{{object_show.size.1+4}}" } },
+      { "tool": "doc_save", "input": { "doc": "object:{{first}}" } },
+      { "say": "Made {{first}} 4 px taller, so all {{uses}} uses change, since they share the object. It's proposal {{proposal}}." }
+    ]
+  },
+  {
+    "match": "^only\\b",
     "steps": [
       { "tool": "scene_items", "input": { "name": "{{scene}}" } },
       { "tool": "scene_move", "each": "items", "input": { "name": "{{scene}}", "item": "{{item}}", "by": [0, 0, 1] } },

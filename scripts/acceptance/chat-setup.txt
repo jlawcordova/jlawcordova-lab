@@ -50,6 +50,9 @@ chat send Move these one tile east
 expect running true
 chat wait
 expect running false
+# R3: the chat has a Claude session; its follow-ups resume it
+chat remember
+expect session same
 expect chattitle Move these one tile east
 expect steps 5
 expect steplabel Saved it as proposal #1 for you to review · 5 steps
@@ -84,6 +87,7 @@ chat wait
 expect chosen Only these 2
 expect cards 2
 expect proposals 2
+expect session same
 # R18: Return sends from the input, Shift-Return adds a line
 chat type What are these
 chatkey shift+return
@@ -101,9 +105,11 @@ expect lastnote Stopped · nothing was proposed
 chat new
 expect messages 0
 expect chattitle New chat
+expect session none
 select 51
 chat send What is this
 chat wait
+expect session new
 expect chats 2
 chat list
 snapshot @OUT@/chat-list-dark.png

@@ -76,7 +76,7 @@ import Foundation
 /// and PIXELLAB_CLAUDE_INSTALLER pointing at scripts/fake-claude, never the owner's Claude Code):
 ///
 ///     righttab inspector|agent   setup check|install|signin|open|cancel|signout|copy|choose <path>|wait <state>
-///     chat new|list|open <n>|type <text…>|send [<text…>]|stop|wait   chatkey tab|shift+tab|return|shift+return|esc
+///     chat new|list|open <n>|type <text…>|send [<text…>]|stop|wait|remember   (expect session same|new|none)   chatkey tab|shift+tab|return|shift+return|esc
 ///     details on|off   steps expand <n>   choose <answer n> [<question n>]   link <text…>
 ///     expect setup|righttab|chats|chattitle|messages|steps|steplabel|chatquestion|chosen|cards|cardstatus <value>
 ///     expect placeholder|draft|draftlines|running|claudeinfo|lastnote|loginurl|details <value>
@@ -94,6 +94,8 @@ final class ScriptRunner {
     let lines: [String]
     let size: CGSize
     private var failures = 0
+    /// The chat's Claude session when `chat remember` ran, for `expect session same|new`.
+    private var rememberedSession: String?
     /// What the last `cli` step printed, for `expect cli`.
     private var lastCLIOutput = ""
 
@@ -396,14 +398,16 @@ final class ScriptRunner {
             // `saveas <path>`: document.copy, then the app switches to the copy.
             let to = try arg(words, 1)
             await model.saveAs(to: to)
-            let expected = to.hasSuffix(".pixellab") ? to : "\(to).pixellab"
+            // Compared as standardized paths, so "…/T//copy.pixellab" (a $TMPDIR with a trailing /) matches.
+            let expected = ((to.hasSuffix(".pixellab") ? to : "\(to).pixellab") as NSString).standardizingPath
+            let opened = { model.sessionInfo?.document.map { ($0.root as NSString).standardizingPath } }
             let started = Date()
             while Date().timeIntervalSince(started) < 30 {
-                if case .ready = model.phase, model.sessionInfo?.document?.root == expected { break }
+                if case .ready = model.phase, opened() == expected { break }
                 if model.notice != nil { break }
                 try? await Task.sleep(for: .milliseconds(100))
             }
-            guard case .ready = model.phase, model.sessionInfo?.document?.root == expected else {
+            guard case .ready = model.phase, opened() == expected else {
                 throw Failure(model.notice ?? "the copy didn't open; still on \(model.sessionInfo?.document?.root ?? "?")")
             }
             return "now \(expected)"
@@ -905,6 +909,9 @@ final class ScriptRunner {
                 guard chat.isRunning else { throw Failure("no turn is running") }
                 chat.stop()
                 try await waitFor("the turn to stop", seconds: 10) { !chat.isRunning }
+            case "remember":
+                rememberedSession = chat.current?.session
+                return rememberedSession ?? "no session yet"
             case "wait":
                 try await waitFor("the turn to end") { !chat.isRunning }
                 return chat.current?.messages.last.map { "\($0.kind.rawValue): \(($0.text ?? $0.human ?? "").prefix(80))" }
@@ -1040,6 +1047,10 @@ final class ScriptRunner {
         case "lastnote": return messages.last(where: { $0.kind == .note })?.text ?? "none"
         case "loginurl": return chat.loginURL?.absoluteString ?? "none"
         case "details": return chat.details ? "on" : "off"
+        // R3: the open chat's Claude session against the one `chat remember` noted.
+        case "session":
+            guard let now = chat.current?.session else { return "none" }
+            return now == rememberedSession ? "same" : "new"
         case "chips": return chat.chips.isEmpty ? "none" : chat.chips.map { "\($0.label) \($0.sub)" }.joined(separator: ",")
         case "pinned": return chat.pins.isEmpty ? "none" : chat.pins.map(\.description).joined(separator: ",")
         case "unsavedcount": return String(chat.context?.unsaved.count ?? 0)

@@ -70,6 +70,8 @@ async function turn() {
   }
   for (const name of ['--strict-mcp-config', '--verbose']) if (!args.includes(name)) return refuse(`${name} is missing`);
   if (!(flag('--allowedTools') ?? '').startsWith('mcp__pixellab__')) return refuse('--allowedTools mcp__pixellab__* is missing');
+  if (flag('--setting-sources') !== '') return refuse('--setting-sources "" is missing');
+  if (!(flag('--disallowedTools') ?? '').split(/[ ,]+/).includes('mcp__pixellab__document_new')) return refuse('--disallowedTools mcp__pixellab__document_new is missing');
 
   const message = await readMessage();
   const resume = flag('--resume');
@@ -118,7 +120,10 @@ async function turn() {
     }
   }
   mcp.close();
-  writeFileSync(join(stateDir, 'sessions', `${session}.json`), JSON.stringify({ session, last: message.slice(0, 200) }));
+  // A resumed session counts its turns, so a test can tell one conversation from a new one each message.
+  const file = join(stateDir, 'sessions', `${session}.json`);
+  const turnsSoFar = existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')).turns ?? 1) : 0;
+  writeFileSync(file, JSON.stringify({ session, turns: turnsSoFar + 1, last: message.slice(0, 200) }));
   out({ type: 'result', subtype: 'success', is_error: false, duration_ms: 0, num_turns: turnsUsed, result: last, ...base, total_cost_usd: 0, uuid: randomUUID() });
   return 0;
 }

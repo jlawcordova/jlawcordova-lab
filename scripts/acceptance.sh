@@ -127,9 +127,31 @@ grep -q '"chat": {' "$proposal" && grep -q '"number": 1' "$proposal" || { echo "
 grep -q '"chat":{"id"' "$chat_state/activity.jsonl" || { echo "no chat lines in the activity log" >&2; exit 1; }
 [[ $(ls "$chat_state"/chats/*.json | wc -l | tr -d ' ') == 2 ]] || { echo "expected 2 chats in the state dir" >&2; exit 1; }
 [[ -z $(find "$doc" -name '*.json' ! -name manifest.json) ]] || { echo "chat state went into the document" >&2; exit 1; }
-echo "the chat's proposals name their chat and number; 2 chats kept in the state dir, none in the document"
+# R3: each chat is one Claude session, its follow-ups resumed (the stopped turn never got to save one).
+sessions=("$claude_home"/.local/share/claude/fake/fake-claude-state/sessions/*.json)
+[[ ${#sessions[@]} == 2 ]] || { echo "expected 2 Claude sessions for 2 chats, found ${#sessions[@]}: follow-ups didn't resume (R3)" >&2; exit 1; }
+grep -q '"turns":4' "${sessions[@]}" || { echo "the first chat's four turns weren't one resumed session (R3)" >&2; exit 1; }
+echo "the chat's proposals name their chat and number; 2 chats kept in the state dir, none in the document; one Claude session per chat"
 echo "==> the Agent chat on the harbor example: layers as chips, Option-click, pins, unsaved items, a question, ghosts per chat"
 run_chat chat-harbor.txt chat-harbor.log harbor
+echo "==> the Agent chat across launches: the session resumed, a proposal settled while closed, a lost session"
+relaunch_doc="$out/examples/relaunch.pixellab" relaunch_state="$out/state-relaunch" relaunch_fake="$out/fake-relaunch"
+rm -rf "$relaunch_doc" "$relaunch_state" "$relaunch_fake" && cp -R "$root/examples/harbor.pixellab" "$relaunch_doc" && mkdir -p "$relaunch_state"
+relaunch() { # relaunch <part>
+  sed "s#@OUT@#$shots#g" "$root/scripts/acceptance/chat-relaunch-$1.txt" > "$out/chat-relaunch-$1.txt"
+  FAKE_CLAUDE_SIGNED_IN=1 FAKE_CLAUDE_STATE="$relaunch_fake" PIXELLAB_CLAUDE_HOME="$fake_home" PIXELLAB_DOC="$relaunch_doc" \
+    PIXELLAB_SCRIPT="$out/chat-relaunch-$1.txt" PIXELLAB_STATE="$relaunch_state" "$app/Contents/MacOS/PixelLab" 2>&1 | grep '^script:' > "$out/chat-relaunch-$1.log" || true
+  tail -1 "$out/chat-relaunch-$1.log"
+  grep -q 'all steps passed' "$out/chat-relaunch-$1.log"
+}
+relaunch 1
+# Pixel Lab is closed: the chat's proposal is rejected from a terminal.
+proposal=$(basename "$(ls "$relaunch_state"/proposals/*.json | head -1)" .json)
+PIXELLAB_STATE="$relaunch_state" node "$app/Contents/Resources/cli/bin/pixellab.mjs" proposal reject "$proposal" --document "$relaunch_doc"
+relaunch 2
+# Claude Code loses the chat's session.
+rm -rf "$relaunch_fake/sessions"
+relaunch 3
 echo "==> sort: a document written before depth order, the Checks warning, Sort, save"
 # The site's document is in depth order since its own depth-order change (f5d74e3), so the unsorted one is
 # the document as it was just before it, read (not checked out) from the site's history.
