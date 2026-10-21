@@ -10,6 +10,8 @@ enum SettingsKey {
     static let appearance = "appearance"
     static let lastDoc = "lastDoc"
     static let showGrid = "showGrid"
+    /// View › Show Published Frame (a per-user choice, never saved in the document).
+    static let showFrame = "showFrame"
     /// The claude command the owner chose in the Agent tab's setup (empty: look for it).
     static let claude = "claudePath"
     /// The right column's tab: inspector or agent.

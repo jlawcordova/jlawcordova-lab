@@ -53,7 +53,11 @@ final class DocumentModel {
     // The scene's size (docs/intents/2026-10-scene-canvas/spec.md, R9, R10)
     /// `scene.frame`: whether the box follows the content or is fixed, the box
     /// the scene publishes at (scene pixels) and its margin. nil until asked.
-    var frameInfo: SceneFrameResult?
+    var frameInfo: SceneFrameResult? {
+        didSet { syncFrameDraft() }
+    }
+    /// The inspector's box field: "x, y, w, h".
+    var frameDraft = ""
     /// The timeline generation `frameInfo` was asked for in; a later one is stale.
     @ObservationIgnored var frameStamp: Int?
     /// The scene pixels the stage renders (the workspace); grows, never shrinks.
@@ -64,6 +68,11 @@ final class DocumentModel {
     /// The box the scene publishes at (an empty scene's one tile, until `scene.frame` answers).
     var publishBox: CGRect { frameInfo?.box ?? CGRect(x: -16, y: -8, width: 32, height: 16) }
     var publishSize: CGSize { publishBox.size }
+    func syncFrameDraft() {
+        let b = publishBox
+        frameDraft = "\(Int(b.minX)), \(Int(b.minY)), \(Int(b.width)), \(Int(b.height))"
+    }
+
     var isFixedFrame: Bool { frameInfo?.isFixed ?? false }
 
     // Scene editing (slice 4)

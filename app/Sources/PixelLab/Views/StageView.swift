@@ -117,6 +117,7 @@ struct StageView: View {
                         if !model.objectEditor.isBlock { AnchorMark(geometry: geometry) }
                     } else {
                         StageOverlay(geometry: geometry, doc: doc, render: render)
+                        if model.showFrame { PublishedFrameOutline(geometry: geometry, doc: doc) }
                     }
                 }
                 .frame(width: geometry.contentSize.width, height: geometry.contentSize.height, alignment: .topLeading)
