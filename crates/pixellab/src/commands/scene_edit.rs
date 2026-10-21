@@ -163,7 +163,13 @@ fn place_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
             }
             Value::Object(at)
         } else if given(&params, "at") {
-            json!({ "tile": params["at"].clone() })
+            // col,row,level: a level given is used as given. col,row alone leaves the level to stacking.
+            let mut tile = params["at"].as_array().cloned().unwrap_or_default();
+            tile.truncate(3);
+            while tile.len() < 3 {
+                tile.push(json!(0));
+            }
+            json!({ "tile": tile })
         } else {
             // SceneMode/Lab.open: the cursor starts on the tile at the middle of the view. A scene without a
             // viewBox has no view: it starts at the middle of what is in it now, or the origin tile when empty.
@@ -187,6 +193,23 @@ fn place_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
                 None => json!({ "tile": [0, 0, 0] }),
             }
         };
+        // Stacking (scene-canvas spec R17): no level given (a tile as col,row, or no position at all) puts
+        // the item on top of what stands there; --on-top says so for a level or a pixel point too.
+        let level_given = if given(&params, "px") {
+            true
+        } else if given(&params, "at") {
+            params["at"].as_array().is_some_and(|a| a.len() >= 3)
+        } else {
+            false
+        };
+        let mut at = at;
+        let mut over: Option<String> = None;
+        if flag(&params, "onTop") || !level_given {
+            let probe = json!({ "object": object, "at": at });
+            let stand = ops::stand_level(&loaded.sources, doc, &probe, None, None);
+            ops::put_level(&mut at, stand.level);
+            over = stand.over;
+        }
         let new_group = params.get("newGroup").and_then(Value::as_object).filter(|_| given(&params, "newGroup"));
         let r = if given(&params, "group") || new_group.is_some() {
             let group = match opt_str(&params, "group") {
@@ -227,6 +250,10 @@ fn place_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
         let message = match &layer {
             Some(l) => format!("{} in {}", str_of(r.get("message")), str_of(l.get("name"))),
             None => str_of(r.get("message")),
+        };
+        let message = match &over {
+            Some(o) => format!("{message}, on top of {o}"),
+            None => message,
         };
         let mut result = obj(vec![("path", json!(path_string(&path))), ("item", ops::item_at(doc, &path).cloned().unwrap_or(Value::Null))]);
         if let Some(g) = &item_group {
@@ -534,6 +561,13 @@ fn group_set_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     })
 }
 
+// ---- scene.drop ----
+
+fn drop_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
+    let loaded = ctx.sources()?;
+    move_edit(ctx, &params, |doc, path| Ok(ops::drop_item(&loaded.sources, doc, path)?), None)
+}
+
 // ---- scene.frame ----
 
 /// The frame a scene would publish at with this source, as result fields (scene-canvas spec R7, R8).
@@ -625,9 +659,16 @@ pub fn commands() -> Vec<Command> {
     for (k, v) in [
         ("name", name_param()),
         ("object", json!({ "type": "string", "description": "the object to place" })),
-        ("at", tile_param()),
+        (
+            "at",
+            json!({ "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 3, "description": "a tile: col,row[,level]; without a level the item goes on top of what stands there" }),
+        ),
         ("px", px_param()),
         ("level", json!({ "type": "integer", "description": "with --px: how high the item stands, for depth order (default 0)" })),
+        (
+            "onTop",
+            json!({ "type": "boolean", "default": false, "description": "put the item on top of the block on its tile, whatever level --at or --px give" }),
+        ),
         ("class", json!({ "type": "string", "description": "a class list for the item" })),
         ("id", json!({ "type": "string", "description": "an id for the item (lowercase kebab-case, unique in the scene)" })),
         (
@@ -659,7 +700,10 @@ pub fn commands() -> Vec<Command> {
     place.description = Some(concat!(
         "Like the lab's Place tool, but the item goes where it stands: it is added to its list and the scene's items are put in depth order, ",
         "so it draws behind what is in front of it and over what is behind (scene.items shows the order). With neither --at nor --px, ",
-        "it goes on the level-0 tile at the middle of the view, where the lab's cursor starts. --px takes --level, how high the item stands ",
+        "it goes on the tile at the middle of the view, where the lab's cursor starts (the middle of the scene's content when it has no viewBox). ",
+        "With no level given (--at col,row, or no position) it stands on top of whatever block covers that tile: on the highest one there, ",
+        "in whole levels, or on the ground (level 0); a block of height h rests with its bottom on that top. --at col,row,level is used as given ",
+        "unless --on-top is set, which also works for --px. --px takes --level, how high the item stands ",
         "(default 0), which is only for depth: its pixel point is where its foot is drawn. ",
         "--group puts it inside an existing group (the group's path, or an item inside it); --new-group wraps it in a new group with those attributes ",
         r#"(class and data-*, like {"class": "enter", "data-enter": "object"}), and --foot sets that group's data-x and data-y to the item's foot. "#,
@@ -853,6 +897,22 @@ pub fn commands() -> Vec<Command> {
     ];
     group_set.format = Some(format_change);
 
+    let mut drop = Command::new(
+        "scene.drop",
+        "Drop an item onto whatever it stands over: down to the top of the block under it, or the ground",
+        item_params(vec![("keepGroup", keep_group_param())]),
+        true,
+        drop_run,
+    );
+    drop.description = Some(concat!(
+        "As the lab's Drop key: the item's level becomes the one where it rests on the highest block under its column and row (a block of height h ",
+        "rests with its bottom on it), or level 0, the ground, when nothing is under it. It never moves up; an item already resting stays. ",
+        "One undo step. The item's group's data-x/data-y follow, as scene.move keeps them (--no-keep-group leaves them), and the scene is put in depth order."
+    ));
+    drop.args = vec!["name", "item"];
+    drop.examples = vec!["pixellab scene drop hero-island 12", "pixellab scene drop hero-island crate --dry-run"];
+    drop.format = Some(format_change);
+
     let mut frame = Command::new(
         "scene.frame",
         "Show a scene's published size, fix it (--box), fit it to its content (--fit) or set its margin",
@@ -883,5 +943,5 @@ pub fn commands() -> Vec<Command> {
     ];
     frame.format = Some(format_change);
 
-    vec![place, mv, set, duplicate, remove, snap, sort, create, group_set, frame]
+    vec![place, mv, set, duplicate, remove, snap, sort, create, group_set, drop, frame]
 }

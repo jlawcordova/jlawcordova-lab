@@ -180,7 +180,7 @@ fn bare_pixellab_prints_help_to_stderr_with_exit_code_2() {
 fn group_help_pixellab_scene_help_pixellab_help_scene() {
     let (code, out, _) = spawn_cli(&["scene", "--help"]);
     assert_eq!(code, 0);
-    assert!(out.lines().any(|l| l == "pixellab scene: 28 commands"), "{out}");
+    assert!(out.lines().any(|l| l == "pixellab scene: 29 commands"), "{out}");
     assert!(out.lines().any(|l| l
         == "  pixellab scene render <name> [--scale <n>] [--time <n>] [--theme <light|dark>] [--play <text>] [--view <n,…>] [--show <text>] [--hide <text,…>] [--focus <text>] [--out <file.png>]"));
     assert!(out.lines().any(|l| l == "  pixellab scene list"));

@@ -66,6 +66,7 @@
 | [`proposal show`](#proposalshow) | Show a proposal: its edits, the source, and a diff from the file as it is now | read |
 | [`scene action`](#sceneaction) | Add, change or delete a scene item's action: a one-shot move the page plays by name | edit |
 | [`scene ambient`](#sceneambient) | Set or clear a scene item's ambient loop: a move that repeats on its own | edit |
+| [`scene drop`](#scenedrop) | Drop an item onto whatever it stands over: down to the top of the block under it, or the ground | edit |
 | [`scene duplicate`](#sceneduplicate) | Duplicate an item one column over, where the copy stands in depth order | edit |
 | [`scene frame`](#sceneframe) | Show a scene's published size, fix it (--box), fit it to its content (--fit) or set its margin | edit |
 | [`scene group set`](#scenegroupset) | Set or remove a group's class and data attributes, or set its data-x and data-y to its first item's foot | edit |
@@ -1185,6 +1186,29 @@ pixellab scene ambient meadow cloud --duration 16000 --keys '[{"t":0,"move":[0,0
 pixellab scene ambient meadow cloud --clear
 ```
 
+#### scene.drop
+
+Drop an item onto whatever it stands over: down to the top of the block under it, or the ground.
+
+```
+pixellab scene drop <name> <item> [--keep-group]
+```
+
+As the lab's Drop key: the item's level becomes the one where it rests on the highest block under its column and row (a block of height h rests with its bottom on it), or level 0, the ground, when nothing is under it. It never moves up; an item already resting stays. One undo step. The item's group's data-x/data-y follow, as scene.move keeps them (--no-keep-group leaves them), and the scene is put in depth order.
+
+edits docs · MCP tool `scene_drop`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id |
+| `--keep-group` | boolean | default `true` | keep the item's group in step: data-x/data-y that were its placement point or foot, and data-col/data-row that were its tile, follow it |
+
+```sh
+pixellab scene drop hero-island 12
+pixellab scene drop hero-island crate --dry-run
+```
+
 #### scene.duplicate
 
 Duplicate an item one column over, where the copy stands in depth order.
@@ -1546,10 +1570,10 @@ edits docs · MCP tool `scene_new`
 Place an object on a tile (or at a pixel point) in a scene.
 
 ```
-pixellab scene place <name> <object> [--at <n,…>] [--px <n,…>] [--level <n>] [--class <text>] [--id <text>] [--group <text>] [--new-group <json>] [--foot] [--layer <text>]
+pixellab scene place <name> <object> [--at <n,…>] [--px <n,…>] [--level <n>] [--on-top] [--class <text>] [--id <text>] [--group <text>] [--new-group <json>] [--foot] [--layer <text>]
 ```
 
-Like the lab's Place tool, but the item goes where it stands: it is added to its list and the scene's items are put in depth order, so it draws behind what is in front of it and over what is behind (scene.items shows the order). With neither --at nor --px, it goes on the level-0 tile at the middle of the view, where the lab's cursor starts. --px takes --level, how high the item stands (default 0), which is only for depth: its pixel point is where its foot is drawn. --group puts it inside an existing group (the group's path, or an item inside it); --new-group wraps it in a new group with those attributes (class and data-*, like {"class": "enter", "data-enter": "object"}), and --foot sets that group's data-x and data-y to the item's foot. --layer puts it in a scene layer (its id or name; layers are apart from groups and never change paint order). Returns the new item's path after the sort, and its group's; reordered says which other paths the sort moved.
+Like the lab's Place tool, but the item goes where it stands: it is added to its list and the scene's items are put in depth order, so it draws behind what is in front of it and over what is behind (scene.items shows the order). With neither --at nor --px, it goes on the tile at the middle of the view, where the lab's cursor starts (the middle of the scene's content when it has no viewBox). With no level given (--at col,row, or no position) it stands on top of whatever block covers that tile: on the highest one there, in whole levels, or on the ground (level 0); a block of height h rests with its bottom on that top. --at col,row,level is used as given unless --on-top is set, which also works for --px. --px takes --level, how high the item stands (default 0), which is only for depth: its pixel point is where its foot is drawn. --group puts it inside an existing group (the group's path, or an item inside it); --new-group wraps it in a new group with those attributes (class and data-*, like {"class": "enter", "data-enter": "object"}), and --foot sets that group's data-x and data-y to the item's foot. --layer puts it in a scene layer (its id or name; layers are apart from groups and never change paint order). Returns the new item's path after the sort, and its group's; reordered says which other paths the sort moved.
 
 edits docs · MCP tool `scene_place`
 
@@ -1557,9 +1581,10 @@ edits docs · MCP tool `scene_place`
 | --- | --- | --- | --- |
 | `name` (positional) | string | required | scene name (or scenes/<name>) |
 | `object` (positional) | string | required | the object to place |
-| `--at` | list of integer |  | a tile: col,row,level |
+| `--at` | list of integer |  | a tile: col,row[,level]; without a level the item goes on top of what stands there |
 | `--px` | list of integer |  | a point in scene pixels: x,y |
 | `--level` | integer |  | with --px: how high the item stands, for depth order (default 0) |
+| `--on-top` | boolean | default `false` | put the item on top of the block on its tile, whatever level --at or --px give |
 | `--class` | string |  | a class list for the item |
 | `--id` | string |  | an id for the item (lowercase kebab-case, unique in the scene) |
 | `--group` | string |  | an existing group to place it in: its path, or an item (path or id) inside it |

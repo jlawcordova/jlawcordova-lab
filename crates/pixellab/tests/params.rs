@@ -354,6 +354,7 @@ fn every_command_is_well_formed_and_has_a_group() {
         "proposal.reject",
         "scene.action",
         "scene.ambient",
+        "scene.drop",
         "scene.duplicate",
         "scene.frame",
         "scene.group.set",

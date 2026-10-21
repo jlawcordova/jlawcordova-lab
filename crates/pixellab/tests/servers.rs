@@ -563,6 +563,33 @@ fn serve_mcp_tools_call_edit_then_doc_save_writes_a_proposal_and_leaves_the_site
     assert_eq!(fs::read_to_string(m.site.document.join("scenes/sample.json")).unwrap(), scene_before, "the site is untouched");
 }
 
+#[test]
+fn r19_agents_can_place_on_top_and_drop_over_mcp_as_proposals() {
+    let mut m = mcp_initialized();
+    let tools = m.server.request("tools/list", json!({}))["result"]["tools"].clone();
+    let tools = tools.as_array().unwrap();
+    for name in ["scene_drop", "scene_place", "scene_frame"] {
+        assert!(tools.iter().any(|t| t["name"] == name), "{name}");
+    }
+    let place = tools.iter().find(|t| t["name"] == "scene_place").unwrap();
+    assert_eq!(place["inputSchema"]["properties"]["onTop"]["type"], "boolean");
+    assert_eq!(place["inputSchema"]["properties"]["at"]["minItems"], 2);
+    // The sample's pebble floats a level above the block at 0,0; the block is its floor.
+    let dropped = call(&mut m.server, "scene_drop", json!({ "name": "sample", "item": "1" }));
+    assert!(dropped.get("isError").is_none(), "{dropped}");
+    assert!(str_of(&dropped["structuredContent"]["summary"]).contains("dropped to level 0, on top of block"), "{dropped}");
+    let placed = call(&mut m.server, "scene_place", json!({ "name": "sample", "object": "block", "at": [0, 0], "onTop": true }));
+    assert!(placed.get("isError").is_none(), "{placed}");
+    let saved = call(&mut m.server, "doc_save", json!({ "doc": "scene:sample" }));
+    let proposal = read_json(&m.state.join("proposals").join(format!("{}.json", str_of(&saved["structuredContent"]["proposal"]))));
+    let source: Value = serde_json::from_str(str_of(&proposal["source"])).unwrap();
+    assert_eq!(pebble_at(&source, json!([0, 0, 0])).map(|p| p["object"].clone()), Some(json!("pebble")));
+    let stacked =
+        source["items"].as_array().unwrap().iter().filter(|i| i["object"] == "block").any(|i| i["at"]["tile"] == json!([0, 0, 1]));
+    assert!(stacked, "{source}");
+    assert_eq!(fs::read_to_string(m.site.document.join("scenes/sample.json")).unwrap(), m.scene_before, "the site is untouched");
+}
+
 fn failing_calls(server: &mut Server) -> (Value, Value, Value) {
     let failed = call(server, "scene_place", json!({ "name": "sample", "object": "no-such-object" }));
     let bad = call(server, "scene_place", json!({ "name": "sample", "object": "pebble", "at": "here" }));

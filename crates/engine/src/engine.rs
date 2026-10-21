@@ -1852,6 +1852,12 @@ impl NodeMaker {
     }
 }
 
+/// The box an item stands in at rest, in tile space (`blockBox` or `spriteBox`): where it is, how much
+/// of the tile grid it covers and between which levels. Scene motion is left out.
+pub fn item_box(sources: &Sources, item: &Value, origin: [f64; 2]) -> Result<Box3> {
+    NodeMaker::new(sources, item, origin, None)?.at_rest().0.ok_or_else(|| EngineError("an item has no box".into()))
+}
+
 /// A group that is one variant of a run (the site shows one at a time).
 fn is_variant_group(item: &Value) -> bool {
     matches!(item.get("group"), Some(Value::Object(g)) if g.contains_key("data-class"))

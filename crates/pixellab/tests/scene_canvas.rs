@@ -238,6 +238,133 @@ fn r8_scene_frame_as_a_proposal() {
     assert_eq!(proposal["summary"].as_array().unwrap().len(), 1);
 }
 
+// ------------------------------------------------------------ R16, R17
+
+fn level_of(item: &Value) -> i64 {
+    item["at"]["tile"][2].as_i64().unwrap()
+}
+
+fn find<'a>(items: &'a [Value], object: &str, col: i64, row: i64) -> &'a Value {
+    items.iter().find(|i| i["object"] == object && i["at"]["tile"][0] == col && i["at"]["tile"][1] == row).unwrap()
+}
+
+#[test]
+fn r16_drop_lands_on_the_top_of_the_block_under_it() {
+    let mut lab = lab(&[(
+        "stack",
+        json!({ "items": [
+            block_item(2, 2, 0), block_item(2, 2, 1),
+            { "object": "pebble", "id": "high", "at": { "tile": [2, 2, 5] } },
+            { "object": "pebble", "id": "lost", "at": { "tile": [8, 8, 4] } },
+            { "object": "block", "id": "floater", "at": { "tile": [4, 4, 3] } },
+            block_item(4, 4, 0),
+            { "object": "pebble", "id": "rests", "at": { "tile": [6, 6, 0] } },
+            block_item(6, 6, 0),
+        ] }),
+    )]);
+    // Over two stacked blocks: onto the top one (level 1).
+    let r = lab.ok("scene.drop", json!({ "name": "stack", "item": "high" }));
+    assert!(r["summary"].as_str().unwrap().contains("dropped to level 1, on top of block"), "{r}");
+    let items = lab.scene("stack")["items"].as_array().unwrap().clone();
+    assert_eq!(level_of(items.iter().find(|i| i["id"] == "high").unwrap()), 1);
+    // Over nothing: the ground.
+    lab.ok("scene.drop", json!({ "name": "stack", "item": "lost" }));
+    let items = lab.scene("stack")["items"].as_array().unwrap().clone();
+    assert_eq!(level_of(items.iter().find(|i| i["id"] == "lost").unwrap()), 0);
+    // A block rests with its bottom on the top of the block under it: level 1, not 0.
+    lab.ok("scene.drop", json!({ "name": "stack", "item": "floater" }));
+    let items = lab.scene("stack")["items"].as_array().unwrap().clone();
+    assert_eq!(level_of(items.iter().find(|i| i["id"] == "floater").unwrap()), 1);
+    // Already resting: it stays, and nothing else moves.
+    let before = lab.scene("stack");
+    let r = lab.ok("scene.drop", json!({ "name": "stack", "item": "rests" }));
+    assert!(r["summary"].as_str().unwrap().contains("already rests at level 0"), "{r}");
+    assert_eq!(lab.scene("stack"), before);
+    // A group is not an item to drop; an unknown item is not found.
+    assert_eq!(lab.call("scene.drop", json!({ "name": "stack", "item": "nope" })).unwrap_err().exit_code, 1);
+}
+
+#[test]
+fn r16_drop_is_one_undo_step_and_ignores_what_is_above_and_the_item_itself() {
+    let mut lab = lab(&[(
+        "tower",
+        json!({ "items": [
+            block_item(1, 1, 0),
+            { "object": "block", "id": "mid", "at": { "tile": [1, 1, 1] } },
+            { "object": "pebble", "id": "top", "at": { "tile": [1, 1, 2] } },
+        ] }),
+    )]);
+    // The block in the middle, with a pebble above it, stays resting on the block below.
+    lab.ok("scene.drop", json!({ "name": "tower", "item": "mid" }));
+    let items = lab.scene("tower")["items"].as_array().unwrap().clone();
+    assert_eq!(level_of(items.iter().find(|i| i["id"] == "mid").unwrap()), 1);
+    // The pebble rests on it (level 1 is the top of the middle block); at 2 it floats one level, so it drops to 1.
+    lab.ok("scene.drop", json!({ "name": "tower", "item": "top" }));
+    let items = lab.scene("tower")["items"].as_array().unwrap().clone();
+    assert_eq!(level_of(items.iter().find(|i| i["id"] == "top").unwrap()), 1);
+    lab.ok("doc.undo", json!({ "doc": "scene:tower" }));
+    let items = lab.scene("tower")["items"].as_array().unwrap().clone();
+    assert_eq!(level_of(items.iter().find(|i| i["id"] == "top").unwrap()), 2, "one undo step");
+}
+
+#[test]
+fn r17_placing_on_a_block_puts_the_item_on_top_of_it() {
+    let mut lab = lab(&[("build", json!({ "items": [block_item(3, 1, 0)] }))]);
+    // A tile as col,row has no level of its own: on the block, level 0 is its top.
+    lab.ok("scene.place", json!({ "name": "build", "object": "pebble", "at": [3, 1] }));
+    let items = lab.scene("build")["items"].as_array().unwrap().clone();
+    assert_eq!(level_of(find(&items, "pebble", 3, 1)), 0);
+    // A block on a block rests its bottom on the top: level 1.
+    let r = lab.ok("scene.place", json!({ "name": "build", "object": "block", "at": [3, 1] }));
+    assert!(r["summary"].as_str().unwrap().ends_with("on top of block"), "{r}");
+    let items = lab.scene("build")["items"].as_array().unwrap().clone();
+    assert_eq!(items.iter().filter(|i| i["object"] == "block").map(level_of).max(), Some(1));
+    // And another: level 2.
+    lab.ok("scene.place", json!({ "name": "build", "object": "block", "at": [3, 1] }));
+    let items = lab.scene("build")["items"].as_array().unwrap().clone();
+    assert_eq!(items.iter().filter(|i| i["object"] == "block").map(level_of).max(), Some(2));
+    // Bare ground is level 0, for a block too, and a sprite is not a floor.
+    lab.ok("scene.place", json!({ "name": "build", "object": "block", "at": [9, 9] }));
+    lab.ok("scene.place", json!({ "name": "build", "object": "pebble", "at": [3, 8] }));
+    lab.ok("scene.place", json!({ "name": "build", "object": "pebble", "at": [3, 8] }));
+    let items = lab.scene("build")["items"].as_array().unwrap().clone();
+    assert_eq!(level_of(find(&items, "block", 9, 9)), 0);
+    assert!(items.iter().filter(|i| i["at"]["tile"][0] == 3 && i["at"]["tile"][1] == 8).all(|i| level_of(i) == 0));
+}
+
+#[test]
+fn r17_a_level_given_wins_and_on_top_overrides_it() {
+    let mut lab = lab(&[("build", json!({ "items": [block_item(3, 1, 0)] }))]);
+    lab.ok("scene.place", json!({ "name": "build", "object": "pebble", "at": [3, 1, 0], "id": "given" }));
+    lab.ok("scene.place", json!({ "name": "build", "object": "pebble", "at": [3, 1, 7], "id": "high" }));
+    lab.ok("scene.place", json!({ "name": "build", "object": "pebble", "at": [3, 1, 7], "id": "pinned", "onTop": true }));
+    let items = lab.scene("build")["items"].as_array().unwrap().clone();
+    let level = |id: &str| level_of(items.iter().find(|i| i["id"] == id).unwrap());
+    assert_eq!((level("given"), level("high"), level("pinned")), (0, 7, 0));
+    // A pixel point: no level, as before; --on-top stacks on the block under its tile.
+    lab.ok("scene.place", json!({ "name": "build", "object": "block", "px": [3, 1] }));
+    lab.ok("scene.place", json!({ "name": "build", "object": "pebble", "px": [0, 0], "onTop": true, "id": "px" }));
+    let items = lab.scene("build")["items"].as_array().unwrap().clone();
+    let px = items.iter().find(|i| i["id"] == "px").unwrap();
+    assert!(px["at"].get("level").is_none() || px["at"]["level"].as_i64().unwrap() >= 0, "{px}");
+    // With no position at all the item stacks where the cursor starts.
+    let middle = lab.ok("scene.place", json!({ "name": "build", "object": "block" }));
+    assert!(middle["item"]["at"]["tile"][2].as_i64().unwrap() >= 0);
+    // The CLI takes --at col,row and --on-top.
+    let (code, out, err) = lab.cli(&["scene", "place", "build", "block", "--at", "3,1", "--on-top"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("placed at column 3, row 1, level"), "{out}");
+}
+
+#[test]
+fn r17_one_place_is_one_undo_step() {
+    let mut lab = lab(&[("build", json!({ "items": [block_item(3, 1, 0)] }))]);
+    lab.ok("scene.place", json!({ "name": "build", "object": "block", "at": [3, 1] }));
+    assert_eq!(lab.scene("build")["items"].as_array().unwrap().len(), 2);
+    lab.ok("doc.undo", json!({ "doc": "scene:build" }));
+    assert_eq!(lab.scene("build")["items"].as_array().unwrap().len(), 1);
+}
+
 // ----------------------------------------------------------------- R11
 
 fn warnings(lab: &mut Lab, name: &str) -> Vec<Value> {
