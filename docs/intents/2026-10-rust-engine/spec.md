@@ -16,11 +16,11 @@ What the site uses today was read from `jlawcordova.github.io` at `main` on 2026
 
 - **R1. One Rust program replaces the Node CLI.** `pixellab` is a single native executable with the same commands, params, JSON results, human output, exit codes and errors as the Node CLI it replaces: every command in `docs/cli.md`, the Agent chat's `chat.ask` and `chat.context` included. It keeps all three doors: the CLI, `serve --stdio` (the app's JSON-RPC, same methods and notifications) and `serve --mcp` (the same tools, instructions and left-out commands, with saves still becoming proposals).
 - **R2. It is the only engine.** Validating, resolving, rendering, depth order, motion, compiling, the lossless check, previews, edits and serializing are all in Rust. When the change is complete, no JavaScript engine is left in this repo, the npm package stops exporting `pixellab/*`, and no site imports one.
-- **R3. Parity before cutover.** Until the Node CLI is removed, a parity check runs both programs over a corpus: the test fixture, both examples, and, when a site checkout is present, a temp copy of the owner's document migrated to format 2. Their outputs must agree in four ways:
+- **R3. Parity before cutover.** Until the Node CLI is removed, a parity check runs both programs over a corpus: the test fixture, both examples, and, when a site checkout is present, a temp copy of the owner's document. The Node CLI reads each document as it is, in format 1. The Rust program reads a temp copy migrated to format 2 (R8). Their outputs must agree in four ways:
   - every scene's SVG is byte-identical;
   - every preview PNG is pixel-identical (dimensions and decoded RGBA);
   - every read command's JSON result is equal (ignoring `ms`, ids and times);
-  - validation problems are the same text.
+  - validation problems are the same text, apart from the file extension.
 
   R3 holds for the outputs as they are today, before R11–R15 change them.
 - **R4. Over budget warns, never fails.** A scene over its raw or gzip budget is still written, and its result is `ok: true` with a `warnings` list. This applies everywhere:
@@ -135,6 +135,51 @@ What the site uses today was read from `jlawcordova.github.io` at `main` on 2026
   - The `2026-10-mac-app` record and the `pixellab-document` spec get a pointer to this change, not a rewrite.
 
 ## Design
+
+### D0. The migration at a glance
+
+The diagram shows the whole change, across both repos. The diamonds are gates the requirements set: parity before cutover (R3), the art moving the same before the site switches (R16), and the release before the site's change (concern 8). The order of work between the gates is the plan's.
+
+```mermaid
+flowchart TB
+  subgraph today["Today"]
+    direction LR
+    nodecli["Node CLI and engine<br/>cli/, the pixellab npm package"]
+    doc1[("Document, format 1<br/>palette.mjs, objects/*.mjs, scenes/*.mjs")]
+    site1["Site imports the library,<br/>commits its SVGs and thumbnails,<br/>pixel-art.css animates the art"]
+    nodecli -->|reads and writes| doc1
+    nodecli -.->|"npm pin v0.5.0"| site1
+  end
+
+  subgraph lab["This repo: this change"]
+    rust["Rust engine and program<br/>crates/engine, crates/pixellab<br/>R1, R2, D1, D2"]
+    fmt["Format 2 and document migrate<br/>JSON, notes, colorNotes<br/>R6–R10, D3, D4"]
+    parity{"Parity: Node on format 1<br/>vs Rust on format 2<br/>R3"}
+    anim["Self-contained SVGs<br/>frame loops, ambient loops,<br/>actions, crispEdges, scoped names<br/>R11–R15, D6, D7"]
+    visual{"Visual check in Chromium<br/>on a temp copy, site swap rehearsed<br/>R16, D9"}
+    app["App bundles the program<br/>no Node, Migrate…, Play,<br/>proposals retired<br/>R21–R26, D10, D11"]
+    cut["Cutover: cli/ and the npm<br/>exports removed<br/>R2, R29"]
+    rel["Release: the app, pixellab-darwin-arm64,<br/>pixellab-linux-x64, SHA256SUMS<br/>R17, R27"]
+    rust --> fmt --> parity
+    parity -->|passes| anim --> visual
+    visual -->|passes| app --> cut --> rel
+  end
+
+  subgraph sitechange["Site repo: its own change, after the release (D13)"]
+    mig["pixellab document migrate"]
+    doc2[("Document, format 2<br/>palette.json, objects/*.json, scenes/*.json")]
+    swap["pcloud and cbob become ambient loops,<br/>the hop becomes an action,<br/>thumb scenes declare images"]
+    drop["Drop the library, the art tests,<br/>pixel-art.css keyframes,<br/>committed SVGs and thumbnails"]
+    ci["CI: download pixellab-linux-x64,<br/>check SHA256SUMS,<br/>pixellab art build, then astro build"]
+    pub["Published site: each SVG carries its animation,<br/>the A button sets data-play to hop"]
+    mig --> doc2 --> swap --> drop --> ci --> pub
+  end
+
+  nodecli -.->|"replaced by, after parity"| rust
+  doc1 -->|in place| mig
+  rel -->|"pinned version"| ci
+  owner(["The owner in the app,<br/>agents over MCP"]) -->|"saves and approved proposals"| doc2
+```
 
 ### D1. Layout
 
