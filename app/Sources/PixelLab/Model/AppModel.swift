@@ -405,8 +405,6 @@ final class AppModel {
     /// Renders the open doc; coalesces requests that arrive mid-render.
     func requestRender() {
         guard let doc = document, let connection else { return }
-        // An action is on the stage: it puts the playhead's frame back when it ends.
-        if timeline.actionActive { return }
         if doc.rendering {
             doc.needsRender = true
             return

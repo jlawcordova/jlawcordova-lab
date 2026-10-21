@@ -27,6 +27,8 @@ final class TimelineModel {
     /// stage keeps its frame until it ends.
     var actionActive = false
     var playingAction: String?
+    /// The frame of the action now on the stage; the stage draws it in place of the rest frame.
+    var actionImage: StageImage?
     /// What the last Play did ("hop: 12 frames", "hop: shown at rest").
     var lastPlay = ""
     var lastAnnouncement = ""
@@ -161,13 +163,13 @@ final class TimelineModel {
         }
         guard token == actionToken, app.document === doc else { return }
         if hold != nil, let frame = frames.first {
-            doc.render = frame
+            actionImage = frame
             lastPlay = "\(row.name): held at \(times[0]) ms"
             return
         }
         for (i, frame) in frames.enumerated() {
             guard token == actionToken, app.document === doc else { return }
-            doc.render = frame
+            actionImage = frame
             let next = i + 1 < times.count ? Double(times[i + 1]) : row.duration
             try? await Task.sleep(for: .milliseconds(max(next - Double(times[i]), 1)))
         }
@@ -183,6 +185,7 @@ final class TimelineModel {
         let was = actionActive
         actionActive = false
         playingAction = nil
+        actionImage = nil
         if render, was { app?.requestRender() }
     }
 
@@ -195,7 +198,8 @@ final class TimelineModel {
             params["theme"] = app.stageTheme
             params.merge(app.layers.renderParams) { _, b in b }
         } else {
-            params.merge(app.objectEditor.renderParams(frame: app.objectEditor.frame)) { _, b in b }
+            // No `layers`: the program places loops and actions on the whole sprite.
+            params["frame"] = JSONValue(app.objectEditor.frame)
             params["time"] = 0
         }
         let r: RenderResult = try await connection.call(isScene ? "scene.render" : "object.render", params)
