@@ -81,7 +81,11 @@ struct InspectorView: View {
             } else if let summary = doc.summary {
                 Text(summary).font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(2)
             }
-            if let render = doc.render {
+            if doc.ref.kind == .scene {
+                Text("\(Int(doc.publishSize.width))×\(Int(doc.publishSize.height)) px · \(model.effectiveZoom)×")
+                    .font(Theme.monoFont(10.5))
+                    .foregroundStyle(Theme.inkMuted)
+            } else if let render = doc.render {
                 Text("\(Int(render.viewBox.width))×\(Int(render.viewBox.height)) px · \(model.effectiveZoom)×")
                     .font(Theme.monoFont(10.5))
                     .foregroundStyle(Theme.inkMuted)

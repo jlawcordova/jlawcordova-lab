@@ -197,6 +197,7 @@ final class TimelineModel {
             params["time"] = JSONValue(renderTime)
             params["theme"] = app.stageTheme
             params.merge(app.layers.renderParams) { _, b in b }
+            if let window = doc.window { params["view"] = window.sceneView }
         } else {
             // No `layers`: the program places loops and actions on the whole sprite.
             params["frame"] = JSONValue(app.objectEditor.frame)
