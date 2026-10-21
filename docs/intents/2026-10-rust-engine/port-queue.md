@@ -18,7 +18,7 @@ A unit's checks: `cargo fmt --check`, `cargo test` for its crate, its ported sui
 | U8 | `preview.mjs` → `preview.rs` | preview cases of `render.test.mjs`, corpus PNGs | U1, U3 | S | waiting |
 | U9 | the rest of `engine.test.mjs` | → `tests/engine.rs`, in two units by `describe` block | U3–U6 | S | waiting |
 | U10 | `errors.mjs`, `argv.mjs`, `params.mjs` | `params.test.mjs` | PR 1 | S | ready |
-| U11 | `jsonrpc.mjs` | its cases in `servers.test.mjs` | PR 1 | S | ready |
+| U11 | `jsonrpc.mjs` | its cases in `servers.test.mjs` | PR 1 | S | merged |
 | U12 | `state.mjs`, `activity-summary.mjs` | `activity-and-proposals.test.mjs` | U10 | S | waiting |
 | U13 | `document.mjs` → `document.rs` (resolution, manifest, R9's problem) | `document.test.mjs` | U10 | S | waiting |
 | U14 | `session.mjs`, `open-docs.mjs`, `context.mjs` | `sync.test.mjs` | U3, U6, U12, U13 | O | waiting |
