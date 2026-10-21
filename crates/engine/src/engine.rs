@@ -2247,10 +2247,9 @@ fn fit_box(scene: &Value, root: &Group, ids: &OMap<String, Value>) -> [i64; 4] {
     fit_of(scene, painted_box(scene, root, ids))
 }
 
-/// Every pixel a tree paints over its whole loop: all frames of a frame loop, every variant, items
-/// that only show at some time, every place scene motion takes an item, and how far ambient loops and
-/// actions move an element. Moves step along straight or 2:1 lines, so the keys' places bound them.
-fn painted_box(scene: &Value, root: &Group, ids: &OMap<String, Value>) -> Option<Bounds> {
+/// Where scene motion puts each moving item's group, relative to where its art is drawn (the first
+/// key's place): the places of its keys, and the rest place. By the group's class.
+fn track_offsets(scene: &Value, ids: &OMap<String, Value>) -> HashMap<String, Vec<[i32; 2]>> {
     let mut by_class: HashMap<String, Vec<[i32; 2]>> = HashMap::new();
     for track in scene.pointer("/motion/tracks").and_then(Value::as_array).into_iter().flatten() {
         let id = js_string(track.get("item"));
@@ -2261,6 +2260,75 @@ fn painted_box(scene: &Value, root: &Group, ids: &OMap<String, Value>) -> Option
         offsets.extend(keys.iter().map(|k| [(k.moved[0] - rest[0]) as i32, (k.moved[1] - rest[1]) as i32]));
         by_class.insert(motion::motion_class(&id), offsets);
     }
+    by_class
+}
+
+/// The places a group's art takes over the loop, relative to where it is drawn: those of its motion
+/// track (by class) and of its ambient loop and actions. Empty for a group that stays put.
+fn group_offsets(g: &Group, by_class: &HashMap<String, Vec<[i32; 2]>>) -> Vec<[i32; 2]> {
+    let mut offsets: Vec<[i32; 2]> = Vec::new();
+    if g.generated {
+        if let Some(o) = g.attrs.iter().find(|(k, _)| k == "class").and_then(|(_, v)| by_class.get(v)) {
+            offsets.extend(o);
+        }
+    }
+    if let Some(m) = &g.moves {
+        offsets.push([0, 0]);
+        let moved = m.ambient.iter().flat_map(|a| a.keys.iter()).chain(m.actions.iter().flat_map(|(_, a)| a.keys.iter()));
+        offsets.extend(moved.map(|k| [k.moved[0] as i32, k.moved[1] as i32]));
+    }
+    offsets
+}
+
+/// How many pixels a scene with a `viewBox` paints outside it, over its whole loop (scene-canvas
+/// spec R11): the pixels an SVG of the scene would cut off. 0 for a scene without a `viewBox`.
+pub fn pixels_outside_frame(sources: &Sources, name: &str) -> Result<usize> {
+    let scene = scene_or_err(sources, name)?;
+    let Some(vb) = scene.get("viewBox").and_then(Value::as_array) else { return Ok(0) };
+    let n = |i: usize| vb.get(i).and_then(Value::as_f64).unwrap_or(0.0) as i64;
+    let (x0, y0, x1, y1) = (n(0), n(1), n(0) + n(2), n(1) + n(3));
+    let rendered = render_scene(sources, name, Order::Depth)?;
+    let ids = motion::items_by_id(scene.get("items").unwrap_or(&Value::Null));
+    let by_class = track_offsets(scene, &ids);
+    fn walk(
+        group: &Group,
+        shift: (i32, i32),
+        by_class: &HashMap<String, Vec<[i32; 2]>>,
+        out: &mut HashSet<(i64, i64)>,
+        rect: (i64, i64, i64, i64),
+    ) {
+        for child in &group.children {
+            match child {
+                Child::Layer(l) => {
+                    for &(x, y) in l.pixels.keys() {
+                        let (px, py) = ((x + shift.0) as i64, (y + shift.1) as i64);
+                        if px < rect.0 || px >= rect.2 || py < rect.1 || py >= rect.3 {
+                            out.insert((px, py));
+                        }
+                    }
+                }
+                Child::Group(g) => {
+                    let offsets = group_offsets(g, by_class);
+                    if offsets.is_empty() {
+                        walk(g, shift, by_class, out, rect);
+                    }
+                    for o in offsets {
+                        walk(g, (shift.0 + o[0], shift.1 + o[1]), by_class, out, rect);
+                    }
+                }
+            }
+        }
+    }
+    let mut outside = HashSet::new();
+    walk(&rendered.root, (0, 0), &by_class, &mut outside, (x0, y0, x1, y1));
+    Ok(outside.len())
+}
+
+/// Every pixel a tree paints over its whole loop: all frames of a frame loop, every variant, items
+/// that only show at some time, every place scene motion takes an item, and how far ambient loops and
+/// actions move an element. Moves step along straight or 2:1 lines, so the keys' places bound them.
+fn painted_box(scene: &Value, root: &Group, ids: &OMap<String, Value>) -> Option<Bounds> {
+    let by_class = track_offsets(scene, ids);
     fn union(a: Option<Bounds>, b: Option<Bounds>) -> Option<Bounds> {
         match (a, b) {
             (None, b) => b,
@@ -2283,17 +2351,7 @@ fn painted_box(scene: &Value, root: &Group, ids: &OMap<String, Value>) -> Option
                 Child::Layer(l) => out = union(out, bounds(l.pixels.keys())),
                 Child::Group(g) => {
                     let inner = walk(g, by_class);
-                    let mut offsets: Vec<[i32; 2]> = Vec::new();
-                    if g.generated {
-                        if let Some(o) = g.attrs.iter().find(|(k, _)| k == "class").and_then(|(_, v)| by_class.get(v)) {
-                            offsets.extend(o);
-                        }
-                    }
-                    if let Some(m) = &g.moves {
-                        offsets.push([0, 0]);
-                        let moved = m.ambient.iter().flat_map(|a| a.keys.iter()).chain(m.actions.iter().flat_map(|(_, a)| a.keys.iter()));
-                        offsets.extend(moved.map(|k| [k.moved[0] as i32, k.moved[1] as i32]));
-                    }
+                    let offsets = group_offsets(g, by_class);
                     out = match inner {
                         Some(b) if !offsets.is_empty() => offsets.iter().fold(out, |acc, o| union(acc, Some(shifted(b, o[0], o[1])))),
                         other => union(out, other),

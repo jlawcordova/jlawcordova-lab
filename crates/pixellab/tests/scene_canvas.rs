@@ -158,3 +158,146 @@ fn r7_place_with_no_position_starts_at_the_middle_of_the_content_or_the_origin_t
     let tile = as_box(&placed["at"]["tile"]);
     assert!((tile[0] - 6).abs() <= 1 && (tile[1] - 2).abs() <= 1 && tile[2] >= 0, "{tile:?}");
 }
+
+// ------------------------------------------------------------------ R8
+
+#[test]
+fn r8_scene_frame_fixes_the_size_and_takes_it_off_again() {
+    let mut lab = lab(&[("fit", json!({ "items": [block_item(0, 0, 0)] }))]);
+    let before = lab.ok("scene.frame", json!({ "name": "fit" }));
+    assert_eq!(before["frame"], "fit");
+    assert_eq!(before["changed"], false);
+    assert_eq!(before["margin"], 0);
+    let size = before["size"].clone();
+    assert!(lab.scene("fit").get("viewBox").is_none(), "reporting changes nothing");
+
+    let fixed = lab.ok("scene.frame", json!({ "name": "fit", "box": [-20, -10, 100, 60] }));
+    assert_eq!(
+        (fixed["frame"].clone(), fixed["viewBox"].clone(), fixed["size"].clone()),
+        (json!("fixed"), json!([-20, -10, 100, 60]), json!([100, 60]))
+    );
+    assert_eq!(lab.scene("fit")["viewBox"], json!([-20, -10, 100, 60]));
+    assert_eq!(lab.ok("scene.render", json!({ "name": "fit" }))["frame"], "fixed");
+    assert_eq!(lab.ok("scene.frame", json!({ "name": "fit" }))["frame"], "fixed");
+
+    let fitted = lab.ok("scene.frame", json!({ "name": "fit", "fit": true }));
+    assert_eq!((fitted["frame"].clone(), fitted["size"].clone()), (json!("fit"), size));
+    assert!(lab.scene("fit").get("viewBox").is_none());
+
+    // The margin, and taking it off with 0.
+    let padded = lab.ok("scene.frame", json!({ "name": "fit", "margin": 3 }));
+    assert_eq!(padded["margin"], 3);
+    assert_eq!(padded["size"], json!([before["size"][0].as_i64().unwrap() + 6, before["size"][1].as_i64().unwrap() + 6]));
+    assert_eq!(lab.scene("fit")["margin"], 3);
+    lab.ok("scene.frame", json!({ "name": "fit", "margin": 0 }));
+    assert!(lab.scene("fit").get("margin").is_none());
+
+    // One undo step each.
+    lab.ok("scene.frame", json!({ "name": "fit", "box": [0, 0, 8, 8] }));
+    lab.ok("doc.undo", json!({ "doc": "scene:fit" }));
+    assert!(lab.scene("fit").get("viewBox").is_none());
+}
+
+#[test]
+fn r8_scene_frame_refuses_a_bad_box_and_both_options_at_once() {
+    let mut lab = lab(&[("fit", json!({ "items": [] }))]);
+    assert_eq!(lab.call("scene.frame", json!({ "name": "fit", "box": [0, 0, 0, 5] })).unwrap_err().exit_code, 2);
+    assert_eq!(lab.call("scene.frame", json!({ "name": "fit", "box": [0, 0, 5, 5], "fit": true })).unwrap_err().exit_code, 2);
+    assert_eq!(lab.call("scene.frame", json!({ "name": "fit", "box": [0, 0, 5] })).unwrap_err().exit_code, 2);
+    assert_eq!(lab.call("scene.frame", json!({ "name": "fit", "margin": -1 })).unwrap_err().exit_code, 2);
+    assert_eq!(lab.call("scene.frame", json!({ "name": "nope" })).unwrap_err().exit_code, 1);
+}
+
+#[test]
+fn r8_scene_frame_over_the_cli() {
+    let lab = lab(&[("fit", json!({ "items": [block_item(0, 0, 0)] }))]);
+    let (code, out, err) = lab.cli(&["scene", "frame", "fit", "--box", "-16,-16,64,48"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("fixed 64×48"), "{out}");
+    let (code, out, _) = lab.cli(&["scene", "frame", "fit"]);
+    assert_eq!(code, 0);
+    assert!(out.contains("fixed 64×48"), "{out}");
+    let (code, out, err) = lab.cli(&["scene", "frame", "fit", "--fit", "--margin", "2"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("fits its content") && out.contains("margin 2"), "{out}");
+    let text = std::fs::read_to_string(lab.doc.root.join("scenes/fit.json")).unwrap();
+    assert!(!text.contains("viewBox") && text.contains("\"margin\": 2"), "{text}");
+}
+
+#[test]
+fn r8_scene_frame_as_a_proposal() {
+    let mut lab = lab_with(&[("fit", json!({ "items": [block_item(0, 0, 0)] }))], Mode::Propose);
+    let before = std::fs::read_to_string(lab.doc.root.join("scenes/fit.json")).unwrap();
+    lab.ok("scene.frame", json!({ "name": "fit", "box": [-16, -16, 64, 48] }));
+    let saved = lab.ok("doc.save", json!({ "doc": "scene:fit" }));
+    assert_eq!(saved["wrote"], false);
+    assert_eq!(std::fs::read_to_string(lab.doc.root.join("scenes/fit.json")).unwrap(), before, "the document is untouched");
+    let proposal = lab.session.state.read_proposal(saved["proposal"].as_str().unwrap()).unwrap();
+    let source: Value = serde_json::from_str(proposal["source"].as_str().unwrap()).unwrap();
+    assert_eq!(source["viewBox"], json!([-16, -16, 64, 48]));
+    assert_eq!(proposal["summary"].as_array().unwrap().len(), 1);
+}
+
+// ----------------------------------------------------------------- R11
+
+fn warnings(lab: &mut Lab, name: &str) -> Vec<Value> {
+    lab.ok("check", json!({ "name": name }))["warnings"].as_array().unwrap().clone()
+}
+
+fn coded<'a>(warnings: &'a [Value], code: &str) -> Vec<&'a Value> {
+    warnings.iter().filter(|w| w["code"] == code).collect()
+}
+
+#[test]
+fn r11_check_warns_when_a_fixed_viewbox_cuts_off_painted_pixels() {
+    let mut lab = lab(&[
+        ("cut", json!({ "viewBox": [0, 0, 10, 10], "items": [block_item(0, 0, 0)] })),
+        ("whole", json!({ "viewBox": [-100, -100, 200, 200], "items": [block_item(0, 0, 0)] })),
+        ("fit", json!({ "items": [block_item(0, 0, 0)] })),
+    ]);
+    let cut = warnings(&mut lab, "cut");
+    let found = coded(&cut, "cropped");
+    assert_eq!(found.len(), 1, "{cut:?}");
+    assert_eq!(found[0]["scene"], "cut");
+    let outside = found[0]["pixels"].as_u64().unwrap();
+    assert!(outside > 0);
+    assert!(found[0]["text"].as_str().unwrap().contains(&format!("{outside} pixels outside its viewBox")), "{}", found[0]["text"]);
+    // The exact count: the block's pixels, less those inside the 10x10 box.
+    let sources = Ctx::new(&mut lab.session).sources().unwrap();
+    let rendered = engine::engine::render_scene(&sources.sources, "cut", engine::engine::Order::Depth).unwrap();
+    let pixels = engine::engine::composite(&rendered.root, engine::engine::CompositeOptions::default());
+    let expected = pixels.keys().filter(|&&(x, y)| !(0..10).contains(&x) || !(0..10).contains(&y)).count();
+    assert_eq!(outside as usize, expected);
+    // It is a warning: the check still passes.
+    assert_eq!(lab.ok("check", json!({ "name": "cut" }))["ok"], true);
+    assert_eq!(lab.ok("check", json!({}))["ok"], true);
+    // A box that holds everything, and a scene that fits, don't warn.
+    assert!(coded(&warnings(&mut lab, "whole"), "cropped").is_empty());
+    assert!(coded(&warnings(&mut lab, "fit"), "cropped").is_empty());
+    let (code, out, _) = lab.cli(&["check", "cut"]);
+    assert_eq!(code, 0);
+    assert!(out.contains("warning: scenes/cut.json: ") && out.contains("outside its viewBox"), "{out}");
+}
+
+#[test]
+fn r11_a_moving_item_that_leaves_the_box_is_counted() {
+    let scene = json!({
+        "viewBox": [-40, -30, 80, 60],
+        "items": [{ "object": "pebble", "id": "p", "at": { "tile": [0, 0, 0] } }],
+        "motion": { "duration": 1000, "tracks": [{ "item": "p", "keys": [{ "t": 0, "move": [0, 0] }, { "t": 500, "move": [200, 0] }] }] }
+    });
+    let mut lab = lab(&[("moves", scene)]);
+    let found = warnings(&mut lab, "moves");
+    let found = coded(&found, "cropped");
+    assert_eq!(found.len(), 1);
+    assert!(found[0]["pixels"].as_u64().unwrap() > 0);
+}
+
+#[test]
+fn r6_check_notes_an_empty_scene_without_failing() {
+    let mut lab = lab(&[("empty", json!({ "items": [] }))]);
+    let found = warnings(&mut lab, "empty");
+    assert_eq!(coded(&found, "empty").len(), 1, "{found:?}");
+    assert_eq!(lab.ok("check", json!({ "name": "empty" }))["ok"], true);
+    assert!(lab.ok("check", json!({ "name": "empty" }))["summary"].as_str().unwrap().starts_with("32×16 ·"));
+}

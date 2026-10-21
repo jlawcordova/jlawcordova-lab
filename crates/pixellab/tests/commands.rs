@@ -380,7 +380,11 @@ fn r11_r12_check_warns_with_a_code_off_the_grid_a_scene_out_of_depth_order_and_t
         .starts_with("scenes/crossing.json: w is drawn 2 times as it moves among other items"));
     assert_eq!(codes(&check(json!({ "name": "off-grid" }))), ["off_grid off-grid", "off_grid off-grid"]);
     assert_eq!(check(json!({ "name": "walker" }))["warnings"], json!([]), "an object has none");
-    assert_eq!(codes(&check(json!({}))), ["copies crossing", "off_grid off-grid", "off_grid off-grid", "out_of_order out-of-order"]);
+    // (the sample's pebble stands partly outside its viewBox: scene-canvas spec R11)
+    assert_eq!(
+        codes(&check(json!({}))),
+        ["copies crossing", "off_grid off-grid", "off_grid off-grid", "out_of_order out-of-order", "cropped sample"]
+    );
     let (code, out, _) = cli(&doc, &["check", "crossing"]);
     assert_eq!(code, 0, "warnings keep the exit code 0");
     assert!(out.lines().any(|l| l.starts_with("warning: scenes/crossing.json: w is drawn 2 times")), "{out}");

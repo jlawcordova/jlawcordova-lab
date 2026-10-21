@@ -67,6 +67,7 @@
 | [`scene action`](#sceneaction) | Add, change or delete a scene item's action: a one-shot move the page plays by name | edit |
 | [`scene ambient`](#sceneambient) | Set or clear a scene item's ambient loop: a move that repeats on its own | edit |
 | [`scene duplicate`](#sceneduplicate) | Duplicate an item one column over, where the copy stands in depth order | edit |
+| [`scene frame`](#sceneframe) | Show a scene's published size, fix it (--box), fit it to its content (--fit) or set its margin | edit |
 | [`scene group set`](#scenegroupset) | Set or remove a group's class and data attributes, or set its data-x and data-y to its first item's foot | edit |
 | [`scene items`](#sceneitems) | List a scene's items in depth order (back to front), with stable paths | read |
 | [`scene key delete`](#scenekeydelete) | Delete a key of an item's track (not the one at 0: remove the track for that) | edit |
@@ -348,7 +349,7 @@ Validate the sources with the engine, all of them or one doc.
 pixellab check [name] [--kind <object|scene>]
 ```
 
-Problems are the engine's "<file>: <where>: <rule>" lines. With a name, only the problems in that doc and the files it uses (palette.json, the objects it places or extends) are listed. On the command line, the exit code is 1 when there are problems. Warnings don't fail the check, and each has a code. off_grid: a scene's key-to-key moves (the loop back to the first key included) whose steps aren't 1 px straight, 1:1 or 2:1, so the item jumps instead of walking the grid; scene.motion.path makes on-grid keys. out_of_order: a scene whose file lists its items out of depth order (it still publishes in depth order; scene.sort writes the file in order), with how many items would move. copies: a moving item that takes several places among the others as it moves is drawn once for each place in the SVG, which adds to its size; the warning says how many.
+Problems are the engine's "<file>: <where>: <rule>" lines. With a name, only the problems in that doc and the files it uses (palette.json, the objects it places or extends) are listed. On the command line, the exit code is 1 when there are problems. Warnings don't fail the check, and each has a code. off_grid: a scene's key-to-key moves (the loop back to the first key included) whose steps aren't 1 px straight, 1:1 or 2:1, so the item jumps instead of walking the grid; scene.motion.path makes on-grid keys. out_of_order: a scene whose file lists its items out of depth order (it still publishes in depth order; scene.sort writes the file in order), with how many items would move. copies: a moving item that takes several places among the others as it moves is drawn once for each place in the SVG, which adds to its size; the warning says how many. cropped: a scene with a fixed viewBox paints pixels outside it, which the published SVG cuts off; the warning says how many (scene.frame --fit fits it to its content). empty: a scene with nothing in it and no viewBox, which publishes one tile around the origin.
 
 read-only · MCP tool `check`
 
@@ -1200,6 +1201,31 @@ edits docs · MCP tool `scene_duplicate`
 | --- | --- | --- | --- |
 | `name` (positional) | string | required | scene name (or scenes/<name>) |
 | `item` (positional) | string | required | the item: its path from scene items (12, 5.2) or its id |
+
+#### scene.frame
+
+Show a scene's published size, fix it (--box), fit it to its content (--fit) or set its margin.
+
+```
+pixellab scene frame <name> [--box <n,…>] [--fit] [--margin <n>]
+```
+
+A scene with a viewBox publishes at exactly that box (fixed). One without publishes at the smallest whole-pixel box that holds everything it paints, over its whole loop (scene motion, ambient loops and actions included), plus its margin (fit). --box x,y,w,h fixes the size; --fit removes the viewBox so the scene fits its content again; --margin n sets the pixels left around a fit scene's art (a fixed box ignores it). With none of them it reports the frame: { frame: "fixed" | "fit", viewBox, size: [w, h], margin }. One undo step; over MCP a proposal like every edit.
+
+edits docs · MCP tool `scene_frame`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | scene name (or scenes/<name>) |
+| `--box` | list of integer |  | fix the size: x,y,w,h in scene pixels (w and h above 0) |
+| `--fit` | boolean | default `false` | take the fixed size off, so the scene publishes at the box that fits what is in it |
+| `--margin` | integer |  | pixels left around the painted pixels of a fit scene (0 or more; 0 takes it off) (at least 0) |
+
+```sh
+pixellab scene frame hero-island
+pixellab scene frame hero-island --box -16,-16,272,200
+pixellab scene frame hero-island --fit --margin 2
+```
 
 #### scene.group.set
 

@@ -534,6 +534,91 @@ fn group_set_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     })
 }
 
+// ---- scene.frame ----
+
+/// The frame a scene would publish at with this source, as result fields (scene-canvas spec R7, R8).
+fn frame_fields(sources: &Sources, name: &str, scene: &Value) -> Map<String, Value> {
+    let mut probe = sources.clone();
+    probe.scenes.insert(name.to_string(), scene.clone());
+    let frame = eng::resolve_frame(&probe, name);
+    let own = scene.get("viewBox").and_then(Value::as_array).cloned();
+    let fixed = own.is_some();
+    let view_box = match (&frame, own) {
+        (_, Some(vb)) => Some(Value::Array(vb)),
+        (Ok(f), None) => Some(json!(f.view_box)),
+        (Err(_), None) => None,
+    };
+    let mut out = Map::new();
+    out.insert("scene".into(), json!(name));
+    out.insert("frame".into(), json!(if fixed { "fixed" } else { "fit" }));
+    if let Some(vb) = view_box {
+        out.insert("size".into(), json!([vb.get(2).cloned().unwrap_or(Value::Null), vb.get(3).cloned().unwrap_or(Value::Null)]));
+        out.insert("viewBox".into(), vb);
+    }
+    out.insert("margin".into(), scene.get("margin").cloned().unwrap_or_else(|| json!(0)));
+    out
+}
+
+fn size_phrase(fields: &Map<String, Value>) -> String {
+    let size = match fields.get("size").and_then(Value::as_array) {
+        Some(s) => format!("{}×{}", str_of(s.first()), str_of(s.get(1))),
+        None => "?".to_string(),
+    };
+    let vb = fields.get("viewBox").map(|v| format!(" at {}", str_of(v.get(0)) + ", " + &str_of(v.get(1)))).unwrap_or_default();
+    if fields.get("frame").and_then(Value::as_str) == Some("fixed") {
+        format!("fixed {size}{vb}")
+    } else {
+        format!("fits its content: {size}{vb}, margin {}", str_of(fields.get("margin")))
+    }
+}
+
+fn frame_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
+    let fit = flag(&params, "fit");
+    if fit && given(&params, "box") {
+        return Err(CommandError::usage("scene.frame: give only one of --box, --fit").into());
+    }
+    let name = scene_name(ctx, text(&params, "name"))?;
+    let new_box: Option<Vec<i64>> = nums(&params, "box").map(|b| b.iter().map(|&n| n as i64).collect());
+    if let Some(b) = &new_box {
+        if b.len() != 4 || b[2] <= 0 || b[3] <= 0 {
+            return Err(CommandError::usage("scene.frame: --box must be x,y,w,h with w and h above 0").into());
+        }
+    }
+    let margin = params.get("margin").and_then(Value::as_i64);
+    if margin.is_some_and(|m| m < 0) {
+        return Err(CommandError::usage("scene.frame: --margin must be 0 or more").into());
+    }
+    if new_box.is_none() && !fit && margin.is_none() {
+        // No option: report the frame.
+        let loaded = ctx.sources()?;
+        let scene = ctx.doc(DocKind::Scene, &name)?;
+        let mut out = frame_fields(&loaded.sources, &name, &scene);
+        out.insert("changed".into(), json!(false));
+        out.insert("summary".into(), json!(format!("{name}: {}", size_phrase(&out))));
+        return Ok(Value::Object(out));
+    }
+    ctx.edit(DocKind::Scene, &name, None, |doc, loaded| {
+        let map = doc.as_object_mut().ok_or_else(|| Error::Internal("a scene is an object".into()))?;
+        if let Some(b) = &new_box {
+            map.insert("viewBox".into(), json!(b));
+        }
+        if fit {
+            map.shift_remove("viewBox");
+        }
+        if let Some(m) = margin {
+            if m == 0 {
+                map.shift_remove("margin");
+            } else {
+                map.insert("margin".into(), json!(m));
+            }
+        }
+        let mut out = frame_fields(&loaded.sources, &name, doc);
+        let message = format!("{name}: {}", size_phrase(&out));
+        out.insert("changed".into(), json!(true));
+        Ok(Edit::new(out, message))
+    })
+}
+
 /// This file's commands.
 pub fn commands() -> Vec<Command> {
     let mut place_props = Map::new();
@@ -768,5 +853,35 @@ pub fn commands() -> Vec<Command> {
     ];
     group_set.format = Some(format_change);
 
-    vec![place, mv, set, duplicate, remove, snap, sort, create, group_set]
+    let mut frame = Command::new(
+        "scene.frame",
+        "Show a scene's published size, fix it (--box), fit it to its content (--fit) or set its margin",
+        json!({
+            "type": "object",
+            "properties": {
+                "name": name_param(),
+                "box": { "type": "array", "items": { "type": "integer" }, "minItems": 4, "maxItems": 4, "description": "fix the size: x,y,w,h in scene pixels (w and h above 0)" },
+                "fit": { "type": "boolean", "default": false, "description": "take the fixed size off, so the scene publishes at the box that fits what is in it" },
+                "margin": { "type": "integer", "minimum": 0, "description": "pixels left around the painted pixels of a fit scene (0 or more; 0 takes it off)" }
+            },
+            "required": ["name"]
+        }),
+        true,
+        frame_run,
+    );
+    frame.description = Some(concat!(
+        "A scene with a viewBox publishes at exactly that box (fixed). One without publishes at the smallest whole-pixel box that holds everything it paints, ",
+        "over its whole loop (scene motion, ambient loops and actions included), plus its margin (fit). --box x,y,w,h fixes the size; ",
+        "--fit removes the viewBox so the scene fits its content again; --margin n sets the pixels left around a fit scene's art (a fixed box ignores it). ",
+        "With none of them it reports the frame: { frame: \"fixed\" | \"fit\", viewBox, size: [w, h], margin }. One undo step; over MCP a proposal like every edit."
+    ));
+    frame.args = vec!["name"];
+    frame.examples = vec![
+        "pixellab scene frame hero-island",
+        "pixellab scene frame hero-island --box -16,-16,272,200",
+        "pixellab scene frame hero-island --fit --margin 2",
+    ];
+    frame.format = Some(format_change);
+
+    vec![place, mv, set, duplicate, remove, snap, sort, create, group_set, frame]
 }

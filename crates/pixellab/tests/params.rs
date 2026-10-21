@@ -355,6 +355,7 @@ fn every_command_is_well_formed_and_has_a_group() {
         "scene.action",
         "scene.ambient",
         "scene.duplicate",
+        "scene.frame",
         "scene.group.set",
         "scene.key.delete",
         "scene.key.move",

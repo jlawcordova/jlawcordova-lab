@@ -150,6 +150,42 @@ fn budget_warnings(sources: &Sources, all: &[String], n: &str, budgets: &Budgets
         .collect()
 }
 
+/// A fixed viewBox that cuts off painted pixels (scene-canvas spec R11): a warning, never a problem, so a
+/// document that has always cropped on purpose still builds. `scene.frame --fit` would fit it to its content.
+fn cropped_warnings(sources: &Sources, all: &[String], n: &str) -> Vec<Value> {
+    let deps = dependencies(sources, DocKind::Scene, n);
+    if deps.iter().any(|f| all.iter().any(|p| file_of(p) == *f)) {
+        return vec![];
+    }
+    let Ok(outside) = engine::engine::pixels_outside_frame(sources, n) else { return vec![] };
+    if outside == 0 {
+        return vec![];
+    }
+    let text = format!(
+        "{}: {outside} pixel{} outside its viewBox (the published SVG cuts {} off; pixellab scene frame {n} --fit fits it to its content)",
+        engine::format::scene_file(n),
+        if outside == 1 { "" } else { "s" },
+        if outside == 1 { "it" } else { "them" }
+    );
+    vec![with(entry(&text), vec![("code", json!("cropped")), ("scene", json!(n)), ("pixels", json!(outside))])]
+}
+
+/// A scene with nothing in it publishes one tile around the origin (scene-canvas spec R6): a note.
+fn empty_warnings(sources: &Sources, all: &[String], n: &str) -> Vec<Value> {
+    let Some(scene) = sources.scenes.get(n) else { return vec![] };
+    let deps = dependencies(sources, DocKind::Scene, n);
+    if deps.iter().any(|f| all.iter().any(|p| file_of(p) == *f)) || scene.get("viewBox").is_some_and(Value::is_array) {
+        return vec![];
+    }
+    match engine::engine::resolve_frame(sources, n) {
+        Ok(frame) if frame.painted.is_none() => {
+            let text = format!("{}: is empty; it publishes one tile around the origin", engine::format::scene_file(n));
+            vec![with(entry(&text), vec![("code", json!("empty")), ("scene", json!(n))])]
+        }
+        _ => vec![],
+    }
+}
+
 fn warnings_of(sources: &Sources, all: &[String], names: &[String], budgets: &Budgets) -> Vec<Value> {
     let mut out = Vec::new();
     for n in names {
@@ -160,6 +196,8 @@ fn warnings_of(sources: &Sources, all: &[String], names: &[String], budgets: &Bu
             }
         }
         out.extend(depth_warnings(sources, all, n));
+        out.extend(cropped_warnings(sources, all, n));
+        out.extend(empty_warnings(sources, all, n));
         out.extend(budget_warnings(sources, all, n, budgets));
     }
     out
@@ -297,7 +335,9 @@ pub fn commands() -> Vec<Command> {
         "Warnings don't fail the check, and each has a code. off_grid: a scene's key-to-key moves (the loop back to the first key included) whose steps ",
         "aren't 1 px straight, 1:1 or 2:1, so the item jumps instead of walking the grid; scene.motion.path makes on-grid keys. ",
         "out_of_order: a scene whose file lists its items out of depth order (it still publishes in depth order; scene.sort writes the file in order), with how many items would move. ",
-        "copies: a moving item that takes several places among the others as it moves is drawn once for each place in the SVG, which adds to its size; the warning says how many."
+        "copies: a moving item that takes several places among the others as it moves is drawn once for each place in the SVG, which adds to its size; the warning says how many. ",
+        "cropped: a scene with a fixed viewBox paints pixels outside it, which the published SVG cuts off; the warning says how many (scene.frame --fit fits it to its content). ",
+        "empty: a scene with nothing in it and no viewBox, which publishes one tile around the origin."
     ));
     check.args = vec!["name"];
     check.examples = vec!["pixellab check", "pixellab check hero-island", "pixellab check objects/pine --json"];

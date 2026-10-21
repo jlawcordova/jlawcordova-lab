@@ -500,7 +500,9 @@ fn serve_mcp_tools_list_the_commands_as_tools_with_input_schemas() {
     let tools = m.server.request("tools/list", json!({}))["result"]["tools"].clone();
     let tools = tools.as_array().unwrap();
     let names: Vec<&str> = tools.iter().map(|t| str_of(&t["name"])).collect();
-    for name in ["scene_place", "scene_render", "object_paint", "object_layer_add", "doc_save", "doc_undo", "proposal_list", "check"] {
+    for name in
+        ["scene_place", "scene_frame", "scene_render", "object_paint", "object_layer_add", "doc_save", "doc_undo", "proposal_list", "check"]
+    {
         assert!(names.contains(&name), "{name}");
     }
     for name in ["proposal_apply", "proposal_reject", "art_build"] {

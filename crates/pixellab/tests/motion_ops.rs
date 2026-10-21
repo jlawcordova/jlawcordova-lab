@@ -223,7 +223,9 @@ fn r13_check_warns_about_each_off_grid_move_the_loop_back_included_without_faili
         ]
     );
     let all = registry().call(&mut Ctx::new(&mut s), "check", json!({}), false).unwrap();
-    assert_eq!(all["warnings"].as_array().unwrap().len(), 2, "a check of everything lists them too");
+    // (the sample's pebble stands partly outside its viewBox: scene-canvas spec R11, the third)
+    let off_grid = all["warnings"].as_array().unwrap().iter().filter(|w| w["code"] == "off_grid").count();
+    assert_eq!(off_grid, 2, "a check of everything lists them too");
     let obj = registry().call(&mut Ctx::new(&mut s), "check", json!({ "name": "pebble" }), false).unwrap();
     assert_eq!(obj["warnings"], json!([]), "an object has none");
     let (code, out, _) = cli(&fx, &["check", "moving"]);
