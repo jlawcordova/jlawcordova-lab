@@ -82,3 +82,13 @@ Two slices, one after the other, because the app calls the commands the program 
 - Snapshots of the stage with the published frame, in dark and light (`scripts/snapshot.sh`), looked at before reporting.
 - Docs: `npm run docs:site` builds with no broken links.
 - Each test is named for its requirement (`R2: …`), so `verify-change` can trace them.
+
+## Departures
+
+Recorded while building PR 1 (the program slice).
+
+- **Only blocks are a floor.** The spec's `top_at` counts "any item whose block size or footprint covers that tile". Built, only a block holds something up: a sprite standing on a tile (a pine, a pebble) is not a floor, because stacking one pine on another by default floated it a level above the first and changed the Place tool's result on every tile that holds a prop. A sprite or block being placed or dropped still covers the tiles its own footprint or block size covers. A block of height h placed on a block rests its bottom on the top (its level is the top plus h), as the town example builds it; with nothing under it, a block stays at level 0 as it has always been placed.
+- **`scene.place --at` takes `col,row[,level]`.** Without a level the item stacks; with one it is used as given, and `--on-top` stacks whatever the position says (also for `--px`). The spec named only `--on-top`; the two-number form is how the keyboard and mouse say "no level".
+- **`scene.render`'s `viewBox`** is the window asked for with `view`, else the resolved box, so item bounds and the PNG's pixels always agree with it. The result carries `frame` (`"fit"` or `"fixed"`) as the spec says. A `view` is refused above 100 million pixels.
+- **`check`'s new warnings** have codes `cropped` (R11) and `empty` (R6), and their text starts with the scene's file like the other warnings (`scenes/hero-island.json: 14 pixels outside its viewBox …`), not the bare scene name. The sample fixture's pebble stands partly outside its viewBox, so `check` on the fixture now says so; the tests that pinned its warnings were updated.
+- **Where the tests live.** `crates/engine/tests/frame.rs` (R1 to R7, R12 and R4) and `crates/pixellab/tests/scene_canvas.rs` (R7 to R8, R11, R16, R17), with R19 in `servers.rs`. R4 compares the SVG and PNG hashes of every scene of the `examples/` and the fixture with `crates/engine/tests/data/frame-goldens.txt`, taken before this change; `PIXELLAB_WRITE_GOLDENS=1` rewrites it and must never be run to make a failing R4 pass.
