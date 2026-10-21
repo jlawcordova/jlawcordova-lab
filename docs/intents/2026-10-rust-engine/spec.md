@@ -1,5 +1,5 @@
 # Spec: The engine in Rust, and a site that only takes its output (from intent.md 2026-10-21)
-Status: draft.
+Status: approved.
 
 This spec turns the accepted intent, as amended on 2026-10-21 with the owner's decisions about the hop, the budgets and the art tests, into requirements and a design. It supersedes parts of `../2026-10-pixellab-document/spec.md`: R6's "the modules are exported from the package so the site's tests can import them", R15's git-installed package, and R7's over-budget failure. Everything else in that change (the document as a folder bundle, resolution, publish folders, Save As) stands, now on the Rust program and JSON sources.
 
