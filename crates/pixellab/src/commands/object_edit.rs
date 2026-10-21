@@ -969,7 +969,7 @@ pub fn commands() -> Vec<Command> {
         vec!["name"],
     );
     create.description = Some(
-        "The same starters as the lab's New dialog and `npm run art -- --new` (starter.mjs): a sprite of --width × --height (16×16 by default) anchored at its bottom center (--footprint says how many tiles it covers, 1,1 unless given), a one-level grass block, or an object that --extends another with no rows overridden yet.",
+        "The same starters as the lab's New dialog and `npm run art -- --new` (starter.rs): a sprite of --width × --height (16×16 by default) anchored at its bottom center (--footprint says how many tiles it covers, 1,1 unless given), a one-level grass block, or an object that --extends another with no rows overridden yet.",
     );
     create.examples = vec![
         "pixellab object new small-rock --width 12 --height 8",

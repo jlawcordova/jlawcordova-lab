@@ -170,7 +170,7 @@ function normalize(/** @type {any} */ v, /** @type {[string, string][]} */ roots
   if (typeof v === 'string') {
     let s = v;
     for (const [from, to] of roots) s = s.split(from).join(to);
-    if (node) s = s.split('.mjs').join('.json');
+    if (node) s = s.split('starter.mjs').join('starter.rs').split('.mjs').join('.json');
     // chat.context's version hashes the saved file's text (.mjs or .json).
     s = s.replace(/version="[^"]*"/g, 'version="<v>"');
     // Reports print gzip sizes in KB: those are compared within 1% with the numbers.
@@ -416,6 +416,8 @@ async function fixtureChecks(/** @type {string} */ base, /** @type {any} */ env,
   const n = await mcp(['node', NODE_CLI, 'serve', '--mcp', '--document', format1]);
   const r = await mcp([PROGRAM, 'serve', '--mcp', '--document', format2]);
   for (let i = 0; i < Math.max(n.length, r.length); i++) {
+    // Format 2 names its source files .json.
+    if (n[i] !== undefined) n[i] = n[i].split('starter.mjs').join('starter.rs').split('.mjs').join('.json');
     if (n[i] !== r[i]) {
       const at = [...(n[i] ?? '')].findIndex((ch, k) => ch !== (r[i] ?? '')[k]);
       differ('sample', `serve --mcp message ${i + 1}`, `node …${(n[i] ?? '').slice(Math.max(0, at - 120), at + 200)}…\n  rust …${(r[i] ?? '').slice(Math.max(0, at - 120), at + 200)}…`);
@@ -482,12 +484,34 @@ async function fixtureChecks(/** @type {string} */ base, /** @type {any} */ env,
   for (const argv of [...reads, ...FAILING]) {
     const a = nodeCli([...argv, '--document', e1], env);
     const b = rustCli([...argv, '--document', e2], env);
-    const norm = (/** @type {string} */ s, /** @type {string} */ root) => s.split(root).join('<root>').split('.mjs').join('.json').replace(/\d+\.\d KB gzip/g, '<gz> KB gzip').replace(/\d+ ms\b/g, '<ms>').replace(/v\d+\.\d+\.\d+/g, '<node>');
+    const norm = (/** @type {string} */ s, /** @type {string} */ root) => {
+      let t = s.split(root).join('<root>').split('starter.mjs').join('starter.rs').split('.mjs').join('.json').replace(/\d+\.\d KB gzip/g, '<gz> KB gzip').replace(/\d+ ms\b/g, '<ms>').replace(/v\d+\.\d+\.\d+/g, '<node>');
+      t = t.replace(/version="[^"]*"/g, 'version="<v>"');
+      // art sizes prints gzip sizes (compared within 1% in its JSON): mask the gzip figures.
+      if (argv[0] === 'art' && argv[1] === 'sizes') t = t.replace(/[\d,]+ B gzip/g, '<gz> B gzip').replace(/^(.*\S)(\s+)([+-]?[\d,—]+)(\s+)([+-]?[\d,—]+)$/gm, (_m, head, a, _g, b) => `${head}${a}<gz>${b}<gz>`);
+      return t;
+    };
     if (a.status !== b.status) differ('sample', `${argv.join(' ')} exit code`, `node ${a.status}, rust ${b.status}`);
     if (norm(a.stdout, e1) !== norm(b.stdout, e2)) differ('sample', `${argv.join(' ')} stdout`, `node ${norm(a.stdout, e1).slice(0, 400)}\n  rust ${norm(b.stdout, e2).slice(0, 400)}`);
     if (norm(a.stderr, e1) !== norm(b.stderr, e2)) differ('sample', `${argv.join(' ')} stderr`, `node ${norm(a.stderr, e1).slice(0, 400)}\n  rust ${norm(b.stderr, e2).slice(0, 400)}`);
   }
   note(`sample: human output and exit codes of ${reads.length} read commands and ${FAILING.length} failing calls compared`);
+  // The CLI reference: the Node script's docs/cli.md and the program's help --markdown.
+  const md1 = run(['node', join(REPO, 'scripts/docs-cli.mjs'), '--stdout'], env);
+  const md2 = rustCli(['help', '--markdown'], env);
+  // document migrate is new in the program (R8): its row and its section aren't in the Node reference.
+  md2.stdout = md2.stdout
+    .split('\n')
+    .filter((l) => !l.startsWith('| [`document migrate`]'))
+    .join('\n')
+    .replace(/\n#### document\.migrate\n[\s\S]*?(?=\n#### )/, '')
+    .replace(/; `document_migrate` \([^)]*\)/, '');
+  const ref = (md1.status === 0 && md1.stdout.startsWith('#') ? md1.stdout : readFileSync(join(REPO, 'docs/cli.md'), 'utf8')).split('starter.mjs').join('starter.rs').replace(/\b(palette|(?:objects|scenes)\/[^\s`"'*)\]]+)\.mjs/g, '$1.json');
+  if (ref !== md2.stdout) {
+    const at = [...ref].findIndex((ch, k) => ch !== md2.stdout[k]);
+    differ('sample', 'help --markdown', `node …${ref.slice(Math.max(0, at - 150), at + 200)}…\n  rust …${md2.stdout.slice(Math.max(0, at - 150), at + 200)}…`);
+  }
+  note('sample: help --markdown compared with docs/cli.md');
   void execFileSync;
 }
 

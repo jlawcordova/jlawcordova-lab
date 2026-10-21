@@ -333,17 +333,10 @@ pub fn help_for(registry: &Registry, topic: &[String]) -> Option<String> {
 
 // ---- the command reference (scripts/docs-cli.mjs) ----
 
-/// The stdio protocol version (`PROTOCOL_VERSION` in server-stdio.mjs).
-const STDIO_PROTOCOL_VERSION: &str = "1";
-/// The MCP protocol version (`PROTOCOL_VERSION` in server-mcp.mjs).
-const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
-/// Commands that aren't MCP tools, and why (`LEFT_OUT` in server-mcp.mjs).
-const LEFT_OUT: [(&str, &str); 4] = [
-    ("proposal.apply", "approving a proposal is for a person, in Pixel Lab or with pixellab proposal apply"),
-    ("proposal.reject", "rejecting a proposal is for a person"),
-    ("art.build", "it publishes the SVGs a site inlines; a person publishes after approving"),
-    ("document.copy", "saving a copy of the document is for a person"),
-];
+/// The servers' protocol versions and the commands MCP leaves out, from the servers.
+const MCP_PROTOCOL_VERSION: &str = crate::server_mcp::PROTOCOL_VERSION;
+use crate::server_mcp::LEFT_OUT;
+
 const REPO: &str = "/Users/jlawcordova/Projects/jlawcordova-lab";
 
 fn tool_name(command: &str) -> String {
@@ -466,7 +459,7 @@ pub fn markdown(registry: &Registry) -> String {
     let text = TEMPLATE
         .replace("@@INDEX@@", &index.join("\n"))
         .replace("@@GLOBALS@@", &globals.join("\n"))
-        .replace("@@STDIO_VERSION@@", STDIO_PROTOCOL_VERSION)
+        .replace("@@STDIO_VERSION@@", &crate::server_stdio::PROTOCOL_VERSION.to_string())
         .replace("@@MCP_VERSION@@", MCP_PROTOCOL_VERSION)
         .replace("@@LEFT_OUT@@", &left_out)
         .replace("@@REPO@@", REPO)
@@ -562,7 +555,7 @@ The server holds a **session**: docs open as in-memory working copies with undo 
 | --- | --- | --- |
 | `doc.changed` | `{ doc, dirty, canUndo, canRedo }` | after each edit, undo, redo, save, revert, merge or reload, and when a clean open doc reloads because its file changed. Sent before the request's response. |
 | `doc.stale` | `{ doc, file }` | an open doc with unsaved edits whose file changed on disk (the app shows Merge, Reload, Keep Mine), and after an applied proposal whose merge into the open copy clashed |
-| `files.changed` | `{ files: ["scenes/hero-island.mjs", …] }` | sources changed on disk (another editor, git, an applied proposal, a save), debounced 150 ms |
+| `files.changed` | `{ files: ["scenes/hero-island.json", …] }` | sources changed on disk (another editor, git, an applied proposal, a save), debounced 150 ms |
 | `proposals.changed` | `{ proposals: [ProposalSummary] }` (as `proposal.list`) | a proposal was written, applied or rejected |
 | `activity.appended` | `{ entries: [{ time, tool, args, ok, summary }] }` | an MCP server logged tool calls |
 
