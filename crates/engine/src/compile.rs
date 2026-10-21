@@ -589,6 +589,41 @@ pub fn compile_all(sources: &Sources, problems: &[String], out: &Path, budgets: 
     Ok(Build { ok: true, outputs, preview_only, problems: vec![] })
 }
 
+/// A scene image written by `compile_images`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ImageOut {
+    pub file: String,
+    pub scene: String,
+    pub raw: u64,
+}
+
+/// The scenes that declare an `image`: (scene, file, scale).
+pub fn scene_images(sources: &Sources) -> Vec<(String, String, u32)> {
+    let mut list = Vec::new();
+    for (name, scene) in &sources.scenes {
+        let Some(image) = scene.get("image").and_then(Value::as_object) else { continue };
+        let Some(file) = image.get("file").and_then(Value::as_str) else { continue };
+        let scale = image.get("scale").and_then(Value::as_f64).map_or(1, |s| s as u32);
+        list.push((name.clone(), file.to_string(), scale));
+    }
+    list
+}
+
+/// Renders each scene's `image`: its viewBox on the card color at `scale`,
+/// the same pixels as `render_preview` + `encode_png`, written to `dir`
+/// (R18, D5). Call it only when the sources have no problems.
+pub fn compile_images(sources: &Sources, dir: &Path, colors: crate::preview::PreviewColors) -> Result<Vec<ImageOut>> {
+    let mut out = Vec::new();
+    for (scene, file, scale) in scene_images(sources) {
+        let (image, _) = crate::preview::render_preview(sources, crate::preview::Target::Scene(&scene), colors)?;
+        let bytes = crate::preview::encode_png(&image, scale);
+        std::fs::create_dir_all(dir).map_err(|e| EngineError(e.to_string()))?;
+        std::fs::write(dir.join(&file), &bytes).map_err(|e| EngineError(e.to_string()))?;
+        out.push(ImageOut { file, scene, raw: bytes.len() as u64 });
+    }
+    Ok(out)
+}
+
 /// How many items a scene places, groups flattened (`countItems`).
 pub fn count_items(items: &[Value]) -> usize {
     items

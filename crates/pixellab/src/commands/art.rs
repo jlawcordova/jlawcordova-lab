@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use engine::compile::{compile_all, drop_head, head_sources, scene_sizes};
+use engine::compile::{compile_all, compile_images, drop_head, head_sources, scene_images, scene_sizes};
 use engine::engine::{load_sources, validate, Sources};
 use engine::omap::OMap;
 use engine::preview::{encode_png, preview_colors, render_palette, render_preview, Target};
@@ -54,12 +54,29 @@ fn build_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
         )
         .into());
     };
-    // The files on disk, not anyone's unsaved working copies.
+    // The files on disk, not anyone's unsaved working copies. Images go to the
+    // manifest's publish.images, else to --dir when given.
+    let images_dir: Option<PathBuf> =
+        doc.images_dir.clone().or_else(|| opt_str(&params, "dir").filter(|d| !d.is_empty()).map(|_| out.clone()));
     let docs = doc.load_docs();
     let budgets = doc.budgets.clone();
     let sources = load_sources(docs.palette.unwrap_or(Value::Null), docs.objects, docs.scenes);
     let problems: Vec<String> = docs.load_errors.into_iter().chain(validate(&sources)).collect();
+    if problems.is_empty() && images_dir.is_none() && !scene_images(&sources).is_empty() {
+        return Err(CommandError::new(
+            "this document has no publish folder for images: add \"publish\": { \"images\": \"<folder>\" } to its manifest.json, or pass --dir <folder>",
+            "no_publish_dir",
+        )
+        .into());
+    }
     let r = compile_all(&sources, &problems, &out, &budgets)?;
+    let images = match (&images_dir, r.ok) {
+        (Some(dir), true) => {
+            let colors = preview_colors(doc.preview_card.as_deref(), doc.preview_grid.as_deref()).map_err(Error::Internal)?;
+            compile_images(&sources, dir, colors)?
+        }
+        _ => vec![],
+    };
     let unsaved: Vec<Value> = match ctx.session.as_deref() {
         Some(s) => s.list().into_iter().filter(|st| st["dirty"] == json!(true)).map(|st| st["doc"].clone()).collect(),
         None => vec![],
@@ -70,6 +87,10 @@ fn build_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
         .map(|o| {
             json!({ "file": o.file, "scene": o.scene, "kind": "svg", "raw": o.raw, "gzip": o.gzip, "over": o.over, "report": o.report, "warnings": o.warnings })
         })
+        .collect();
+    let outputs: Vec<Value> = outputs
+        .into_iter()
+        .chain(images.iter().map(|i| json!({ "file": i.file, "scene": i.scene, "kind": "png", "raw": i.raw, "warnings": [] })))
         .collect();
     let preview_only: Vec<Value> = r
         .preview_only
@@ -98,7 +119,11 @@ fn build_format(r: &Value, _: &Params) -> String {
     let list = |k: &str| r[k].as_array().cloned().unwrap_or_default();
     let mut lines: Vec<String> = Vec::new();
     for o in list("outputs") {
-        lines.push(format!("{}: {}", str_of(o.get("file")), str_of(o.get("report"))));
+        if o["kind"] == "png" {
+            lines.push(format!("{}: PNG, {} bytes", str_of(o.get("file")), str_of(o.get("raw"))));
+        } else {
+            lines.push(format!("{}: {}", str_of(o.get("file")), str_of(o.get("report"))));
+        }
     }
     for p in list("previewOnly") {
         lines.push(format!("{} (preview only, not written): {}", str_of(p.get("scene")), str_of(p.get("report"))));
