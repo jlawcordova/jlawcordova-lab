@@ -42,4 +42,6 @@ A unit's checks: `cargo fmt --check`, `cargo test` for its crate, its ported sui
 
 - U3 settles `engine.rs`'s render internals before U4, U5 and U8 start on them.
 - U14 settles `context.rs` (`Ctx`) and `session.rs` (`Session`) before the command units (U22–U26) start; their briefs give the final methods.
+- The main session wrote `commands/common.rs` and `commands/object.rs` (object.list, show, render) as the pattern for the command units; U24 is left with `object-edit.mjs`. `crates/pixellab/tests/corpus.rs` compares every read command with the Node goldens.
+- U10 took the core of `registry.rs` (new, groups, call); U14 took `sortScene`, `stayed` and `pathChanges` (`sorting.rs`).
 - U21 settles `registry.rs`, `argv.rs`, `params.rs` and `help.rs`; U22–U26 add their commands to the files in `commands/` only.
