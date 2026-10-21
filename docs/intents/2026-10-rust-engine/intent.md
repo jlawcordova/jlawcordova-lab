@@ -1,5 +1,5 @@
 # Intent: The engine in Rust, and a site that only takes its output
-Author: J. Law Cordova (owner) · 2026-10-21 · Status: draft.
+Author: J. Law Cordova (owner) · 2026-10-21 · Status: accepted.
 
 ## Problem
 
