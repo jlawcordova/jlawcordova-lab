@@ -5,35 +5,34 @@ A native macOS editor for isometric pixel art: the hero island of [jlawcordova.g
 It's built CLI first: every action is a command in one registry, reachable three ways, so an agent can do everything a person can.
 
 - **Pixel Lab.app**: a SwiftUI app (board 03, "Field notebook", night and day).
-- **`pixellab`**: a zero-dependency Node CLI (`pixellab scene place hero-island pine --at 14,6,1`), which is also the pixel-art engine and compiler, exported as the `pixellab` package.
+- **`pixellab`**: one native program, written in Rust (`pixellab scene place hero-island pine --at 14,6,1`), which is also the pixel-art engine and compiler. It needs nothing installed to run, and it's bundled inside the app.
 - **`pixellab serve --mcp`**: an MCP server for Claude Code and other agents. Agents' saves become **proposals** you approve in the app.
 - **The Agent chat**: Claude, in a tab beside the inspector, running on your own Claude Code install and plan, with what you select on the stage going along with your message.
 
-The document is the source of truth: the engine in this repo validates and serializes every write into the document's `.mjs` sources, and nothing touches a site until you publish. The site keeps its document next to the SVGs it compiles to, and installs this package to check its art.
+The document is the source of truth: the engine in this repo validates and serializes every write into the document's JSON sources (format 2), and nothing touches a site until you publish. The compiled SVGs are self-contained: they carry their own styles and animations, so a site only inlines them. The site keeps its document next to the SVGs it compiles to, and builds them with the released `pixellab` program.
 
 ![Pixel Lab, scene mode, night](docs/screenshots/final-scene-dark.png)
 
 ## Requirements
 
 - macOS 15 or later, Apple silicon or Intel.
-- Node.js 22 or later (`node` on your shell's PATH, in `/opt/homebrew/bin` or `/usr/local/bin`, or set in Settings). The app runs its CLI with it; you never type `npm`.
 - A `.pixellab` document. With none chosen, Pixel Lab opens the one in `~/Projects/jlawcordova.github.io` when that checkout is there (or its older `source/` folder); File › New Document… makes one anywhere.
-- To build: the Xcode Command Line Tools (Swift 6). Full Xcode isn't needed.
+- To build: the Xcode Command Line Tools (Swift 6) and [rustup](https://rustup.rs), which installs the Rust toolchain `rust-toolchain.toml` pins on first use. Full Xcode isn't needed, and neither is Node.
 - For the Agent chat (optional): [Claude Code](https://claude.com/claude-code), signed in with your Claude plan. The Agent tab can install it and sign you in.
 
 ## Install
 
 ### From a release
 
-Each [release](https://github.com/jlawcordova/jlawcordova-lab/releases) has Pixel Lab.app for Apple silicon as a disk image (`PixelLab-darwin-arm64.dmg`) and a zip of the same app (`PixelLab-darwin-arm64.zip`). Download them from the release page, or with `gh`:
+Each [release](https://github.com/jlawcordova/jlawcordova-lab/releases) has Pixel Lab.app for Apple silicon as a disk image (`PixelLab-darwin-arm64.dmg`) and a zip of the same app (`PixelLab-darwin-arm64.zip`), the program alone for a terminal or a site's CI (`pixellab-darwin-arm64.tar.gz` and `pixellab-linux-x64.tar.gz`, each holding the one executable), and `SHA256SUMS` for all four. Download them from the release page, or with `gh`:
 
 ```sh
 gh release download --repo jlawcordova/jlawcordova-lab --pattern 'PixelLab-darwin-arm64.dmg' --dir /tmp
 ```
 
-Open the disk image and drag Pixel Lab to `~/Applications` (create the folder if needed). Then connect Claude Code with the `claude mcp add` command below. The app is ad-hoc signed and the download is quarantined, so the first launch is blocked: allow it under System Settings › Privacy & Security › Open Anyway. To update, quit Pixel Lab and replace the app with the newer one.
+Open the disk image and drag Pixel Lab to `~/Applications` (create the folder if needed). The app carries the program, so there's nothing else to install. Then connect Claude Code with the `claude mcp add` command below. The app is ad-hoc signed and the download is quarantined, so the first launch is blocked: allow it under System Settings › Privacy & Security › Open Anyway. To update, quit Pixel Lab and replace the app with the newer one.
 
-On an Intel Mac, install from source.
+To check a download, run `grep ' <file>$' SHA256SUMS | shasum -a 256 -c` in the folder holding both. To use the program without the app, unpack `pixellab-darwin-arm64.tar.gz` (or the Linux one) and put the `pixellab` inside on your PATH; `pixellab --version` prints the release. On an Intel Mac, install from source.
 
 ### From source
 
@@ -43,11 +42,11 @@ cd ~/Projects/jlawcordova-lab
 scripts/install.sh
 ```
 
-`scripts/install.sh` builds `build/Pixel Lab.app` (release build, ad-hoc signed) and copies it to `~/Applications` (it creates the folder if needed; no sudo, never `/Applications`). It ends by printing the `claude mcp add` command and an optional shell alias, both pointing at the CLI inside the installed app:
+`scripts/install.sh` builds the program with cargo and the app with Swift into `build/Pixel Lab.app` (release build, ad-hoc signed) and copies it to `~/Applications` (it creates the folder if needed; no sudo, never `/Applications`). It ends by printing the `claude mcp add` command and an optional shell alias, both pointing at the program inside the installed app:
 
 ```sh
-claude mcp add pixellab -- node "$HOME/Applications/Pixel Lab.app/Contents/Resources/cli/bin/pixellab.mjs" serve --mcp
-alias pixellab='node "$HOME/Applications/Pixel Lab.app/Contents/Resources/cli/bin/pixellab.mjs"'   # in ~/.zshrc
+claude mcp add pixellab -- "$HOME/Applications/Pixel Lab.app/Contents/Helpers/pixellab" serve --mcp
+alias pixellab='"$HOME/Applications/Pixel Lab.app/Contents/Helpers/pixellab"'   # in ~/.zshrc
 ```
 
 Options: `--no-build` installs the existing build, `--dest <dir>` installs somewhere else. Run it again to update; quit Pixel Lab first.
@@ -56,7 +55,7 @@ The app is signed ad hoc, not notarized. If macOS won't open it the first time, 
 
 ## First launch
 
-Pixel Lab opens the document in `~/Projects/jlawcordova.github.io` if that checkout is there, and starts its own `pixellab serve --stdio` server on it. If the document or Node.js can't be found, a setup screen says what's missing, with Choose… for a `.pixellab` (or a site checkout holding one), New… to make one, Choose… for the node binary, and Try Again. Change either later in **Settings** (⌘,), along with the appearance (Auto, Light, Dark). Double-clicking a `.pixellab` in Finder opens it too.
+Pixel Lab opens the document in `~/Projects/jlawcordova.github.io` if that checkout is there, and starts its own `pixellab serve --stdio` server on it. If the document can't be found, a setup screen says what's missing, with Choose… for a `.pixellab` (or a site checkout holding one), New… to make one, and Try Again. If the document is still in the old format (`.mjs` sources, format 1), the screen says so and offers **Migrate…**: it converts the document in place to JSON sources after you confirm, checks first that every scene compiles to the same SVG, and can be undone with git. Change the document later in **Settings** (⌘,), along with the appearance (Auto, Light, Dark). Double-clicking a `.pixellab` in Finder opens it too.
 
 It reopens the last scene or object you had open, else the hero island. The window title shows the open doc and the document's name.
 
@@ -157,19 +156,19 @@ pixellab art sizes hero-island                       # bytes per object and colo
 pixellab proposal list && pixellab proposal apply <id>
 ```
 
-The document comes from `--document`, else `PIXELLAB_DOC`, else `~/.config/pixellab/config.json` (`{"document": "…"}`), else `--site <checkout>` / `PIXELLAB_SITE` (the `*.pixellab` under the site's `src/assets/pixel-art/`, or its older `source/` folder), else the default site checkout. Edits from the command line are one-shot: load, edit, validate, serialize with the engine, write atomically. They refuse docs with problems or files changed on disk unless `--force`. Inside the repo use `node cli/bin/pixellab.mjs`, or the alias from Install.
+The document comes from `--document`, else `PIXELLAB_DOC`, else `~/.config/pixellab/config.json` (`{"document": "…"}`), else `--site <checkout>` / `PIXELLAB_SITE` (the `*.pixellab` under the site's `src/assets/pixel-art/`, or its older `source/` folder), else the default site checkout. Edits from the command line are one-shot: load, edit, validate, serialize with the engine, write atomically. They refuse docs with problems or files changed on disk unless `--force`. Inside the repo use `target/release/pixellab` (after `cargo build --release`), or the alias from Install.
 
-**The document.** A `.pixellab` is a folder: `manifest.json`, `palette.mjs`, `objects/*.mjs` and `scenes/*.mjs`, the sources exactly as the engine reads them. The manifest holds the format version, a name, and what publishing needs: `publish.dir` (relative to the document) and per-output `budgets`, plus the `preview` colors and the night `theme` color. Everything but `format` is optional.
+**The document.** A `.pixellab` is a folder: `manifest.json`, `palette.json`, `objects/*.json` and `scenes/*.json`, the sources exactly as the engine reads them (format 2). The manifest holds `"format": 2`, a name, and what publishing needs: `publish.dir` (relative to the document) and per-output `budgets`, plus the `preview` colors and the night `theme` color. Everything but `format` is optional. [docs/document-format.md](docs/document-format.md) has every field. A format-1 document (`.mjs` sources) is migrated, not edited: `pixellab document migrate` converts it in place (or `--to <path>.pixellab` writes a copy), after checking that every scene still compiles to the same SVG, and the app offers **Migrate…** on its setup screen.
 
-**As a package.** A site that inlines the art installs this repo from git (`"pixellab": "github:jlawcordova/jlawcordova-lab#<ref>"`) to run `pixellab art build` and to import the engine in its tests: `pixellab/engine`, `pixellab/compile`, `pixellab/document`, `pixellab/serialize`, … (the `exports` in `package.json`).
+**As a program.** A site that inlines the art downloads the release's `pixellab` for its platform, checks it against `SHA256SUMS`, and runs `pixellab art build` (the same program on a Mac or in Linux CI; no Node and no package to install). The compiled SVGs carry `data-pixellab`, scope their generated names to the scene, and play frame loops, motion, ambient loops and actions from their own `<style>`: an action plays when the page sets `data-play` and ends with `animationend`. A scene over its budget is written with a warning, not refused. What a site may rely on is in [docs/site-contract.md](docs/site-contract.md).
 
 ## MCP for Claude Code
 
 ```sh
-claude mcp add pixellab -- node "$HOME/Applications/Pixel Lab.app/Contents/Resources/cli/bin/pixellab.mjs" serve --mcp
+claude mcp add pixellab -- "$HOME/Applications/Pixel Lab.app/Contents/Helpers/pixellab" serve --mcp
 ```
 
-(The Agent window's Copy button gives the same command for the running app. Add `--document <path.pixellab>` or `--site <checkout>` after `--mcp` for another document.)
+(Without the app, point it at the `pixellab` you unpacked from a release instead. The Agent window's Copy button gives the command for the running app. Add `--document <path.pixellab>` or `--site <checkout>` after `--mcp` for another document.)
 
 Tools are the commands with `.` → `_` (`scene_place`, `object_paint`, `scene_render` returns the PNG so the agent can see it, …). Agents never order items: `scene_place` and every other scene edit leave the scene in depth order, `scene_set` takes `depth` (front, back or auto) and a pixel item's `level`, `scene_sort` fixes a scene, and `object_footprint` sets a sprite's footprint. Besides placing and painting, agents can place into groups and edit a group's attributes (`scene_group_set`), key motion (`scene_track_add`, `scene_key_set` for move, show and pose keys, `scene_motion_path` for on-grid keys along a polyline), and set a whole map in one call (`object_map_set`). **How proposals work:**
 
@@ -189,28 +188,30 @@ Every tool call is logged to `activity.jsonl` in the same folder and shown in th
 
 ## Troubleshooting
 
-- **"Pixel Lab needs Node.js 22…" / node not found.** The app looks in Settings, then your login shell's `command -v node`, then `/opt/homebrew/bin` and `/usr/local/bin`. Install Node 22+ (e.g. `brew install node`), or set its path in Settings › Node.js and Try Again.
-- **Document not found.** The setup screen names the path it tried and what's wrong (no folder there, or no `palette.mjs` in it). Choose a `.pixellab`, a site checkout holding one, or make a new one. The CLI resolves the document from `--document`, `PIXELLAB_DOC`, `~/.config/pixellab/config.json` (`{"document": "…"}`), then `--site` / `PIXELLAB_SITE` / `{"site": "…"}`, then `~/Projects/jlawcordova.github.io`.
+- **"… uses the old format."** The document is still format 1 (`.mjs` sources). Choose Migrate… on the setup screen, or run `pixellab document migrate` on it (or with `--to` for a copy). It refuses while Pixel Lab has the document open with unsaved edits, and an `.mjs` source that isn't plain data is named with its file, line and column.
+- **Document not found.** The setup screen names the path it tried and what's wrong (no folder there, or no `palette.json` in it). Choose a `.pixellab`, a site checkout holding one, or make a new one. The CLI resolves the document from `--document`, `PIXELLAB_DOC`, `~/.config/pixellab/config.json` (`{"document": "…"}`), then `--site` / `PIXELLAB_SITE` / `{"site": "…"}`, then `~/Projects/jlawcordova.github.io`.
 - **Publish fails or is refused.** Nothing is written when a source has a problem: the sheet lists them (so does the Checks panel), fix them and publish again. An output over its budget is written and flagged; make the art smaller or raise its budget in `manifest.json`. A document whose manifest names no publish folder asks for one. Unsaved docs aren't in a publish; save first.
 - **"The file changed on disk" when saving.** Someone (git, another editor, an approved proposal) changed the source while you had unsaved edits, and you chose Keep Mine (or hadn't seen the bar). Merge brings the file's change into your copy and keeps your edits; Revert loads the file; Save Anyway overwrites it.
 - **A proposal's base changed.** The file changed since the agent opened it. Approve asks whether to apply anyway (overwriting those changes) or reject; the diff shows what would change against the file as it is now.
-- **The Agent tab says Claude Code isn't installed, or keeps asking to sign in.** It looks in `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and your login shell's PATH; choose the command if it's elsewhere. Check `claude auth status` in Terminal: the chat uses the same login. If the browser sign-in doesn't finish (Claude Code asks for a code in the terminal), run `claude auth login` in Terminal and press Check again. A turn that stops with "Pixel Lab's tools didn't start" means the bundled CLI couldn't run: check Node.js in Settings.
+- **The Agent tab says Claude Code isn't installed, or keeps asking to sign in.** It looks in `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and your login shell's PATH; choose the command if it's elsewhere. Check `claude auth status` in Terminal: the chat uses the same login. If the browser sign-in doesn't finish (Claude Code asks for a code in the terminal), run `claude auth login` in Terminal and press Check again. A turn that stops with "Pixel Lab's tools didn't start" means the bundled program couldn't run: check that `Pixel Lab.app/Contents/Helpers/pixellab --version` runs, and reinstall the app if it doesn't.
 - **The app won't open the first time.** It's ad-hoc signed; Control-click › Open, or allow it in System Settings › Privacy & Security (Open Anyway, which a downloaded release always needs).
 
 ## Development
 
-The developer docs are in [docs/README.md](docs/README.md): the architecture, contributing, testing, and a README for each of [`cli/`](crates/pixellab/README.md), [`app/`](app/README.md) and [`scripts/`](scripts/README.md). They're also published as a site at [jlawcordova.com/jlawcordova-lab](https://jlawcordova.com/jlawcordova-lab/), built with `npm run docs:site` and deployed from `main` by [`.github/workflows/docs.yml`](.github/workflows/docs.yml).
+The developer docs are in [docs/README.md](docs/README.md): the architecture, contributing, testing, and a README for each of [`crates/pixellab/`](crates/pixellab/README.md), [`app/`](app/README.md) and [`scripts/`](scripts/README.md). They're also published as a site at [jlawcordova.com/jlawcordova-lab](https://jlawcordova.com/jlawcordova-lab/), built with `npm run docs:site` and deployed from `main` by [`.github/workflows/docs.yml`](.github/workflows/docs.yml).
 
 ```sh
-npm test                                   # CLI tests (node:test), must show "# fail 0"
+cargo test                                 # the Rust suites (engine and program)
+npm test                                   # builds the program, then the repo tooling's tests (node:test), must show "# fail 0"
 scripts/test-app.sh                        # app unit tests (Swift Testing, works with the Command Line Tools)
 swift build --package-path app             # debug build; swift build -c release for release
-scripts/build-app.sh                       # build/Pixel Lab.app (icon, bundled CLI, ad-hoc signature)
+scripts/build-app.sh                       # build/Pixel Lab.app (icon, bundled program, ad-hoc signature)
 scripts/snapshot.sh /tmp/hero.png scene:hero-island dark   # read-only self-snapshot of the main window
 scripts/acceptance.sh                      # the end-to-end acceptance pass on a temp copy of the site
 scripts/try-example.sh town                # the app on a temp copy of an example document (examples/)
 npm run examples                           # rewrite examples/ from scripts/make-examples.mjs
-npm run docs:cli                           # regenerate docs/cli.md from the command registry
+cargo build --release                      # target/release/pixellab, the program (the pinned toolchain installs itself)
+npm run docs:cli                           # regenerate docs/cli.md from the program's command registry
 npm run docs:site                          # build the developer docs site into build/docs-site/
 ```
 
@@ -218,7 +219,7 @@ npm run docs:site                          # build the developer docs site into 
 
 **Script hook.** `PIXELLAB_SCRIPT=<file> PIXELLAB_DOC=<temp copy of a document> PIXELLAB_STATE=<temp dir> "build/Pixel Lab.app/Contents/MacOS/PixelLab"` (or `PIXELLAB_SITE=<temp copy of the site>`) drives the app's model headlessly, one action per line (`open scene:hero-island`, `library pine`, `place 4 -1 1`, `move 1 0`, `save`, `publish`, `saveas <path>`, `mode object`, `px 23 20`, `agent open`, `approve`, `snapshot <png>`, `expect …`); it refuses the real checkout and anything inside it, logs each step and exits 0 only if every step passed. The action list is at the top of `app/Sources/PixelLab/Support/ScriptRunner.swift`; [CLAUDE.md](CLAUDE.md) says how to make the temp copy.
 
-**Releases.** Tags `v<major>.<minor>.<patch>` publish a GitHub Release ([`.github/workflows/release.yml`](.github/workflows/release.yml)). **The tag is the version:** nothing in the repo is bumped. The workflow passes it to `scripts/build-app.sh` (`PIXELLAB_VERSION`), which stamps it into the app's `Info.plist` and the bundled CLI's `package.json`, so the MCP server reports it too. The repo's `package.json` says `0.0.0-dev`; a local build or `scripts/install.sh` takes its version from `git describe` (`0.4.0-3-gabc1234` after three commits past `v0.4.0`).
+**Releases.** Tags `v<major>.<minor>.<patch>` publish a GitHub Release ([`.github/workflows/release.yml`](.github/workflows/release.yml)). **The tag is the version:** nothing in the repo is bumped. The workflow passes it to `scripts/build-app.sh` and `scripts/package-program.sh` (`PIXELLAB_VERSION`), which build it into the program (`pixellab --version`, and the version the MCP server reports) and stamp it into the app's `Info.plist`. The repo's `package.json` and `Cargo.toml` say `0.0.0-dev`; a local build or `scripts/install.sh` takes its version from `git describe` (`0.4.0-3-gabc1234` after three commits past `v0.4.0`).
 
 1. With what you want released merged to `main`, run `scripts/build-app.sh` and `scripts/acceptance.sh` on it (CI doesn't run the acceptance pass: it pins today's art).
 2. Tag `main` and push the tag:
@@ -227,6 +228,6 @@ npm run docs:site                          # build the developer docs site into 
    git fetch origin && git tag -a v<version> -m "Pixel Lab <version>" origin/main && git push origin v<version>
    ```
 
-The **Release Pixel Lab** workflow checks that the tag looks like `v0.4.0` and that the commit is on `main`, runs the CLI tests (against a fresh clone of the site) and the app's unit tests, builds the app on Apple silicon with the tag's version, packages it, installs it from the disk image and smoke-tests it (signature, the bundled MCP server reporting the tag's version, the app opening `scene:hero-island` through the script hook), then publishes the release with generated notes. If it fails, delete the tag (`git push origin :refs/tags/v<version>`), fix it, and tag again.
+The **Release Pixel Lab** workflow checks that the tag looks like `v0.4.0` and that the commit is on `main`, then builds and tests the program for Linux, and tests the program, the repo's tooling and the app on a Mac. It builds the app on Apple silicon with the tag's version, packages the app (`PixelLab-darwin-arm64.dmg` and `.zip`) and both programs (`pixellab-darwin-arm64.tar.gz` and `pixellab-linux-x64.tar.gz`, each built by `scripts/package-program.sh <target> <dir>`, which also writes the `SHA256SUMS` line), installs the app from the disk image and smoke-tests it (signature, the bundled program's MCP server reporting the tag's version, the app opening a scene of the fixture through the script hook), then publishes the release with the five files and generated notes. If it fails, delete the tag (`git push origin :refs/tags/v<version>`), fix it, and tag again.
 
-Layout: `cli/` (Node ≥ 22, ESM, Node built-ins only), `app/` (SwiftPM, SwiftUI + AppKit, macOS 15+), `scripts/`, `docs/intents/` (each change's intent, spec and plan; `2026-10-mac-app/plan.md` is the architecture and design record), `docs/cli.md` (the command reference), `docs/*.md` and each folder's `README.md` (the developer docs). No dependencies beyond Node and Swift.
+Layout: `crates/` (the Rust engine, `crates/engine`, and the program, `crates/pixellab`; the toolchain is pinned in `rust-toolchain.toml`), `app/` (SwiftPM, SwiftUI + AppKit, macOS 15+), `scripts/`, `docs/intents/` (each change's intent, spec and plan; `2026-10-mac-app/plan.md` is the architecture and design record), `docs/cli.md` (the command reference), `docs/*.md` and each folder's `README.md` (the developer docs). Node is only repo tooling (the docs site builder, the example and icon generators, the fake `claude`, `scripts/test/`); the program, the app and agents never need it. Dependencies: `serde`, `serde_json` and `miniz_oxide` for the program, none for the app.
