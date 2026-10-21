@@ -147,7 +147,6 @@ fn r3_the_default_site_under_home_is_tried_when_nothing_else_is_set() {
 }
 
 #[test]
-#[ignore = "needs U8"]
 fn r1_r6_open_document_reads_the_manifest_and_carries_this_packages_engine() {
     let doc = make_document();
     let opened = open_document(&opts(Some(&doc.root), None, doc.env())).unwrap();
@@ -163,7 +162,6 @@ fn r1_r6_open_document_reads_the_manifest_and_carries_this_packages_engine() {
 }
 
 #[test]
-#[ignore = "needs U8"]
 fn r2_a_document_without_a_manifest_opens_with_defaults_and_no_publish_folder() {
     let doc = make_document();
     fs::remove_file(doc.root.join("manifest.json")).unwrap();
@@ -193,7 +191,6 @@ fn r2_format_is_required_and_must_be_2_everything_else_is_optional() {
 }
 
 #[test]
-#[ignore = "needs U8"]
 fn r2_format_2_with_every_key_is_accepted() {
     ok(json!({
         "format": 2, "name": "x",
@@ -204,7 +201,6 @@ fn r2_format_2_with_every_key_is_accepted() {
 }
 
 #[test]
-#[ignore = "needs U8"]
 fn r2_unknown_keys_and_bad_values_are_named() {
     bad(json!({ "format": 2, "colour": 1 }), r#"unknown key "colour""#);
     bad(json!({ "format": 2, "publish": { "folder": ".." } }), r#"unknown key publish."folder""#);
@@ -283,7 +279,6 @@ fn r4_document_copy_saves_the_whole_document_elsewhere_save_as_and_refuses_an_ex
 // a site checkout (R3, legacy)
 
 #[test]
-#[ignore = "needs U8"]
 fn r3_a_pixellab_under_src_assets_pixel_art_is_the_document_of_a_site() {
     let site = make_site();
     assert_eq!(find_document_in_site(&site.root), Some((site.document.clone(), false)));
