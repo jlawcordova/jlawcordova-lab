@@ -402,6 +402,11 @@ fn old_format(name: &str) -> CommandError {
 /// Checks that `root` is a document (or, via a site, finds the one in it)
 /// and reads its manifest.
 pub fn check_document(root: &Path, from: From, via: Via) -> CResult<Checked> {
+    check(root, from, via, false).map(|(checked, _)| checked)
+}
+
+/// `check_document`, or, with `allow_old`, a format-1 document as it is with R9's problem beside it.
+fn check(root: &Path, from: From, via: Via, allow_old: bool) -> CResult<(Checked, Option<CommandError>)> {
     let where_ = format!("(from {})", from_text(from, via));
     if !is_dir(root) {
         let expected = if via == Via::Site { "a checkout of the site" } else { "a .pixellab document" };
@@ -426,7 +431,11 @@ pub fn check_document(root: &Path, from: From, via: Via) -> CResult<Checked> {
         legacy = is_legacy;
     }
     if legacy {
-        return Err(old_format(&document_name(&doc_root, site_root.as_deref(), None)));
+        let problem = old_format(&document_name(&doc_root, site_root.as_deref(), None));
+        if allow_old {
+            return Ok((Checked { root: doc_root, site_root, legacy, manifest: serde_json::json!({ "format": 1 }) }, Some(problem)));
+        }
+        return Err(problem);
     }
     let manifest_file = doc_root.join("manifest.json");
     // The manifest, parsed leniently first: R9 only needs its format and name.
@@ -448,7 +457,12 @@ pub fn check_document(root: &Path, from: From, via: Via) -> CResult<Checked> {
     };
     let is_old = parsed.as_ref().and_then(|m| m.get("format")).and_then(Value::as_f64) == Some(1.0);
     if is_old || (!doc_root.join("palette.json").exists() && doc_root.join("palette.mjs").exists()) {
-        return Err(old_format(&document_name(&doc_root, site_root.as_deref(), parsed.as_ref())));
+        let problem = old_format(&document_name(&doc_root, site_root.as_deref(), parsed.as_ref()));
+        if allow_old {
+            let manifest = parsed.filter(Value::is_object).unwrap_or_else(|| serde_json::json!({ "format": 1 }));
+            return Ok((Checked { root: doc_root, site_root, legacy, manifest }, Some(problem)));
+        }
+        return Err(problem);
     }
     if !doc_root.join("palette.json").exists() {
         return Err(CommandError::document(format!(
@@ -460,7 +474,7 @@ pub fn check_document(root: &Path, from: From, via: Via) -> CResult<Checked> {
         Some(p) => check_manifest(&p, &manifest_file.to_string_lossy())?,
         None => serde_json::json!({ "format": FORMAT }),
     };
-    Ok(Checked { root: doc_root, site_root, legacy, manifest })
+    Ok((Checked { root: doc_root, site_root, legacy, manifest }, None))
 }
 
 /// How to open a document.
@@ -496,6 +510,8 @@ pub struct Document {
     pub preview_card: Option<String>,
     pub preview_grid: Option<String>,
     pub dark_page: String,
+    /// R9's problem when the document is still in format 1 (`open_document_allowing_old`), else None.
+    pub old_format: Option<String>,
 }
 
 impl Document {
@@ -515,6 +531,18 @@ pub fn open_document(options: &OpenOptions) -> CResult<Document> {
     let Resolved { root, from, via } = resolve_document_root(options.doc.as_deref(), options.site.as_deref(), &options.env, &options.cwd)?;
     let checked = check_document(&root, from, via)?;
     Ok(document_at(checked, from, via))
+}
+
+/// `open_document`, but a format-1 document opens too, with R9's problem in
+/// `old_format`: `serve --stdio` starts on it so the app can run
+/// `document.migrate` through it (spec R8), and every command that needs
+/// the document gives that problem until then.
+pub fn open_document_allowing_old(options: &OpenOptions) -> CResult<Document> {
+    let Resolved { root, from, via } = resolve_document_root(options.doc.as_deref(), options.site.as_deref(), &options.env, &options.cwd)?;
+    let (checked, problem) = check(&root, from, via, true)?;
+    let mut document = document_at(checked, from, via);
+    document.old_format = problem.map(|p| p.message);
+    Ok(document)
 }
 
 fn document_at(Checked { root, site_root, legacy, manifest }: Checked, from: From, via: Via) -> Document {
@@ -548,5 +576,6 @@ fn document_at(Checked { root, site_root, legacy, manifest }: Checked, from: Fro
         dark_page: text("theme", "darkPage").unwrap_or_else(|| DEFAULT_DARK_PAGE.to_string()),
         manifest,
         root,
+        old_format: None,
     }
 }

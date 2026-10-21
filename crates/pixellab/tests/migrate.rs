@@ -255,3 +255,71 @@ fn r8_a_migrated_document_builds_every_scene_byte_identical_to_the_node_clis_bui
     assert!(scenes > 0);
     eprintln!("{scenes} scenes compared");
 }
+
+/// Runs `serve --stdio` over requests (one per line) until stdin ends; the responses by id.
+fn stdio(args: &[&str], env: &std::collections::HashMap<String, String>, requests: &[(&str, Value)]) -> Vec<Value> {
+    use std::io::Write as _;
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_pixellab"))
+        .args(["serve", "--stdio"])
+        .args(args)
+        .env_clear()
+        .envs(env)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    for (id, (method, params)) in requests.iter().enumerate() {
+        let line = serde_json::json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
+        writeln!(stdin, "{line}").unwrap();
+    }
+    drop(stdin);
+    let out = child.wait_with_output().unwrap();
+    let mut replies: Vec<Value> = String::from_utf8(out.stdout)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str::<Value>(l).unwrap())
+        .filter(|m| m.get("id").is_some())
+        .collect();
+    replies.sort_by_key(|m| m["id"].as_u64());
+    replies
+}
+
+#[test]
+fn r8_r9_the_apps_server_opens_a_format_1_document_refuses_its_commands_and_migrates_it() {
+    let (root, env) = old_document();
+    let requests = [
+        ("scene.list", serde_json::json!({})),
+        ("session.info", serde_json::json!({})),
+        ("document.migrate", serde_json::json!({})),
+        ("scene.list", serde_json::json!({})),
+    ];
+    let r = stdio(&["--document", root.to_str().unwrap()], &env, &requests);
+    assert_eq!(r[0]["error"]["message"], "sample uses the old format. Migrate it with `pixellab document migrate`, or in the app.");
+    assert_eq!(r[0]["error"]["data"]["code"], "document");
+    assert_eq!(r[1]["result"]["document"]["root"], root.to_string_lossy().as_ref());
+    assert_eq!(r[2]["result"]["ok"], true, "{}", r[2]);
+    assert_eq!(r[3]["result"]["scenes"][0]["file"], "scenes/sample.json", "{}", r[3]);
+    assert!(root.join("palette.json").exists() && !root.join("palette.mjs").exists());
+}
+
+#[test]
+fn r8_r9_the_apps_server_migrates_a_sites_legacy_source_folder_into_its_bundle_and_reopens_it() {
+    let base = common::temp_dir("pixellab-migrate-site-");
+    let site = base.join("mysite");
+    let source = site.join("src/assets/pixel-art/source");
+    common::copy_dir(&common::repo().join("fixtures/format1/sample.pixellab"), &source);
+    std::fs::remove_file(source.join("manifest.json")).unwrap();
+    let mut env = std::collections::HashMap::new();
+    env.insert("HOME".to_string(), base.join("home").to_string_lossy().into_owned());
+    env.insert("PIXELLAB_STATE".to_string(), base.join("state").to_string_lossy().into_owned());
+    let requests =
+        [("document.migrate", serde_json::json!({})), ("session.info", serde_json::json!({})), ("scene.list", serde_json::json!({}))];
+    let r = stdio(&["--site", site.to_str().unwrap()], &env, &requests);
+    let bundle = site.join("src/assets/pixel-art/mysite.pixellab");
+    assert_eq!(r[0]["result"]["root"], bundle.to_string_lossy().as_ref(), "{}", r[0]);
+    assert_eq!(r[1]["result"]["document"]["root"], bundle.to_string_lossy().as_ref());
+    assert_eq!(r[1]["result"]["document"]["kind"], "document");
+    assert_eq!(r[2]["result"]["scenes"][0]["name"], "sample", "{}", r[2]);
+}

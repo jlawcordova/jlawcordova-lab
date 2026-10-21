@@ -24,7 +24,8 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use crate::context::{Ctx, DocKind};
-use crate::document::{Document, Env};
+use crate::document::{open_document_allowing_old, Document, Env, OpenOptions};
+use crate::errors::{CommandError, Error};
 use crate::jsonrpc::{handle_line, spawn_lines, Failure, Output, RpcError, METHOD_NOT_FOUND};
 use crate::open_docs::OpenDocsWriter;
 use crate::registry::Registry;
@@ -98,6 +99,7 @@ pub fn start(
     }
     drop(tx);
     let mut shutting_down = false;
+    let mut reopened = false;
     let docs_of = |s: &Session| -> Vec<(String, bool)> { s.entries.keys().map(|r| (r.clone(), s.is_dirty(r))).collect() };
     while let Ok(event) = rx.recv() {
         match event {
@@ -128,13 +130,47 @@ pub fn start(
                             .with_data(json!({ "code": "not_found" }))
                             .into());
                     }
-                    let result = registry.call(&mut Ctx::new(&mut session), method, params, false);
+                    // A format-1 document (R9): only the commands that don't need it run,
+                    // document.migrate among them, which converts it and reopens it here (R8).
+                    let old = session.document.old_format.clone().map(|problem| {
+                        let d = &session.document;
+                        let legacy = d.kind == "legacy-site";
+                        let open = OpenOptions {
+                            doc: if legacy { None } else { Some(d.root.to_string_lossy().into_owned()) },
+                            site: if legacy { d.site_root.as_ref().map(|r| r.to_string_lossy().into_owned()) } else { None },
+                            env: session.env.clone(),
+                            cwd: d.root.clone(),
+                        };
+                        (problem, open)
+                    });
+                    if let Some((problem, _)) = &old {
+                        if registry.get(method).is_some_and(|c| c.needs_document) {
+                            return Err(Failure::from(Error::Command(CommandError::document(problem.clone()))));
+                        }
+                    }
+                    let mut ctx = Ctx::new(&mut session);
+                    ctx.open = old.as_ref().map(|(_, open)| open.clone());
+                    let result = registry.call(&mut ctx, method, params, false);
+                    if let (Some((_, open)), Ok(_), "document.migrate") = (&old, &result, method) {
+                        match open_document_allowing_old(open) {
+                            Ok(document) if document.old_format.is_none() => {
+                                session.document = document;
+                                session.invalidate();
+                                reopened = true;
+                            }
+                            Ok(_) => {}
+                            Err(e) => log(&format!("reopening the migrated document failed: {}", e.message)),
+                        }
+                    }
                     // Opening and closing docs changes the list without a doc.changed; written before the response.
                     open_docs.update(&docs_of(&session), &mut |t| log(t));
                     result.map_err(Failure::from)
                 };
                 if let Some(reply) = handle_line(&line, &mut handle, &mut |t| log(t)) {
                     rpc.send(&reply);
+                }
+                if std::mem::take(&mut reopened) && sources.is_some() {
+                    sources = Some(SourcesWatcher::new(&session.document.source_dir));
                 }
                 if shutting_down {
                     break;

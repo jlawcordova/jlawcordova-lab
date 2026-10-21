@@ -3,7 +3,7 @@
 //! and stdout. Logs go to stderr.
 
 use crate::cli::Io;
-use crate::document::{open_document, OpenOptions};
+use crate::document::{open_document, open_document_allowing_old, OpenOptions};
 use crate::errors::{CommandError, Error};
 
 pub const SERVE_HELP: &str = "Usage: pixellab serve --stdio [--document <path.pixellab> | --site <checkout>]
@@ -104,7 +104,9 @@ fn run(argv: &[String], io: &mut Io) -> Result<i32, Error> {
     if flags.direct && !flags.mcp {
         return Err(CommandError::usage("serve: --direct goes with --mcp").into());
     }
-    let document = open_document(&OpenOptions { doc: flags.document, site: flags.site, env: io.env.clone(), cwd: io.cwd.clone() })?;
+    let options = OpenOptions { doc: flags.document, site: flags.site, env: io.env.clone(), cwd: io.cwd.clone() };
+    // The app's server opens a format-1 document too, so it can migrate it (R8, R9).
+    let document = if flags.stdio { open_document_allowing_old(&options)? } else { open_document(&options)? };
     if flags.stdio {
         return Ok(crate::server_stdio::start(
             document,
