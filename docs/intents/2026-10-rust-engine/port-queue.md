@@ -29,7 +29,7 @@ A unit's checks: `cargo fmt --check`, `cargo test` for its crate, its ported sui
 | U19 | `motion-ops.mjs` | `motion-commands.test.mjs` | U5 | S | merged |
 | U20 | `render.mjs` | `render.test.mjs` | U7, U8 | S | merged |
 | U21 | `registry.mjs`, `cli.mjs`, `help.mjs`, `bin/pixellab.mjs` → `registry.rs`, `cli.rs`, `help.rs`, `main.rs` | `help.test.mjs`, `commands.test.mjs` | U10 | S | merged |
-| U22 | `commands/scene.mjs`, `scene-edit.mjs` | scene parts of `edit-commands.test.mjs` | U14, U17, U21 | S | waiting |
+| U22 | `commands/scene.mjs`, `scene-edit.mjs` | scene parts of `edit-commands.test.mjs` | U14, U17, U21 | S | merged |
 | U23 | `commands/scene-layers.mjs`, `scene-motion.mjs` |  | U18, U19, U21 | S | merged |
 | U24 | `commands/object.mjs`, `object-edit.mjs` | `map-set.test.mjs`, object parts of `edit-commands.test.mjs` | U14, U21 | S | waiting |
 | U25 | `commands/doc.mjs`, `document.mjs`, `proposal.mjs`, `check.mjs`, `art.mjs`, `common.mjs` | `art-commands.test.mjs` | U7, U14, U15, U21 | S | waiting |

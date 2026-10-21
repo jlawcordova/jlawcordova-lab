@@ -10,6 +10,8 @@
 //! fixture (tests/data/render/expected.json, made by the script named in
 //! the report).
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -18,7 +20,12 @@ use engine::format::read_docs;
 use engine::iso;
 use engine::omap::OSet;
 use engine::png::{decode, Image};
+use pixellab::context::Ctx;
+use pixellab::document::{open_document, OpenOptions};
+use pixellab::errors::Error;
+use pixellab::registry::registry;
 use pixellab::render::*;
+use pixellab::session::{Options, Session};
 use serde_json::{json, Value};
 
 fn repo() -> PathBuf {
@@ -500,11 +507,39 @@ fn the_cli_writes_the_png_with_out() {
 }
 
 #[test]
-#[ignore = "needs U22"]
 fn render_params_are_checked_scale_range_time_show() {
-    // scene render zz-pine --scale 0|17|1.5, --time -1, --show x: exit 2, "pixellab: scene.render: …";
+    // The CLI prints these as "pixellab: scene.render: …" with exit 2.
+    let doc = common::make_document();
+    let state = common::temp_dir("pixellab-state-");
+    let mut env = doc.env();
+    env.insert("PIXELLAB_STATE".into(), state.to_string_lossy().into_owned());
+    let document = open_document(&OpenOptions {
+        doc: Some(doc.root.to_string_lossy().into_owned()),
+        site: None,
+        env: env.clone(),
+        cwd: doc.root.clone(),
+    })
+    .unwrap();
+    let mut session = Session::new(document, Options { env, ..Options::default() });
+    for (key, value) in [("scale", json!(0)), ("scale", json!(17)), ("scale", json!(1.5)), ("time", json!(-1)), ("show", json!("x"))] {
+        let mut params = json!({ "name": "sample" });
+        params[key] = value.clone();
+        let err = registry().call(&mut Ctx::new(&mut session), "scene.render", params, false).unwrap_err();
+        match err {
+            Error::Command(e) => {
+                assert_eq!(e.exit_code, 2, "{key} {value}");
+                assert!(e.message.starts_with("scene.render: "), "{key} {value}: {}", e.message);
+            }
+            other => panic!("{key} {value}: {other:?}"),
+        }
+    }
+}
+
+#[test]
+#[ignore = "needs U21"]
+fn render_out_goes_with_a_render_command() {
     // scene list --out x.png: exit 2, "--out goes with a render command".
-    unreachable!("needs scene.render (U22) and the CLI (U21)");
+    unreachable!("needs the CLI (U21)");
 }
 
 // ------------------------------------------------------------------ helpers
