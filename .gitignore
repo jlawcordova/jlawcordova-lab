@@ -5,3 +5,4 @@ build/
 .swiftpm/
 .DS_Store
 .tmp/
+target/

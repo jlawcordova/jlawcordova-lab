@@ -1,0 +1,22 @@
+# The pixellab program (docs/intents/2026-10-rust-engine/spec.md, D1): the
+# engine library and the executable. Only the crates the owner approved (R5):
+# serde, serde_json with preserve_order (which brings indexmap), miniz_oxide.
+[workspace]
+resolver = "2"
+members = ["crates/engine", "crates/pixellab"]
+
+[workspace.package]
+version = "0.0.0-dev"
+edition = "2021"
+repository = "https://github.com/jlawcordova/jlawcordova-lab"
+
+[workspace.dependencies]
+serde = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
+miniz_oxide = "0.9"
+engine = { path = "crates/engine", package = "pixellab-engine" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
