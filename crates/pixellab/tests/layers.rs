@@ -185,7 +185,7 @@ fn r1_layers_serialize_before_items_one_per_line_and_an_items_layer_before_at_th
 }
 
 #[test]
-#[ignore = "needs U23"]
+#[ignore = "needs U22"]
 fn r1_scene_items_lists_the_layers_what_each_holds_layers_inside_included_and_each_items_layer() {
     let fx = Fx::new();
     let mut s = fx.session();
@@ -240,7 +240,7 @@ fn working(s: &mut Session, name: &str) -> Value {
 }
 
 #[test]
-#[ignore = "needs U23"]
+#[ignore = "needs U25"]
 fn r1_when_the_open_copy_and_the_file_each_make_a_scenes_first_layers_a_merge_keeps_both_lists() {
     let fx = Fx::new();
     fx.write_scene("merging", &merging());
@@ -254,7 +254,7 @@ fn r1_when_the_open_copy_and_the_file_each_make_a_scenes_first_layers_a_merge_ke
 }
 
 #[test]
-#[ignore = "needs U23"]
+#[ignore = "needs U25"]
 fn r1_a_layer_id_both_sides_made_for_different_layers_clashes_and_nothing_merges() {
     let fx = Fx::new();
     fx.write_scene("merging", &merging());
@@ -270,7 +270,7 @@ fn r1_a_layer_id_both_sides_made_for_different_layers_clashes_and_nothing_merges
 }
 
 #[test]
-#[ignore = "needs U23"]
+#[ignore = "needs U25"]
 fn r1_two_different_layers_both_sides_made_under_the_same_default_name_clash_and_nothing_merges() {
     for start in [merging(), merging_layered()] {
         let fx = Fx::new();
@@ -290,7 +290,7 @@ fn r1_two_different_layers_both_sides_made_under_the_same_default_name_clash_and
 }
 
 #[test]
-#[ignore = "needs U23"]
+#[ignore = "needs U22, U25"]
 fn r1_the_same_layer_made_on_both_sides_the_same_change_twice_still_merges() {
     let fx = Fx::new();
     fx.write_scene("merging", &merging());
@@ -308,7 +308,7 @@ fn r1_the_same_layer_made_on_both_sides_the_same_change_twice_still_merges() {
 }
 
 #[test]
-#[ignore = "needs U23"]
+#[ignore = "needs U25"]
 fn r1_a_merge_that_would_leave_an_item_in_a_layer_neither_side_kept_is_refused() {
     let fx = Fx::new();
     fx.write_scene("merging", &merging_layered());
@@ -364,7 +364,7 @@ fn r2_art_build_of_a_document_with_layers_is_byte_identical_to_the_same_document
 }
 
 #[test]
-#[ignore = "needs U23"]
+#[ignore = "needs U22"]
 fn r2_scene_render_draws_the_same_png_with_and_without_layers() {
     let fx = Fx::new();
     let mut s = fx.session();
@@ -444,7 +444,6 @@ fn r3_layer_commands_leave_the_group_wrappers_alone_and_scene_group_set_works_on
 }
 
 #[test]
-#[ignore = "needs U23"]
 fn r3_moving_a_layer_keeps_each_items_wrapper_data_x_data_y_and_data_col_data_row_in_step_no_keep_group_leaves_them() {
     let fx = Fx::new();
     let mut s = fx.session();
@@ -578,7 +577,7 @@ fn r5_scene_layer_assign_moves_items_and_layers_into_a_layer_or_the_top_level_an
 }
 
 #[test]
-#[ignore = "needs U23"]
+#[ignore = "needs U25"]
 fn r5_scene_layer_move_moves_every_item_in_the_layers_and_inside_them_and_the_items_once_in_one_undo_step() {
     let fx = Fx::new();
     let mut s = fx.session();
