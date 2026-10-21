@@ -51,9 +51,9 @@ import Testing
     @Test func testR11CheckWarningsDecodeWithTheirCodes() throws {
         let r = try decode(CheckResult.self, """
         {"ok":true,"checked":9,"problems":[],"warnings":[
-          {"file":"scenes/harbor.mjs","message":"items are not in depth order: 3 would move","text":"scenes/harbor.mjs: items are not in depth order: 3 would move","code":"out_of_order","scene":"harbor","moves":3},
-          {"file":"scenes/harbor.mjs","message":"boat is drawn 4 times","text":"scenes/harbor.mjs: boat is drawn 4 times","code":"copies","scene":"harbor","item":"boat","copies":4},
-          {"file":"scenes/harbor.mjs","message":"off grid","text":"scenes/harbor.mjs: off grid","code":"off_grid","scene":"harbor"}
+          {"file":"scenes/harbor.json","message":"items are not in depth order: 3 would move","text":"scenes/harbor.json: items are not in depth order: 3 would move","code":"out_of_order","scene":"harbor","moves":3},
+          {"file":"scenes/harbor.json","message":"boat is drawn 4 times","text":"scenes/harbor.json: boat is drawn 4 times","code":"copies","scene":"harbor","item":"boat","copies":4},
+          {"file":"scenes/harbor.json","message":"off grid","text":"scenes/harbor.json: off grid","code":"off_grid","scene":"harbor"}
         ]}
         """)
         let warnings = try #require(r.warnings)
@@ -232,9 +232,9 @@ import Testing
 
     @MainActor @Test func testR14AWarningNamesAnOutOfOrderSceneOnlyForThatScene() {
         let doc = DocumentModel(ref: DocRef(.scene, "harbor"))
-        let there = CheckWarning(file: "scenes/harbor.mjs", message: "m", text: "t", code: "out_of_order", scene: "harbor", moves: 2)
-        let other = CheckWarning(file: "scenes/town.mjs", message: "m", text: "t", code: "out_of_order", scene: "town", moves: 1)
-        let copies = CheckWarning(file: "scenes/harbor.mjs", message: "m", text: "t", code: "copies", scene: "harbor", item: "boat", copies: 4)
+        let there = CheckWarning(file: "scenes/harbor.json", message: "m", text: "t", code: "out_of_order", scene: "harbor", moves: 2)
+        let other = CheckWarning(file: "scenes/town.json", message: "m", text: "t", code: "out_of_order", scene: "town", moves: 1)
+        let copies = CheckWarning(file: "scenes/harbor.json", message: "m", text: "t", code: "copies", scene: "harbor", item: "boat", copies: 4)
         doc.warnings = [copies, other]
         #expect(doc.outOfOrder == nil)
         doc.warnings = [copies, other, there]

@@ -108,7 +108,7 @@ enum HitTester {
     }
 }
 
-/// Finds the item a check problem names: `scenes/x.mjs: items[5].items[2]: …`
+/// Finds the item a check problem names: `scenes/x.json: items[5].items[2]: …`
 /// is path "5.2"; a quoted id (a motion track's item) is matched against the
 /// scene's ids.
 enum ProblemLocator {

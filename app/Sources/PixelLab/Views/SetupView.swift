@@ -1,13 +1,12 @@
 import AppKit
 import SwiftUI
 
-/// Shown when node, the CLI or the document can't be found, or the server
+/// Shown when the program or the document can't be found, or the server
 /// won't start: what's wrong, and a way to fix it without a terminal.
 struct SetupView: View {
     @Environment(AppModel.self) private var model
     var problem: SetupProblem
     @AppStorage(SettingsKey.document) private var documentPath = ""
-    @AppStorage(SettingsKey.node) private var nodePath = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,7 +18,7 @@ struct SetupView: View {
                     }
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Set up Pixel Lab").font(Theme.nameFont(22))
-                        Text("Pixel Lab edits pixel art in a .pixellab document with Node.js.")
+                        Text("Pixel Lab edits pixel art in a .pixellab document.")
                             .font(.callout).foregroundStyle(Theme.inkMuted)
                     }
                 }
@@ -30,17 +29,25 @@ struct SetupView: View {
                     value: model.documentPath,
                     problem: problem.document,
                     choose: chooseDocument,
-                    extra: { Button("New…") { Task { await model.newDocument() } } }
+                    extra: {
+                        if problem.migrate {
+                            Button("Migrate…") { model.askMigrate() }
+                                .buttonStyle(AccentButtonStyle())
+                                .disabled(model.migrating)
+                                .accessibilityLabel("Migrate the document to the new format")
+                        }
+                        Button("New…") { Task { await model.newDocument() } }
+                    }
                 )
-                row(
-                    title: "Node.js",
-                    symbol: "terminal",
-                    value: nodePath.isEmpty ? "Found automatically" : nodePath,
-                    problem: problem.node,
-                    choose: chooseNode,
-                    extra: { EmptyView() }
-                )
-                if let cli = problem.cli { problemText(cli) }
+                if model.migrating {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Migrating…").font(.callout).foregroundStyle(Theme.inkMuted)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+                if let message = model.migrateMessage { problemText(message) }
+                if let program = problem.program { problemText(program) }
                 if let server = problem.server {
                     VStack(alignment: .leading, spacing: 6) {
                         Label("The pixellab server didn't start", systemImage: "exclamationmark.triangle.fill")
@@ -60,9 +67,6 @@ struct SetupView: View {
                 }
 
                 HStack {
-                    if !nodePath.isEmpty {
-                        Button("Find Node Automatically") { nodePath = "" }
-                    }
                     Spacer()
                     Button("Try Again") { Task { await model.bootstrap() } }
                         .buttonStyle(AccentButtonStyle())
@@ -71,6 +75,15 @@ struct SetupView: View {
             }
             .padding(28)
             .frame(maxWidth: 560)
+            .alert(
+                "Migrate \(model.migrateName) to the new format?",
+                isPresented: Binding(get: { model.migrateAsking }, set: { model.migrateAsking = $0 })
+            ) {
+                Button("Migrate") { Task { await model.migrate() } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Its sources become JSON files. The art doesn't change. You can undo this with git.")
+            }
             .background(Theme.sidebar, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.border))
             Spacer(minLength: 24)
@@ -113,13 +126,6 @@ struct SetupView: View {
         }
     }
 
-    private func chooseNode() {
-        if let path = SetupView.chooseNodeBinary() {
-            nodePath = path
-            Task { await model.bootstrap() }
-        }
-    }
-
     /// An open panel for a `.pixellab` document (a folder bundle), or a site
     /// checkout holding one.
     @MainActor static func chooseDocumentFolder(start: String) -> String? {
@@ -158,26 +164,12 @@ struct SetupView: View {
         if let start { panel.directoryURL = URL(fileURLWithPath: start).deletingLastPathComponent() }
         return panel.runModal() == .OK ? panel.url?.path : nil
     }
-
-    @MainActor static func chooseNodeBinary() -> String? {
-        let panel = NSOpenPanel()
-        panel.title = "Choose node"
-        panel.message = "Choose the node executable (Node.js 22 or later)."
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        panel.allowsMultipleSelection = false
-        panel.treatsFilePackagesAsDirectories = true
-        panel.showsHiddenFiles = true
-        panel.directoryURL = URL(fileURLWithPath: "/opt/homebrew/bin")
-        return panel.runModal() == .OK ? panel.url?.path : nil
-    }
 }
 
-/// Settings: the document, node, and appearance.
+/// Settings: the document and appearance.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @AppStorage(SettingsKey.document) private var documentPath = ""
-    @AppStorage(SettingsKey.node) private var nodePath = ""
     @AppStorage(SettingsKey.appearance) private var appearance = AppearanceSetting.auto.rawValue
 
     var body: some View {
@@ -193,18 +185,8 @@ struct SettingsView: View {
                         }
                     }
                 }
-                LabeledContent("Node.js") {
-                    HStack {
-                        TextField("Node.js", text: $nodePath, prompt: Text("Found automatically"))
-                            .labelsHidden()
-                            .font(Theme.monoFont(12))
-                        Button("Choose…") {
-                            if let p = SetupView.chooseNodeBinary() { nodePath = p }
-                        }
-                    }
-                }
                 HStack {
-                    Text(model.settingsNeedRestart ? "Restart the server to use the new paths." : "Leave the document empty for the one in the default site checkout, and Node.js empty to find it in your shell's PATH.")
+                    Text(model.settingsNeedRestart ? "Restart the server to use the new document." : "Leave the document empty for the one in the default site checkout.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -226,6 +208,5 @@ struct SettingsView: View {
         .fixedSize(horizontal: false, vertical: true)
         .onChange(of: appearance) { model.applyAppearance() }
         .onChange(of: documentPath) { model.settingsNeedRestart = true }
-        .onChange(of: nodePath) { model.settingsNeedRestart = true }
     }
 }

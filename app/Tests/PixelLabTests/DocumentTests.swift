@@ -24,30 +24,62 @@ import Testing
         #expect(Locator.path(of: .document("/a.pixellab")) == "/a.pixellab")
     }
 
-    @Test("R11: a document is a folder with palette.mjs; a site holds one under src/assets/pixel-art")
+    @Test("R11: a document is a folder with palette.json; a site holds one under src/assets/pixel-art")
     func testDocumentProblem() throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("pixellab-doc-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: base) }
         let doc = base.appendingPathComponent("art.pixellab")
         try FileManager.default.createDirectory(at: doc, withIntermediateDirectories: true)
         #expect(Locator.documentProblem(.document(base.appendingPathComponent("nowhere").path))?.hasPrefix("There's no document at") == true)
-        #expect(Locator.documentProblem(.document(doc.path))?.contains("no palette.mjs") == true)
-        try "export default { world: {}, outfit: {} };\n".write(to: doc.appendingPathComponent("palette.mjs"), atomically: true, encoding: .utf8)
+        #expect(Locator.documentProblem(.document(doc.path))?.contains("no palette.json") == true)
+        try "{}\n".write(to: doc.appendingPathComponent("palette.json"), atomically: true, encoding: .utf8)
         #expect(Locator.documentProblem(.document(doc.path)) == nil)
 
         let site = base.appendingPathComponent("site")
         try FileManager.default.createDirectory(at: site.appendingPathComponent("src/assets/pixel-art"), withIntermediateDirectories: true)
-        #expect(Locator.documentProblem(.site(site.path))?.contains("no .pixellab document or source/ folder") == true)
+        #expect(Locator.documentProblem(.site(site.path))?.contains("no .pixellab document under") == true)
+        let bundle = site.appendingPathComponent("src/assets/pixel-art/site.pixellab")
+        try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+        #expect(Locator.documentProblem(.site(site.path)) != nil, "a .pixellab without palette.json doesn't count")
+        try "{}\n".write(to: bundle.appendingPathComponent("palette.json"), atomically: true, encoding: .utf8)
+        #expect(Locator.documentProblem(.site(site.path)) == nil)
+    }
+
+    @Test("R9: a palette.mjs is the old format, which Migrate… fixes; a legacy source/ folder too")
+    func testOldFormatProblem() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("pixellab-doc-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let doc = base.appendingPathComponent("art.pixellab")
+        try FileManager.default.createDirectory(at: doc, withIntermediateDirectories: true)
+        try "export default {};\n".write(to: doc.appendingPathComponent("palette.mjs"), atomically: true, encoding: .utf8)
+        #expect(Locator.documentProblem(.document(doc.path)) == "art.pixellab uses the old format. Migrate it with `pixellab document migrate`, or in the app.")
+        #expect(Locator.needsMigration(.document(doc.path)))
+
+        let site = base.appendingPathComponent("site")
         let legacy = site.appendingPathComponent("src/assets/pixel-art/source")
         try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
         try "export default {};\n".write(to: legacy.appendingPathComponent("palette.mjs"), atomically: true, encoding: .utf8)
-        #expect(Locator.documentProblem(.site(site.path)) == nil)
-        try FileManager.default.removeItem(at: legacy)
+        #expect(Locator.needsMigration(.site(site.path)))
         let bundle = site.appendingPathComponent("src/assets/pixel-art/site.pixellab")
         try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
-        #expect(Locator.documentProblem(.site(site.path)) != nil, "a .pixellab without palette.mjs doesn't count")
         try "export default {};\n".write(to: bundle.appendingPathComponent("palette.mjs"), atomically: true, encoding: .utf8)
+        #expect(Locator.documentProblem(.site(site.path))?.hasPrefix("site.pixellab uses the old format") == true)
+        // Once it is migrated, the problem is gone, and a missing document is not R9's.
+        try FileManager.default.removeItem(at: bundle.appendingPathComponent("palette.mjs"))
+        try "{}\n".write(to: bundle.appendingPathComponent("palette.json"), atomically: true, encoding: .utf8)
         #expect(Locator.documentProblem(.site(site.path)) == nil)
+        #expect(!Locator.needsMigration(.document(base.appendingPathComponent("nowhere").path)))
+    }
+
+    @Test("R21: the program is found through PIXELLAB_PROGRAM")
+    func testFindProgram() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("pixellab-prog-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        let fake = base.appendingPathComponent("pixellab")
+        try "#!/bin/sh\n".write(to: fake, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fake.path)
+        #expect(Locator.findProgram(environment: ["PIXELLAB_PROGRAM": fake.path])?.resolvingSymlinksInPath().path == fake.resolvingSymlinksInPath().path)
     }
 }
 
@@ -77,10 +109,10 @@ import Testing
         #expect(r.overBudget.map(\.scene) == ["big"])
 
         let failed = try JSONDecoder().decode(ArtBuildResult.self, from: Data("""
-        { "ok": false, "publishDir": "/out", "outputs": [], "previewOnly": [], "problems": ["objects/x.mjs: row 1 is 3 wide, expected 4"], "ms": 3, "unsaved": [] }
+        { "ok": false, "publishDir": "/out", "outputs": [], "previewOnly": [], "problems": ["objects/x.json: row 1 is 3 wide, expected 4"], "ms": 3, "unsaved": [] }
         """.utf8))
-        #expect(failed.report == ["objects/x.mjs: row 1 is 3 wide, expected 4"])
-        #expect(failed.marked == ["objects/x.mjs: row 1 is 3 wide, expected 4"])
+        #expect(failed.report == ["objects/x.json: row 1 is 3 wide, expected 4"])
+        #expect(failed.marked == ["objects/x.json: row 1 is 3 wide, expected 4"])
     }
 
     @Test("R4: session.info carries the document, and still the old site field")

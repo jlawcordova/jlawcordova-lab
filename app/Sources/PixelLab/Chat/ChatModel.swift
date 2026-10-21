@@ -74,9 +74,6 @@ final class ChatModel {
 
     var isRunning: Bool { running != nil }
 
-    /// The app's node (its server's): on every claude's PATH.
-    var node: URL? { app?.connection?.launch.node }
-
     // MARK: Paths
 
     var stateDir: String { app?.sessionInfo?.stateDir ?? AgentModel.defaultStateDir.path }
@@ -125,16 +122,15 @@ final class ChatModel {
     /// Finds `claude`, then asks whether it's signed in.
     func check() async {
         let search = self.search
-        let node = self.node
         let chosen = search.useSystem ? UserDefaults.standard.string(forKey: SettingsKey.claude) : nil
         if setup != .waiting { setup = .checking }
-        let found = await Task.detached { ClaudeLocator.find(chosen: chosen, search: search, node: node) }.value
+        let found = await Task.detached { ClaudeLocator.find(chosen: chosen, search: search) }.value
         install = found
         guard let found else {
             setup = .missing
             return
         }
-        let on = await Task.detached { ClaudeLocator.signedIn(found.url, search: search, node: node) }.value
+        let on = await Task.detached { ClaudeLocator.signedIn(found.url, search: search) }.value
         if on == true {
             setup = .ready
             setupMessage = nil
@@ -195,19 +191,18 @@ final class ChatModel {
 
     private func installFinished(status: Int32) async {
         let search = self.search
-        let node = self.node
-        let found = await Task.detached { ClaudeLocator.find(chosen: nil, search: search, node: node) }.value
+        let found = await Task.detached { ClaudeLocator.find(chosen: nil, search: search) }.value
         guard status == 0, let found else {
             setup = .missing
             let expected = URL(fileURLWithPath: search.home).appendingPathComponent(".local/bin/claude")
-            let why = await Task.detached { ClaudeLocator.diagnose(expected, search: search, node: node) }.value
+            let why = await Task.detached { ClaudeLocator.diagnose(expected, search: search) }.value
             setupMessage = status == 0 ? "The installer finished, but claude in ~/.local/bin didn't answer (\(why)). Choose the command, or check again." : "The installer stopped (exit \(status)). Its last lines are above."
             return
         }
         install = found
         appendInstall("claude --version → \(found.version) (Claude Code)")
         try? await Task.sleep(for: .milliseconds(app?.script == nil ? 900 : 50))
-        let on = await Task.detached { ClaudeLocator.signedIn(found.url, search: search, node: node) }.value
+        let on = await Task.detached { ClaudeLocator.signedIn(found.url, search: search) }.value
         setup = on == true ? .ready : .signedOut
     }
 
@@ -227,14 +222,13 @@ final class ChatModel {
 
     func choose(path: String) async {
         let search = self.search
-        let node = self.node
-        guard let v = await Task.detached(operation: { ClaudeLocator.version(of: URL(fileURLWithPath: path), search: search, node: node) }).value else {
+        guard let v = await Task.detached(operation: { ClaudeLocator.version(of: URL(fileURLWithPath: path), search: search) }).value else {
             setupMessage = "\(path) didn't answer like Claude Code (claude --version)."
             return
         }
         if app?.script == nil { UserDefaults.standard.set(path, forKey: SettingsKey.claude) }
         install = ClaudeLocator.Install(url: URL(fileURLWithPath: path), version: v)
-        let on = await Task.detached { ClaudeLocator.signedIn(URL(fileURLWithPath: path), search: search, node: node) }.value
+        let on = await Task.detached { ClaudeLocator.signedIn(URL(fileURLWithPath: path), search: search) }.value
         setup = on == true ? .ready : .signedOut
         setupMessage = nil
     }
@@ -245,7 +239,7 @@ final class ChatModel {
         setup = .waiting
         setupMessage = nil
         loginURL = nil
-        let env = ClaudeLocator.environment(base: ProcessInfo.processInfo.environment, claude: install.url, node: node, search: search)
+        let env = ClaudeLocator.environment(base: ProcessInfo.processInfo.environment, claude: install.url, search: search)
         do {
             let p = try LineProcess(executable: install.url, arguments: ["auth", "login", "--claudeai"], environment: env, closeInput: false)
             loginProcess = p
@@ -291,8 +285,7 @@ final class ChatModel {
     private func pollOnce() async {
         guard setup == .waiting, let url = install?.url else { return }
         let search = self.search
-        let node = self.node
-        if await Task.detached(operation: { ClaudeLocator.signedIn(url, search: search, node: node) }).value == true {
+        if await Task.detached(operation: { ClaudeLocator.signedIn(url, search: search) }).value == true {
             loginProcess?.stop()
             loginProcess = nil
             pollTask?.cancel()
@@ -328,8 +321,7 @@ final class ChatModel {
         }
         stop()
         let search = self.search
-        let node = self.node
-        _ = await Task.detached { ClaudeLocator.run(install.url, ["auth", "logout"], search: search, node: node, timeout: 15) }.value
+        _ = await Task.detached { ClaudeLocator.run(install.url, ["auth", "logout"], search: search, timeout: 15) }.value
         setup = .signedOut
     }
 
@@ -567,10 +559,10 @@ final class ChatModel {
             return
         }
         let title = chats.first { $0.id == chatID }?.title ?? Chat.untitled
-        let config = ClaudeTurn.mcpConfig(node: launch.node, cli: launch.cli, location: launch.location, stateDir: stateDir, chatID: chatID, title: title)
+        let config = ClaudeTurn.mcpConfig(program: launch.program, location: launch.location, stateDir: stateDir, chatID: chatID, title: title)
         let session = chats.first { $0.id == chatID }?.session
         let args = ClaudeTurn.arguments(mcpConfig: config, prompt: ChatPrompt.text, resume: session)
-        let env = ClaudeLocator.environment(base: ProcessInfo.processInfo.environment, claude: install.url, node: launch.node, search: search)
+        let env = ClaudeLocator.environment(base: ProcessInfo.processInfo.environment, claude: install.url, search: search)
         let cwd = store.dir
         try? FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
         do {

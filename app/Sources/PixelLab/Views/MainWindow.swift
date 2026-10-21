@@ -128,9 +128,9 @@ struct DocumentWindow: View {
         }
     }
 
-    /// "scenes/x.mjs: items[3]: rule" → "items[3]: rule".
+    /// "scenes/x.json: items[3]: rule" → "items[3]: rule".
     static func trimFile(_ line: String) -> String {
-        guard let r = line.range(of: ".mjs: ") else { return line }
+        guard let r = line.range(of: ".json: ") else { return line }
         return String(line[r.upperBound...])
     }
 }

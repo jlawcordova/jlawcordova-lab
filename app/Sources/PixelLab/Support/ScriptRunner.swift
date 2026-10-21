@@ -21,7 +21,7 @@ import Foundation
 ///     undo redo save [force] revert publish [<dir>] done   saveas <path.pixellab>
 ///     time <ms>  play  pause  tracks on|off   zoom fit|1-4   sidebar library|items
 ///     search <text>   wait <ms>   snapshot <file.png>   log <text>
-///     cli <args…>  (the bundled CLI on the script's document: an outside edit to the files)
+///     cli <args…>  (the bundled program on the script's document: an outside edit to the files)
 ///     stale merge|reload|keep     (the changed-on-disk banner's buttons)
 ///     expect dirty|selected|object|at|items|problems|build|outputs|publishdir|document|tool|time <value>
 ///     expect scenes|objects|zoom|badge|theme|ghosttime <value>   expect scenepixel <x>,<y> <#RRGGBB|empty>
@@ -63,6 +63,13 @@ import Foundation
 ///     mousepath x,y x,y …         (a fast real drag: down, a drag every 4 ms, up)
 ///     expect color|layer|frame|layers|frames|doc|mode|hidden|calls <value>
 ///     expect pixel <x>,<y> <color name|empty>   (the rendered pixel)
+///
+/// The setup screen's Migrate… (R9; a format-1 document opens the app on the setup screen, and the script runs from there):
+///
+///     migrate   (clicks Migrate…: the alert comes up)   answer migrate|cancel   (its buttons; Migrate runs `document migrate`, starts the server and opens the document)
+///     expect migrate offered|asking|none   (Migrate… is on the setup screen / the alert is up / neither)
+///     expect phase setup|starting|ready   expect problem <text>  (the setup screen's document problem contains it)
+///     expect migratemessage <text>   (the line under the document row contains it)
 ///
 /// The Agent window (proposals are numbered from 1, oldest first, as listed):
 ///
@@ -143,7 +150,9 @@ final class ScriptRunner {
         while Date().timeIntervalSince(started) < 60 {
             if case .ready = model.phase, model.document != nil { break }
             if case .setup(let p) = model.phase {
-                log("setup problem: \([p.node, p.document, p.cli, p.server].compactMap { $0 }.joined(separator: "; "))")
+                log("setup problem: \([p.document, p.program, p.server].compactMap { $0 }.joined(separator: "; "))")
+                // A format-1 document waits on Migrate… (R9): the script goes on from the setup screen.
+                if p.migrate { break }
                 exit(2)
             }
             try? await Task.sleep(for: .milliseconds(100))
@@ -365,10 +374,9 @@ final class ScriptRunner {
             return ok ? model.lastEdit : "not saved"
         case "revert": await model.revert(); return nil
         case "cli":
-            // An outside editor: the bundled CLI, one-shot, on the document the script runs on.
-            let nodeSetting = UserDefaults.standard.string(forKey: SettingsKey.node)
-            guard let node = Locator.findNode(setting: nodeSetting), let cli = Locator.findCLI() else { throw Failure("no node or CLI") }
-            let out = try await Locator.runCli(node: node, cli: cli, Array(words.dropFirst()) + model.documentLocation.arguments)
+            // An outside editor: the bundled program, one-shot, on the document the script runs on.
+            guard let program = Locator.findProgram() else { throw Failure("no program") }
+            let out = try await Locator.runCli(program: program, Array(words.dropFirst()) + model.documentLocation.arguments)
             // Give the server's watcher time to see the file and tell the app.
             let started = Date()
             while Date().timeIntervalSince(started) < 2 {
@@ -513,6 +521,11 @@ final class ScriptRunner {
             let window = agentWindow ? model.agent.window.flatMap { $0.isVisible ? $0 : nil } : Snapshotter.mainWindow()
             guard let window, Snapshotter.capture(window, to: out) else { throw Failure(agentWindow ? "no Agent window (agent open first)" : "couldn't capture") }
             return out.path
+        case "migrate":
+            // The setup screen's Migrate… button: the alert comes up (`answer migrate|cancel` settles it).
+            guard case .setup(let p) = model.phase, p.migrate else { throw Failure("there's no Migrate… on screen") }
+            model.askMigrate()
+            return nil
         case "agent", "proposal", "approve", "reject", "ghost", "answer", "menus", "agentkey":
             return try await performAgent(words, model: model)
         case "righttab", "setup", "chat", "chatkey", "details", "steps", "choose", "link", "chip", "savenow", "card", "altclick", "selectuses",
@@ -1128,6 +1141,11 @@ final class ScriptRunner {
             agent.setGhostShown((try arg(words, 1)) == "on")
             return nil
         case "answer":
+            // The Migrate alert's buttons (R9), when it is up.
+            if model.migrateAsking, let which = words.dropFirst().first, which == "migrate" || which == "cancel" {
+                if which == "migrate" { await model.migrate() } else { model.migrateAsking = false }
+                return nil
+            }
             guard let a = AgentAnswer(rawValue: try arg(words, 1)) else { throw Failure("answer proceed|force|reject|cancel") }
             agent.scriptAnswer = a
             return nil
@@ -1257,6 +1275,17 @@ final class ScriptRunner {
         case "theme": got = model.stageDark ? "dark" : "light"
         case "outputs": got = model.build?.result.map { String($0.outputs.count) } ?? "none"
         case "publishdir": got = model.build?.result?.publishDir ?? model.sessionInfo?.document?.publishDir ?? "none"
+        case "migrate":
+            if model.migrateAsking { got = "asking" }
+            else if case .setup(let p) = model.phase, p.migrate { got = "offered" }
+            else { got = "none" }
+        case "phase":
+            got = switch model.phase { case .starting: "starting"; case .setup: "setup"; case .ready: "ready" }
+        case "problem", "migratemessage":
+            var text = ""
+            if what == "problem" { if case .setup(let p) = model.phase { text = p.document ?? "" } } else { text = model.migrateMessage ?? "" }
+            guard text.contains(want) else { throw Failure("expected \(what) to contain \"\(want)\", got \"\(text)\"") }
+            return "\(what) has \"\(want)\""
         case "document": got = model.sessionInfo?.document?.name ?? "none"
         case "documentkind": got = model.sessionInfo?.document?.kind ?? "none"
         case _ where expectLayers(what, model: model) != nil: got = expectLayers(what, model: model) ?? ""
@@ -1320,6 +1349,8 @@ final class ScriptRunner {
             let busy: Bool = {
                 if model.editor.pendingEdits > 0 || model.build?.running == true || model.objectEditor.busy { return true }
                 if model.newDoc?.creating == true { return true }
+                if model.migrating { return true }
+                if case .starting = model.phase { return true }
                 if model.agent.busy { return true }
                 if model.chat.setup == .checking, model.rightTab == .agent { return true }
                 guard let doc = model.document else { return false }
