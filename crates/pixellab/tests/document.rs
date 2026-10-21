@@ -9,11 +9,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use common::{make_document, make_site, temp_dir};
+use pixellab::context::Ctx;
 use pixellab::document::{
     check_document, check_manifest, find_document_in_site, home_dir, open_document, resolve_document_root, site_budgets, site_colors, Env,
     From, OpenOptions, Resolved, Via, DEFAULT_DARK_PAGE,
 };
 use pixellab::errors::CommandError;
+use pixellab::registry::registry;
+use pixellab::session::{Options, Session};
 use serde_json::{json, Value};
 
 fn env_of(pairs: &[(&str, &str)]) -> Env {
@@ -258,22 +261,83 @@ fn r2_the_manifests_budgets_colors_and_theme_reach_the_document() {
 
 // document.new and document.copy (R4)
 
+/// Runs a command on a session over the document at `root`.
+fn call_on(root: &Path, home: &Path, name: &str, params: Value) -> Result<Value, pixellab::errors::Error> {
+    let env = with(home, &[("PIXELLAB_STATE", &home.join("state").to_string_lossy())]);
+    let document = open_document(&opts(Some(root), None, env.clone())).unwrap();
+    let mut session = Session::new(document, Options { env, ..Options::default() });
+    registry().call(&mut Ctx::new(&mut session), name, params, false)
+}
+
 #[test]
-#[ignore = "needs U25"]
 fn r4_document_new_needs_no_open_document_so_it_works_on_a_mac_with_no_site_checkout() {
-    todo!("U25: `document new <base>/fresh --json` with an empty HOME exits 0 and names <base>/fresh.pixellab; `scene list` exits 1 with `Pass --document <path.pixellab>`");
+    // An empty home: no config, no default site to fall back on (as in CI).
+    let base = temp_dir("pixellab-test-");
+    let fresh = base.join("fresh");
+    let r = registry().call(&mut Ctx::none(), "document.new", json!({ "path": fresh.to_string_lossy() }), false).unwrap();
+    assert_eq!(r["root"], json!(format!("{}.pixellab", fresh.display())));
+    // A command that needs a document still says how to name one.
+    let e = err_of(open_document(&opts(None, None, with(&base, &[]))));
+    assert!(is_document_error(&e));
+    assert!(e.message.contains("Pass --document <path.pixellab>"), "{}", e.message);
+    let _ = fs::remove_dir_all(&base);
 }
 
 #[test]
-#[ignore = "needs U25"]
 fn r4_document_new_makes_an_empty_document_with_the_starter_palette_and_a_manifest_and_refuses_an_existing_path() {
-    todo!("U25: manifest is {{ format: 2, name }}, objects/ and scenes/ exist, the starter palette has 48 colors, `exists` code on a second run, --name");
+    let base = temp_dir("pixellab-test-");
+    let path = base.join("meadow");
+    let reg = registry();
+    let out = reg.call(&mut Ctx::none(), "document.new", json!({ "path": path.to_string_lossy() }), false).unwrap();
+    let root = PathBuf::from(format!("{}.pixellab", path.display()));
+    assert_eq!(out["root"], json!(root.to_string_lossy()));
+    assert_eq!(out["name"], "meadow");
+    let manifest: Value = serde_json::from_str(&fs::read_to_string(root.join("manifest.json")).unwrap()).unwrap();
+    assert_eq!(manifest, json!({ "format": 2, "name": "meadow" }));
+    assert!(root.join("objects").is_dir() && root.join("scenes").is_dir());
+    let opened = open_document(&opts(Some(&root), None, Env::new())).unwrap();
+    let docs = opened.load_docs();
+    assert!(docs.load_errors.is_empty(), "{:?}", docs.load_errors);
+    let sources = engine::engine::load_sources(docs.palette.unwrap(), docs.objects, docs.scenes);
+    assert_eq!(sources.colors.len(), 48, "the starter palette: 32 world and 16 outfit colors");
+    assert!(engine::engine::validate(&sources).is_empty());
+    // (scene new on it waits for the scene commands: scene.new is ported with them.)
+    let again = err_of_call(reg.call(&mut Ctx::none(), "document.new", json!({ "path": path.to_string_lossy() }), false));
+    assert_eq!((again.code.as_str(), again.exit_code), ("exists", 1));
+    let other = base.join("other.pixellab");
+    let named = reg.call(&mut Ctx::none(), "document.new", json!({ "path": other.to_string_lossy(), "name": "Other art" }), false).unwrap();
+    assert_eq!(named["name"], "Other art");
+    let _ = fs::remove_dir_all(&base);
+}
+
+fn err_of_call(r: Result<Value, pixellab::errors::Error>) -> CommandError {
+    match r {
+        Err(pixellab::errors::Error::Command(c)) => c,
+        other => panic!("expected a command error, got {other:?}"),
+    }
 }
 
 #[test]
-#[ignore = "needs U25"]
 fn r4_document_copy_saves_the_whole_document_elsewhere_save_as_and_refuses_an_existing_path() {
-    todo!("U25: copy to <base>/copy.pixellab; objects/pebble.json is identical; the copy opens with name `sample` and publish_dir next to the copy; second copy exits 1 `already exists`; copy into itself exits 2");
+    let doc = make_document();
+    let to = doc.base.join("copy");
+    let copy = PathBuf::from(format!("{}.pixellab", to.display()));
+    let r = call_on(&doc.root, &doc.home, "document.copy", json!({ "to": to.to_string_lossy() })).unwrap();
+    let from = doc.root.to_string_lossy().into_owned();
+    let dest = copy.to_string_lossy().into_owned();
+    assert_eq!(r, json!({ "from": from, "to": dest, "wroteManifest": false, "summary": format!("Copied {from} to {dest}") }));
+    assert_eq!(
+        fs::read_to_string(copy.join("objects/pebble.json")).unwrap(),
+        fs::read_to_string(doc.root.join("objects/pebble.json")).unwrap()
+    );
+    let opened = open_document(&opts(Some(&copy), None, Env::new())).unwrap();
+    assert_eq!(opened.name, "sample", "the manifest comes along");
+    assert_eq!(opened.publish_dir, Some(doc.base.join("sample-out")), "a relative publish.dir now points next to the copy");
+    let again = err_of_call(call_on(&doc.root, &doc.home, "document.copy", json!({ "to": to.to_string_lossy() })));
+    assert_eq!(again.exit_code, 1);
+    assert!(again.message.contains("already exists"), "{}", again.message);
+    let inside = err_of_call(call_on(&doc.root, &doc.home, "document.copy", json!({ "to": doc.root.join("inner").to_string_lossy() })));
+    assert_eq!(inside.exit_code, 2);
 }
 
 // a site checkout (R3, legacy)
@@ -311,7 +375,7 @@ fn r3_the_sites_budgets_are_the_legacy_ones() {
 }
 
 #[test]
-#[ignore = "needs U25"]
+#[ignore = "a legacy source folder is format 1 now (R9); document migrate covers it"]
 fn r4_a_copy_of_a_legacy_source_folder_gets_a_manifest_with_the_sites_budgets_and_publish_folder() {
     todo!("U25 (and migrate): a legacy source folder is format 1 now (R9); document copy of it is covered by document migrate");
 }
