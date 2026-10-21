@@ -1,7 +1,7 @@
 # Spec: The engine in Rust, and a site that only takes its output (from intent.md 2026-10-21)
 Status: draft.
 
-This spec turns the accepted intent, as amended on 2026-10-21 with the owner's decisions about the hop and the budgets, into requirements and a design. It supersedes parts of `../2026-10-pixellab-document/spec.md`: R6's "the modules are exported from the package so the site's tests can import them", R15's git-installed package, and R7's over-budget failure. Everything else in that change (the document as a folder bundle, resolution, publish folders, Save As) stands, now on the Rust program and JSON sources.
+This spec turns the accepted intent, as amended on 2026-10-21 with the owner's decisions about the hop, the budgets and the art tests, into requirements and a design. It supersedes parts of `../2026-10-pixellab-document/spec.md`: R6's "the modules are exported from the package so the site's tests can import them", R15's git-installed package, and R7's over-budget failure. Everything else in that change (the document as a folder bundle, resolution, publish folders, Save As) stands, now on the Rust program and JSON sources.
 
 What the site uses today was read from `jlawcordova.github.io` at `main` on 2026-10-21, read-only:
 - **Library imports:** seven test files and `scripts/blog-thumbnails.mjs` import `pixellab/*`.
@@ -16,7 +16,7 @@ What the site uses today was read from `jlawcordova.github.io` at `main` on 2026
 
 - **R1. One Rust program replaces the Node CLI.** `pixellab` is a single native executable with the same commands, params, JSON results, human output, exit codes and errors as the Node CLI it replaces: every command in `docs/cli.md`, the Agent chat's `chat.ask` and `chat.context` included. It keeps all three doors: the CLI, `serve --stdio` (the app's JSON-RPC, same methods and notifications) and `serve --mcp` (the same tools, instructions and left-out commands, with saves still becoming proposals).
 - **R2. It is the only engine.** Validating, resolving, rendering, depth order, motion, compiling, the lossless check, previews, edits and serializing are all in Rust. When the change is complete, no JavaScript engine is left in this repo, the npm package stops exporting `pixellab/*`, and no site imports one.
-- **R3. Parity before cutover.** Until the Node CLI is removed, a parity check runs both programs over a corpus: the test fixture, both examples, and a temp copy of the owner's document migrated to format 2. Their outputs must agree in four ways:
+- **R3. Parity before cutover.** Until the Node CLI is removed, a parity check runs both programs over a corpus: the test fixture, both examples, and, when a site checkout is present, a temp copy of the owner's document migrated to format 2. Their outputs must agree in four ways:
   - every scene's SVG is byte-identical;
   - every preview PNG is pixel-identical (dimensions and decoded RGBA);
   - every read command's JSON result is equal (ignoring `ms`, ids and times);
@@ -30,7 +30,7 @@ What the site uses today was read from `jlawcordova.github.io` at `main` on 2026
   - the site's build in CI prints it.
 
   Problems in the sources (validation errors) still stop a build, and nothing is written.
-- **R5. Dependencies.** The program uses only the crates this spec lists in D2. Any other crate needs the owner's approval, as npm and Swift packages do today.
+- **R5. Dependencies.** The program uses only the three crates the owner approved for this change: `serde`, `serde_json` (with `indexmap`) and `miniz_oxide` (D2). Any other crate needs the owner's approval, as npm and Swift packages do today.
 
 ### The document
 
@@ -87,17 +87,15 @@ What the site uses today was read from `jlawcordova.github.io` at `main` on 2026
   - what reduced motion does.
 
   Nothing else in the SVG is a promise.
-- **R20. The site's art tests come here.** The site's tests of the art are ported to this repo, keeping their names:
-  - `pixel-art-island`;
-  - `pixel-art-sources`, without its palette ↔ `variables.css` check;
-  - `pixel-art-roundtrip`;
-  - `pixel-art-motion`;
-  - `range-art`;
-  - `achievement-icons`.
+- **R20. The site's art tests leave the site.** The site's six art suites are sorted three ways:
+  - **Engine behavior comes here, on fixtures.** The tests of the engine itself are ported to this repo with their names, and run against the fixture document, not the owner's art. These are `pixel-art-motion`'s tests: motion validation, stepping, `loopFrame`, the motion CSS, serializing, and animating, switching or stopping a frame loop.
+  - **Generic document rules are the engine's job.** Loading and validating, the palette's caps and names, depth order and budgets are already enforced by `art build` and `check`, which the site's CI runs on every build. Three that aren't are added here:
+    - compiling twice gives identical bytes (an engine test on fixtures);
+    - a compiled SVG has no script, link, text or external reference (an engine test on fixtures);
+    - a source file that isn't in canonical form is a `check` warning.
+  - **Rules about the owner's particular art are dropped,** not ported. These are the rest of `pixel-art-island`, `pixel-art-sources`, `pixel-art-roundtrip`, `range-art` and `achievement-icons`: the trucks keep to the road, the crane is two stacked objects, each Range floor is three ground rows, and so on. So are the tests that compare the art with the site's own files: `range-classes` (against `src/data/home.ts`), the palette ↔ `variables.css` check, and the thumbnails' size and staleness checks. For this change, the visual check (R16) proves the migrated art looks and moves the same.
 
-  They run against a temp copy of the owner's document when a site checkout is present, and skip otherwise, as the art suites do today. They also run in this repo's CI against the site's `main` (R25).
-
-  Tests that compare the art with the site's own files are dropped and not replaced. These are `range-classes` (against `src/data/home.ts`), the palette ↔ `variables.css` check, and the thumbnails' size and staleness checks.
+  Nothing in this repo's tests or CI needs a site checkout. A document declaring checks of its own is a possible follow-up.
 
 ### The app
 
@@ -126,7 +124,7 @@ What the site uses today was read from `jlawcordova.github.io` at `main` on 2026
   - publishes everything in R17.
 
   The tag is still the version (`PIXELLAB_VERSION`). The program reports it in `pixellab --version` and in `serve --mcp`'s server info.
-- **R28. Checks on every PR.** A new workflow runs `cargo test`, `npm test` (the repo tooling's suites, and the parity check while the Node CLI exists) and the ported art suites against a shallow clone of the site's `main`, all on Linux.
+- **R28. Checks on every PR.** A new workflow runs `cargo test` and `npm test` (the repo tooling's suites, and the parity check over the fixture and the examples while the Node CLI exists), on Linux. It needs no site checkout.
 - **R29. Node stays only as repo tooling.** Node is still used by the docs site builder, the fake `claude`, the parity and visual checks, and the scripts that drive the program. The app, the CLI, agents and the site never need it. Repo scripts that import the Node engine (`make-examples.mjs`, `make-icon.mjs`, `docs-cli.mjs`) run the program instead.
 - **R30. Docs.**
   - `CLAUDE.md`: its commands, architecture and rules become "the engine lives here in Rust; the site takes only output".
@@ -152,7 +150,7 @@ crates/engine/                     the library: no I/O beyond what callers pass 
   src/migrate.rs                   format 1 → 2: the JS-literal reader (D3)
   src/jsnum.rs                     JS number semantics (D2, "Byte parity")
   src/deflate.rs png.rs sha256.rs  gzip/PNG/crc32/sha-256 around miniz_oxide (D2)
-  tests/                           ported node:test suites, names kept (R1, R20)
+  tests/                           ported node:test suites and the site's engine tests, names kept (R1, R20)
 crates/pixellab/                   the executable
   src/main.rs cli.rs argv.rs help.rs
   src/registry.rs commands/*.rs    one file per cli/lib/commands/*.mjs
@@ -170,7 +168,7 @@ The Node CLI in `cli/` stays, unchanged in behavior, until the cutover. Then `cl
 ### D2. The Rust program
 
 - **Toolchain:** stable Rust, edition 2021. `rust-toolchain.toml` pins the version so the cloud container, the owner's Mac and CI agree.
-- **Crates:**
+- **Crates (approved by the owner):**
   - `serde` and `serde_json`, with `preserve_order`, which brings in `indexmap`. JSON in and out, in the order the Node CLI writes keys.
   - `miniz_oxide`, for deflate and inflate, pure Rust with no C toolchain.
 
@@ -186,7 +184,7 @@ The Node CLI in `cli/` stays, unchanged in behavior, until the cutover. Then `cl
   - `jsnum::to_string` is JS shortest round-trip number printing, including JS's exponent rules. It's used everywhere a number becomes text.
   - Key order: JSON objects keep insertion order (`preserve_order`). Where the Node CLI relied on JS putting integer-like keys first, the port sorts them explicitly. `serialize.mjs`'s `prop()` shows where that happens.
   - Sorting: Rust's `sort_by` is stable, like `Array.prototype.sort`. Comparators are ported as written (`byCodePoint`).
-- **Gzip sizes:** `miniz_oxide` doesn't produce zlib's exact bytes, so reported gzip sizes can differ from the Node CLI's by a few bytes. Budgets only warn now (R4), so R3 compares raw sizes exactly and gzip sizes within 1%. PNGs are compared decoded for the same reason.
+- **Gzip sizes:** `miniz_oxide` doesn't produce zlib's exact bytes, so reported gzip sizes can differ from the Node CLI's by a few bytes. The owner accepted this. Budgets only warn now (R4), so R3 compares raw sizes exactly and gzip sizes within 1%. PNGs are compared decoded for the same reason.
 - **Errors:** the same codes and messages as the Node CLI (`CommandError`, `NotFoundError`, …), checked by the ported tests.
 
 ### D3. Migration (R8, R9)
@@ -309,7 +307,7 @@ On a scene item, or on an object map layer (beside its `class` and `map`):
 | `object ambient <object> <layer> …` / `object action <object> <layer> <name> …` | The same, for an object's map layer. Tools. |
 | `scene render`, `object render` | Gain `--play <action>@<ms>`, and render ambient loops at `--time`. |
 | `art build` | Result `outputs[]` gains `kind`, `warnings`. `ok` is false only for problems (R4). Human output: `hero-island.svg: 780.1 KB / 98.1 KB gzip → … lossless — over its 750 KB budget (warning)`. |
-| `art sizes`, `check` | Over budget is a warning line, not an error. |
+| `art sizes`, `check` | Over budget is a warning line, not an error. `check` also warns about a source file that isn't in canonical form (R20). |
 
 Undo, redo, proposals, ghosts and diffs treat the new fields like any other edit. `docs/cli.md` is regenerated by `pixellab help --markdown` through `npm run docs:cli`.
 
@@ -350,13 +348,13 @@ A proposal file gains `"format": 2`. On start, `state.rs` moves any proposal fil
 ### D12. Tests (R1, R3, R16, R20, R28)
 
 - **Ported suites:** every `cli/test/*.test.mjs` suite becomes a Rust test file in the crate that owns the code, with its test names kept (`R7: the site's art compiles byte-identical` stays readable in `cargo test` output). `helpers.mjs`'s `makeDocument()` and `makeSite()` become `tests/common` helpers that copy into a temp dir, and never the real checkout.
-- **The site's art suites:** these land in `crates/engine/tests/site_art/`, one file per suite in R20. They find the site checkout as the art suites do now (`~/Projects/jlawcordova.github.io`, or `PIXELLAB_SITE_CHECKOUT`), and skip when it's absent.
+- **The site's engine tests (R20):** `pixel-art-motion`'s tests land in `crates/engine/tests/motion_site.rs`, rewritten against the fixture (given an animated layer and a motion scene where it lacks them), names kept. The two new engine tests (deterministic output; no script, link, text or external reference) run over the fixture and both examples.
 - **The servers:** `servers.test.mjs`'s JSON-RPC and MCP transcripts are replayed against the program, unchanged apart from `.json` file names.
 - **The app:** `scripts/test-app.sh` and the acceptance pass run against the bundled program. Changed scripts:
   - `document.txt` and `scene-object.txt`, for `.json` names;
   - new `migrate.txt`: opening a format-1 temp document, Migrate…, the expects;
-  - new `actions.txt`: `play hop`, and the expects on a temp copy of the owner's document.
-- **The PR workflow (R28):** `ubuntu-latest`. It installs the pinned toolchain, runs `cargo test`, runs `npm test` (repo tooling and the parity check), and runs the site-art suites with `PIXELLAB_SITE_CHECKOUT` set to a shallow clone of the public site repo.
+  - new `actions.txt`: `play hop` and the expects, on a temp copy of an example given an ambient loop and an action (`scripts/make-examples.mjs` adds them).
+- **The PR workflow (R28):** `ubuntu-latest`. It installs the pinned toolchain, runs `cargo test`, and runs `npm test` (repo tooling and the parity check). The parity check and the visual check over the owner's document (R3, R16) run in the main session, against a temp copy from a site checkout, and their output goes in the PR.
 
 ### D13. What the site's change does (external, `2026-10-…` in `jlawcordova.github.io`)
 
@@ -371,26 +369,32 @@ For the site's own intent, which depends on this one:
 
 ## Areas of concern
 
-1. **The entrances are visitor-triggered too, and this spec leaves them on the site.** The hero island and the Range "build themselves" (`Hero.astro`, `Range.astro`): the site's JavaScript and the Motion library animate the document's 274 `.enter` groups with eased, staggered timing worked out from `data-enter`, `data-row` and `data-x`. That's the same kind of animation as the hop, but it's smooth rather than pixel-stepped, and its schedule is tuned to the site's layout. Moving it would need actions with easing and stagger, which is a much bigger feature. **Decision:** keep the entrances on the site, through the documented group attributes (R19), and make "entrances as actions" a follow-up? This spec assumes yes.
-2. **"New features" vs self-contained animation.** The intent leaves new engine features out of scope, except what self-contained animation needs. Ambient loops and actions (R12, R13) are that exception, and the app only shows and plays them (R23). Editing them is by command. **Decision:** is a command-only editor acceptable for now, with the editing UI as a follow-up?
-3. **Crates (R5).** This spec asks for `serde`, `serde_json` (with `indexmap`) and `miniz_oxide`, and nothing else (D2). The trade-off: polling instead of a watcher crate, and hand-written SHA-256, CRC-32 and PNG code. **Decision:** approve these three?
-4. **Gzip numbers move slightly.** With `miniz_oxide`, reported gzip sizes can differ from today's by a few bytes (D2). Budgets only warn now, so nothing breaks. Linking the system zlib through `flate2` would match exactly, but adds a C dependency. **Decision:** accept the small drift?
-5. **The site's art suites in this repo's CI.** Running them against the site's `main` (R20, R28) means a change to the site's art can turn this repo's PR checks red, with nothing in the site's own CI catching it first. The site's CI still runs `pixellab art build`, so validation and depth order surface there as problems or warnings. **Decision:** accept that, or run the art suites only on a schedule here?
+Resolved by the owner on 2026-10-21:
+
+1. **The entrances stay on the site.** The hero island and the Range "build themselves" (`Hero.astro`, `Range.astro`): the site's JavaScript and the Motion library animate the document's 274 `.enter` groups with eased, staggered timing worked out from `data-enter`, `data-row` and `data-x`. That's visitor-triggered like the hop, but smooth rather than pixel-stepped, and its schedule is tuned to the site's layout. In this change they keep working through the documented group attributes (R19). **Entrances as actions** (with easing and stagger) is a follow-up.
+2. **Ambient loops and actions are edited by command.** They are the exception the intent makes for self-contained animation (R12, R13). The app shows and plays them (R23), and editing them is by command over all three doors (R24). **An editing UI** is a follow-up.
+3. **Crates:** `serde`, `serde_json` (with `indexmap`) and `miniz_oxide` are approved (R5, D2). The trade-off: polling instead of a watcher crate, and hand-written SHA-256, CRC-32 and PNG code.
+4. **Gzip numbers move slightly,** by a few bytes, with `miniz_oxide` (D2). Budgets only warn, so nothing breaks. Accepted.
+5. **The site's art tests leave the site.** The engine tests come here on fixtures, three generic rules become engine tests and a `check` warning, and the tests about the owner's particular art are dropped (R20). This repo's CI needs no site checkout. The trade-off: rules like "no truck is on the crossing while the train is" are no longer checked automatically after this change. The visual check (R16) covers the migration, and later art changes are reviewed as proposals in the app.
+
+Still open, for information or for the site's change:
+
 6. **Generated names change (R15).** Scoping renames scene motion's `mv-…` classes in the hero island's SVG. Nothing in the site references them (checked), but any future page code must use `data-play` and the contract, not generated names.
-7. **Outputs not committed.** `astro dev` needs the SVGs to exist. After the site's change, a fresh site clone shows broken imports until someone runs `pixellab art build`, or publishes from the app. **Decision:** should the site's dev script run the pinned program first? This is the site's call, and that change must make it.
-8. **External dependency and order.** The site's change (D13) depends on this one's release, which includes R17's binaries. Until then, the site keeps its pin (`v0.5.0`) and keeps working on the Node package. This repo must not break `v0.5.0`'s consumers. They pin a tag, so a later release can't break them.
+7. **Outputs not committed.** `astro dev` needs the SVGs to exist. After the site's change, a fresh site clone shows broken imports until someone runs `pixellab art build`, or publishes from the app. Whether the site's dev script runs the pinned program first is the site's call, and that change must make it.
+8. **External dependency and order.** The site's change (D13) depends on this one's release, which includes R17's binaries. Until then, the site keeps its pin (`v0.5.0`) and keeps working on the Node package. They pin a tag, so a later release can't break them.
 9. **A large port.** About 12,000 lines of Node source and 9,000 lines of tests are ported. The parity check (R3) and the ported tests are the safety net. The plan should port engine-first and keep the Node CLI shippable until cutover.
 
 ## Open questions
 
-From the intent:
-- **The Range hop:** carried by the art as an action, played with `data-play` and ended by `animationend` (R13, D7). Answered by the owner.
-- **Comments:** the meaningful ones are kept, as `notes` and `colorNotes` (R7). Answered by the owner.
-- **Tests that check the art against the site's pages and styles:** dropped, not kept in the site (R20). Answered by the owner.
-- **Over budget:** a warning everywhere, never a failure (R4). Answered by the owner.
+From the intent, all answered by the owner:
+- **The Range hop:** carried by the art as an action, played with `data-play` and ended by `animationend` (R13, D7).
+- **Comments:** the meaningful ones are kept, as `notes` and `colorNotes` (R7).
+- **Tests that check the art against the site's pages and styles:** dropped, along with the tests of the owner's particular art. Only the engine's tests come here (R20).
+- **Over budget:** a warning everywhere, never a failure (R4).
 
-New, for the owner, from the Areas of concern:
-- **Entrances:** do they stay on the site for now (concern 1)?
-- **Ambient loops and actions:** are they edited by command only in this change (concern 2)?
-- **Crates:** are the three approved, and is the gzip drift accepted (concerns 3, 4)?
-- **Art suites in CI:** on every PR here, or on a schedule (concern 5)?
+From the Areas of concern, all answered by the owner: the entrances stay on the site for now, ambient loops and actions are edited by command for now, the three crates are approved, and the gzip drift is accepted.
+
+Follow-ups this change leaves:
+- entrances as actions;
+- an editing UI for ambient loops and actions;
+- checks a document declares for itself.
