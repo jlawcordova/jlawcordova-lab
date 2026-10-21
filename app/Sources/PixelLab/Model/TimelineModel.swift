@@ -130,7 +130,7 @@ final class TimelineModel {
     /// (ms into the action) and stays until `endAction()`. Under Reduce Motion
     /// it shows the rest frame and says so.
     func playAction(_ row: ActionRow, hold: Int? = nil) async {
-        guard let app, let doc = app.document, let connection = app.connection else { return }
+        guard let app, let doc = app.document else { return }
         pause()
         actionToken += 1
         let token = actionToken
@@ -142,6 +142,7 @@ final class TimelineModel {
             app.requestRender()
             return
         }
+        guard let connection = app.connection else { return }
         actionActive = true
         playingAction = row.name
         let times = hold.map { [$0] } ?? Animation.sampleTimes(duration: row.duration)
