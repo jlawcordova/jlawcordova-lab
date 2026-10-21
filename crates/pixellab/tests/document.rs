@@ -137,16 +137,40 @@ fn r3_a_folder_without_palette_json_is_not_a_document_a_checkout_without_art_is_
     assert!(is_document_error(&e) && e.message.contains("doesn't look like the site checkout: no *.pixellab or source/"), "{}", e.message);
 }
 
-#[test]
-#[ignore = "needs U21"]
-fn r3_the_cli_reports_a_bad_document_with_exit_code_1_and_code_document() {
-    todo!("U21: run `scene list --document <nowhere>`: exit 1, stderr starts `pixellab: document not found: .*nowhere (from --document)`, empty stdout; with --json the error code is `document`");
+fn cli(args: &[&str], env: Env) -> (i32, String, String) {
+    let reg = registry();
+    let argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let code = {
+        let mut io = pixellab::cli::Io { stdout: &mut out, stderr: &mut err, env, cwd: PathBuf::from("/"), registry: &reg };
+        pixellab::cli::main(&argv, &mut io)
+    };
+    (code, String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap())
 }
 
 #[test]
-#[ignore = "needs U21"]
+fn r3_the_cli_reports_a_bad_document_with_exit_code_1_and_code_document() {
+    let doc = make_document();
+    let nowhere = doc.base.join("nowhere");
+    let (code, out, err) = cli(&["scene", "list", "--document", &nowhere.to_string_lossy()], doc.env());
+    assert_eq!(code, 1);
+    assert!(err.starts_with("pixellab: document not found: "), "{err}");
+    assert!(err.contains("nowhere (from --document)"), "{err}");
+    assert_eq!(out, "");
+    let mut env = doc.env();
+    env.insert("PIXELLAB_SITE".into(), doc.home.to_string_lossy().into_owned());
+    let (code, _, err) = cli(&["scene", "list", "--json"], env);
+    assert_eq!(code, 1);
+    let e: Value = serde_json::from_str(&err).unwrap();
+    assert_eq!(e["error"]["code"], "document");
+}
+
+#[test]
 fn r3_the_default_site_under_home_is_tried_when_nothing_else_is_set() {
-    todo!("U21: run `document info` with an empty HOME: exit 1, stderr names Projects/jlawcordova.github.io (from the default site)");
+    let doc = make_document();
+    let (code, _, err) = cli(&["document", "info"], doc.env());
+    assert_eq!(code, 1);
+    assert!(err.contains("Projects/jlawcordova.github.io (from the default site)"), "{err}");
 }
 
 #[test]
@@ -494,10 +518,34 @@ fn a_file_that_cant_be_read_is_a_load_error_as_the_compiler_reports_it() {
     assert!(!docs.objects.contains_key("zz-broken"));
 }
 
+/// The session's working copies are the overlay now: a doc it holds replaces the disk's, a
+/// new one is added. (The Node overlay's `null` for a removed doc has no Rust counterpart:
+/// no session ever returned it.)
 #[test]
-#[ignore = "needs U14"]
 fn an_overlay_replaces_adds_and_removes_docs_for_a_session() {
-    todo!("U14: a context over the open document with an overlay: draft scene added, footer-dirt removed, not_found for it");
+    use pixellab::context::DocKind;
+    use pixellab::session::Edit;
+    let doc = make_document();
+    let mut env = doc.env();
+    env.insert("PIXELLAB_STATE".into(), doc.base.join("state").to_string_lossy().into_owned());
+    let document = open_document(&opts(Some(&doc.root), None, env.clone())).unwrap();
+    let mut session = Session::new(document, Options { env, ..Options::default() });
+    let mut ctx = Ctx::new(&mut session);
+    let draft = json!({ "viewBox": [0, 0, 8, 8], "items": [{ "object": "pebble", "at": { "px": [4, 7] } }] });
+    let draft2 = draft.clone();
+    ctx.session().unwrap().create(DocKind::Scene, "draft", draft.clone(), "draft");
+    assert_eq!(ctx.doc(DocKind::Scene, "draft").unwrap(), draft);
+    assert!(ctx.names(DocKind::Scene).unwrap().contains(&"draft".to_string()));
+    // Replaces: an edit of a doc on disk shows through the context.
+    ctx.edit(DocKind::Scene, "sample", None, |d, _| {
+        d["viewBox"] = json!([0, 0, 9, 9]);
+        Ok(Edit::new(serde_json::Map::new(), "changed"))
+    })
+    .unwrap();
+    assert_eq!(ctx.doc(DocKind::Scene, "sample").unwrap()["viewBox"], json!([0, 0, 9, 9]));
+    assert_eq!(draft2["viewBox"], json!([0, 0, 8, 8]));
+    let missing = ctx.doc(DocKind::Scene, "footer-dirt").unwrap_err();
+    assert!(matches!(missing, pixellab::errors::Error::Command(c) if c.code == "not_found"));
 }
 
 #[test]

@@ -243,7 +243,6 @@ fn negative_numbers_are_values_not_flags() {
 }
 
 #[test]
-#[ignore = "needs the commands (U22–U26)"]
 fn leading_words_name_the_command_positionals_fill_its_args() {
     t_leading_words_name_the_command_positionals_fill_its_args(&registry());
 }
@@ -252,7 +251,6 @@ fn leading_words_name_the_command_positionals_fill_its_args_with_a_test_registry
     t_leading_words_name_the_command_positionals_fill_its_args(&mini());
 }
 #[test]
-#[ignore = "needs the commands (U22–U26)"]
 fn a_single_word_command_takes_positionals_check_name() {
     t_a_single_word_command_takes_positionals(&registry());
 }
@@ -261,7 +259,6 @@ fn a_single_word_command_takes_positionals_check_name_with_a_test_registry() {
     t_a_single_word_command_takes_positionals(&mini());
 }
 #[test]
-#[ignore = "needs the commands (U22–U26)"]
 fn flags_flag_value_flag_value_booleans_and_no_flag() {
     t_flags_value_equals_booleans_and_no_flag(&registry());
 }
@@ -270,7 +267,6 @@ fn flags_flag_value_flag_value_booleans_and_no_flag_with_a_test_registry() {
     t_flags_value_equals_booleans_and_no_flag(&mini());
 }
 #[test]
-#[ignore = "needs the commands (U22–U26)"]
 fn global_flags_go_anywhere_and_are_not_params() {
     t_global_flags_go_anywhere_and_are_not_params(&registry());
 }
@@ -279,7 +275,6 @@ fn global_flags_go_anywhere_and_are_not_params_with_a_test_registry() {
     t_global_flags_go_anywhere_and_are_not_params(&mini());
 }
 #[test]
-#[ignore = "needs the commands (U22–U26)"]
 fn help_topics() {
     t_help_topics(&registry());
 }
@@ -288,7 +283,6 @@ fn help_topics_with_a_test_registry() {
     t_help_topics(&mini());
 }
 #[test]
-#[ignore = "needs the commands (U22–U26)"]
 fn usage_errors() {
     t_usage_errors(&registry());
 }
@@ -300,7 +294,6 @@ fn usage_errors_with_a_test_registry() {
 // ---------------------------------------------------------------- registry
 
 #[test]
-#[ignore = "needs the commands (U22–U26)"]
 fn every_command_is_well_formed_and_has_a_group() {
     let reg = registry();
     let names: Vec<&str> = reg.commands.iter().map(|c| c.name).collect();
@@ -336,6 +329,7 @@ fn every_command_is_well_formed_and_has_a_group() {
         "doc.save",
         "doc.undo",
         "document.copy",
+        "document.migrate", // new in the Rust program (R8); not in the Node registry
         "document.new",
         "object.animate",
         "object.erase",
@@ -393,7 +387,7 @@ fn every_command_is_well_formed_and_has_a_group() {
         ["doc.close", "doc.merge", "doc.open", "doc.redo", "doc.reload", "doc.revert", "doc.save", "doc.status", "doc.undo"]
     );
     let writes: Vec<&str> = names.iter().copied().filter(|n| reg.get(n).unwrap().writes_direct).collect();
-    assert_eq!(writes, ["art.build", "document.copy", "document.new", "proposal.apply", "proposal.reject"]);
+    assert_eq!(writes, ["art.build", "document.copy", "document.migrate", "document.new", "proposal.apply", "proposal.reject"]);
     let groups: Vec<String> = reg.groups().into_iter().map(|(g, _)| g).collect();
     assert_eq!(groups, ["activity", "art", "chat", "check", "doc", "document", "object", "palette", "proposal", "scene"]);
 }

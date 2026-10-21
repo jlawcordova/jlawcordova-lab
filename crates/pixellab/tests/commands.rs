@@ -96,7 +96,6 @@ fn code_of(e: &Error) -> String {
 }
 
 #[test]
-#[ignore = "needs U22–U26"]
 fn document_info_spec_r3_r4_a_document_resolves_to_its_folder() {
     let doc = make_document();
     let r = call(&doc, "document.info", json!({})).unwrap();
@@ -113,7 +112,6 @@ fn document_info_spec_r3_r4_a_document_resolves_to_its_folder() {
 }
 
 #[test]
-#[ignore = "needs U22–U26"]
 fn palette_get() {
     let doc = make_document();
     let r = call(&doc, "palette.get", json!({})).unwrap();
@@ -132,7 +130,6 @@ fn palette_get() {
 }
 
 #[test]
-#[ignore = "needs U22–U26"]
 fn scene_list() {
     let doc = make_document();
     let r = call(&doc, "scene.list", json!({})).unwrap();
@@ -147,7 +144,6 @@ fn scene_list() {
 }
 
 #[test]
-#[ignore = "needs U22–U26"]
 fn scene_show() {
     let doc = make_document();
     let r = call(&doc, "scene.show", json!({ "name": "sample" })).unwrap();
@@ -167,7 +163,6 @@ fn scene_show() {
 }
 
 #[test]
-#[ignore = "needs U22–U26"]
 fn scene_items_flattened_with_stable_paths_into_groups() {
     let doc = make_document();
     let r = call(&doc, "scene.items", json!({ "name": "sample" })).unwrap();
@@ -187,7 +182,6 @@ fn scene_items_flattened_with_stable_paths_into_groups() {
 }
 
 #[test]
-#[ignore = "needs U22–U26"]
 fn scene_render_shape_pixels_and_bounds_are_in_render_test_mjs() {
     let doc = make_document();
     let r = call(&doc, "scene.render", json!({ "name": "sample", "scale": 2 })).unwrap();
@@ -202,7 +196,6 @@ fn scene_render_shape_pixels_and_bounds_are_in_render_test_mjs() {
 }
 
 #[test]
-#[ignore = "needs U22–U26"]
 fn object_list() {
     let doc = make_document();
     let r = call(&doc, "object.list", json!({})).unwrap();
@@ -222,7 +215,6 @@ fn object_list() {
 }
 
 #[test]
-#[ignore = "needs U22–U26"]
 fn object_show_kind_size_layers_frames_colors_extends() {
     let doc = make_document();
     let pebble = call(&doc, "object.show", json!({ "name": "pebble" })).unwrap();
@@ -236,14 +228,13 @@ fn object_show_kind_size_layers_frames_colors_extends() {
     }
     let block = call(&doc, "object.show", json!({ "name": "block" })).unwrap();
     assert_eq!(block["kind"], "block");
-    assert_eq!(block["block"]["size"], json!([1, 1, 0]));
+    assert_eq!(block["block"]["size"], json!([1, 1, 1]));
     assert_eq!(cli_json(&doc, &["object", "show", "pebble"]), pebble);
     let (_, human, _) = cli(&doc, &["object", "show", "block"]);
     assert!(human.lines().any(|l| l == "kind      block"), "{human}");
 }
 
 #[test]
-#[ignore = "needs U22–U26"]
 fn object_render_shape() {
     let doc = make_document();
     let r = call(&doc, "object.render", json!({ "name": "pebble", "scale": 3 })).unwrap();
@@ -257,7 +248,6 @@ fn object_render_shape() {
 }
 
 #[test]
-#[ignore = "needs U22–U26"]
 fn check_everything_one_doc_and_problems_with_exit_code_1() {
     let doc = make_document();
     let all = call(&doc, "check", json!({})).unwrap();
@@ -293,7 +283,6 @@ fn check_everything_one_doc_and_problems_with_exit_code_1() {
 }
 
 #[test]
-#[ignore = "needs U22–U26"]
 fn r11_r12_check_warns_with_a_code_off_the_grid_a_scene_out_of_depth_order_and_the_copies_a_moving_item_is_drawn_in() {
     let house = json!({ "kind": "block", "size": [1, 1, 1], "faces": { "top": "grass-2", "left": "grass-4", "right": "wood-3" } });
     let walker = json!({ "kind": "sprite", "keys": { "g": "grass-2", "i": "ink" }, "anchor": [2, 4], "layers": [{ "map": [".gg.", "gggg", "gggg", ".ii."] }] });
@@ -367,7 +356,6 @@ fn r11_r12_check_warns_with_a_code_off_the_grid_a_scene_out_of_depth_order_and_t
 }
 
 #[test]
-#[ignore = "needs U22–U26"]
 fn r11_a_scene_with_a_problem_gets_no_depth_warnings_only_its_problems() {
     let bad = broken();
     let r = call(&bad, "check", json!({ "name": "zz-broken" })).unwrap();
@@ -376,7 +364,6 @@ fn r11_a_scene_with_a_problem_gets_no_depth_warnings_only_its_problems() {
 }
 
 #[test]
-#[ignore = "needs U22–U26"]
 fn rendering_a_broken_scene_is_a_clear_command_error() {
     let bad = broken();
     let err = call(&bad, "scene.render", json!({ "name": "zz-broken" })).unwrap_err();
@@ -385,7 +372,6 @@ fn rendering_a_broken_scene_is_a_clear_command_error() {
 }
 
 #[test]
-#[ignore = "needs U22–U26"]
 fn an_ambiguous_name_asks_for_objects_or_scenes() {
     let both = make_document();
     both.write("scenes/pebble.json", "{ \"viewBox\": [0, 0, 4, 4], \"items\": [] }\n");

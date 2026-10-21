@@ -10,6 +10,7 @@ mod common;
 use std::process::Command as Process;
 
 use common::{make_document, TempDocument};
+use pixellab::cli::{main, Io};
 use pixellab::context::Ctx;
 use pixellab::document::{open_document, OpenOptions};
 use pixellab::errors::{Error, Result};
@@ -94,12 +95,31 @@ fn r8_scale_multiplies_the_size_and_out_writes_the_png() {
     assert!(line.starts_with("pebble: 144×") && line.ends_with(" preview PNG at 4×"), "{line}");
 }
 
+fn cli(doc: &TempDocument, args: &[&str]) -> (i32, String, String) {
+    let reg = registry();
+    let mut argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    argv.push("--document".into());
+    argv.push(doc.root.to_string_lossy().into_owned());
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let code = {
+        let mut io = Io { stdout: &mut out, stderr: &mut err, env: doc.env(), cwd: doc.root.clone(), registry: &reg };
+        main(&argv, &mut io)
+    };
+    (code, String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap())
+}
+
 #[test]
-#[ignore = "needs U21"]
 fn r8_out_writes_the_png_on_the_command_line() {
-    todo!(
-        "U21: `art preview pebble --scale 4 --out <file>` prints the summary and `wrote <file> (144×n)`, and the file decodes at 144 wide"
-    );
+    let doc = make_document();
+    let file = doc.base.join("pebble@4x.png");
+    let (code, stdout, stderr) = cli(&doc, &["art", "preview", "pebble", "--scale", "4", "--out", &file.to_string_lossy()]);
+    assert_eq!(code, 0, "{stderr}");
+    let lines: Vec<&str> = stdout.split_inclusive('\n').collect();
+    assert_eq!(lines.len(), 2, "{stdout}");
+    assert!(lines[0].starts_with("pebble: 144\u{d7}") && lines[0].ends_with(" preview PNG at 4\u{d7}\n"), "{stdout}");
+    assert!(lines[1].starts_with("wrote ") && lines[1].contains("pebble@4x.png (144\u{d7}"), "{stdout}");
+    let png = engine::png::decode(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(png.width, 144);
 }
 
 #[test]
@@ -210,12 +230,4 @@ fn r8_takes_a_scene_not_an_object() {
     let (code, message) = code_of(call(&doc, "art.sizes", json!({ "name": "pebble" })).unwrap_err());
     assert_eq!(code, "not_found");
     assert!(message.contains("no scene named pebble"), "{message}");
-}
-
-// art.preview on the site's art (R8)
-
-#[test]
-#[ignore = "needs the owner's site checkout (the corpus test compares art.preview over the owner's document)"]
-fn r8_the_island_previews_at_its_viewbox_and_an_outfit_on_its_tile() {
-    todo!("hero-island previews at 446×264 and outfit-front-end at --scale 2 is at least 72 wide, on a temp copy of the site");
 }

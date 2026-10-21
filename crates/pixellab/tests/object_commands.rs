@@ -198,7 +198,6 @@ fn r15_an_object_that_extends_another_gets_row_overrides_blocks_are_refused() {
 }
 
 #[test]
-#[ignore = "needs the check command"]
 fn r15_an_object_that_extends_another_gets_row_overrides_and_check_finds_no_problems() {
     let doc = map_doc();
     let state = temp_dir("pixellab-state-");

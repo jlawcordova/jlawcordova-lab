@@ -229,7 +229,6 @@ fn r10_the_cli_prints_the_block() {
 // --- chat.context: what is not saved is left out (R11) ---
 
 #[test]
-#[ignore = "needs U22"]
 fn r11_an_item_placed_since_the_save_is_left_out_items_it_pushed_down_the_list_keep_their_saved_paths() {
     let mut h = harbor();
     let placed = h.ok("scene.place", json!({ "name": "harbor", "object": "rock", "at": [0, 0, 1] }));
@@ -253,7 +252,6 @@ fn r11_an_item_placed_since_the_save_is_left_out_items_it_pushed_down_the_list_k
 }
 
 #[test]
-#[ignore = "needs U22 and U25"]
 fn r11_a_moved_item_a_new_layer_and_a_layer_whose_items_changed_are_left_out_saving_brings_them_back() {
     let mut h = harbor();
     h.ok("scene.move", json!({ "name": "harbor", "item": "14.0", "by": [1, 0] }));
@@ -360,7 +358,6 @@ fn r23_over_mcp_with_pixellab_chat_chat_ask_and_chat_context_are_tools_the_quest
 // --- proposals and activity know where they came from (R24) ---
 
 #[test]
-#[ignore = "needs U22 and U25"]
 fn r24_a_chats_proposal_records_the_chat_and_a_number_the_activity_lines_record_the_agent_and_the_chat() {
     let mut h = harbor();
     let out = mcp(
@@ -438,7 +435,6 @@ fn r24_numbers_count_up_a_rewrite_keeps_its_number_and_servers_proposing_at_once
 }
 
 #[test]
-#[ignore = "needs U25"]
 fn r24_an_older_proposal_without_a_number_or_a_chat_still_lists_shows_and_is_rejected() {
     let mut h = harbor();
     std::fs::create_dir_all(h.state.join("proposals")).unwrap();
