@@ -296,7 +296,12 @@ fn apply_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     if !reloaded && session.entries.has(&ref_) && session.is_dirty(&ref_) {
         match session.merge(&ref_) {
             Ok(r) => merged = r["merged"] == json!(true),
-            Err(Error::Command(e)) if e.code == "merge_conflict" || e.code == "merge_invalid" => conflict = true,
+            Err(Error::Command(e)) if e.code == "merge_conflict" || e.code == "merge_invalid" => {
+                conflict = true;
+                if let Some(on_stale) = session.on_stale.as_mut() {
+                    on_stale(json!({ "doc": ref_, "file": file }));
+                }
+            }
             Err(e) => return Err(e),
         }
     }

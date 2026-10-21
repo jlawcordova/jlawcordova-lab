@@ -190,6 +190,8 @@ pub struct Options {
     pub agent: Option<String>,
     pub chat: Option<Value>,
     pub on_change: Option<Box<dyn FnMut(Value)>>,
+    /// `{ doc, file }` when an open doc with unsaved edits can't take what changed on disk (proposal.apply's conflict).
+    pub on_stale: Option<Box<dyn FnMut(Value)>>,
     pub now: Box<dyn Fn() -> f64>,
 }
 
@@ -201,6 +203,7 @@ impl Default for Options {
             agent: None,
             chat: None,
             on_change: None,
+            on_stale: None,
             now: Box::new(crate::state::now_ms),
         }
     }
@@ -298,6 +301,7 @@ pub struct Session {
     /// The Agent chat this session works for (docs/intents/2026-10-agent-chat/spec.md, D7).
     pub chat: Option<Value>,
     pub on_change: Option<Box<dyn FnMut(Value)>>,
+    pub on_stale: Option<Box<dyn FnMut(Value)>>,
     pub now: Box<dyn Fn() -> f64>,
     pub state: State,
     /// Open docs by ref, in the order they were opened.
@@ -319,6 +323,7 @@ impl Session {
             agent: options.agent,
             chat: options.chat,
             on_change: options.on_change,
+            on_stale: options.on_stale,
             now: options.now,
             state,
             entries: engine::omap::OMap::new(),

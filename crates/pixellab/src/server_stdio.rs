@@ -65,12 +65,15 @@ pub fn start(
 ) -> i32 {
     let rpc = Output::new(output);
     let notify = rpc.clone();
+    // The app's server notices stale docs itself (the watcher), so proposal.apply can tell it.
+    let stale = rpc.clone();
     let mut session = Session::new(
         document,
         Options {
             env,
             mode: Mode::Direct,
             on_change: Some(Box::new(move |status| notify.notify("doc.changed", status))),
+            on_stale: Some(Box::new(move |doc| stale.notify("doc.stale", doc))),
             ..Options::default()
         },
     );

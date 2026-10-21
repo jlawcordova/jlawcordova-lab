@@ -236,8 +236,9 @@ fn migrate_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     }
     let io = |e: std::io::Error| CommandError::new(format!("writing {} failed: {e}", target.display()), "write_failed");
     let write = |file: &str, text: &str| -> Result<()> {
-        write_atomic(&target.join(file), text)
-            .map_err(|e| CommandError::new(format!("writing {} failed: {}", target.join(file).display(), e.message()), "write_failed").into())
+        write_atomic(&target.join(file), text).map_err(|e| {
+            CommandError::new(format!("writing {} failed: {}", target.join(file).display(), e.message()), "write_failed").into()
+        })
     };
     if target != root {
         fs::create_dir_all(&target).map_err(io)?;
