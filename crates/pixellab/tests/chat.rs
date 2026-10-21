@@ -20,7 +20,7 @@ use pixellab::context::Ctx;
 use pixellab::document::{open_document, OpenOptions};
 use pixellab::errors::Error;
 use pixellab::registry::registry;
-use pixellab::session::{Mode, Options, Session};
+use pixellab::session::{Options, Session};
 use serde_json::{json, Value};
 
 /// The harbor as format 2, made once with Node's bootstrap.
