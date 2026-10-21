@@ -345,6 +345,8 @@ flowchart TB
 
 - **As built, PR 2 (from step 11's review):** `serve --stdio` opens a format-1 document too, so R8's migrate works through the app's door: every command that needs the document gives R9's problem, and `document.migrate` converts it and reopens it in the same server (a site's legacy `source/` folder reopens as its new bundle). `serve --mcp` still refuses a format-1 document. A panic in a command is an internal error for that call, and the servers keep their open docs.
 
+- **As built, PR 3:** an action's name is one move in a scene (validation refuses the same name with different moves, since its keyframes are `<scene>--<action>`, the documented `animationName`); action rules sit inside `@media (prefers-reduced-motion:no-preference)`, so under reduced motion nothing plays and no `animationend` fires; elements that play the same moves share one class. `docs/cli.md` is generated from the program's `help --markdown` from PR 3 on (`scripts/docs-cli.mjs`); the Node reference parity compares against is `scripts/docs-cli-node.mjs`, removed at cutover. The visual gate compares every SVG the owner's document publishes; preview-only scenes (the `thumb-*` scenes, which become D5's PNGs) are covered by the parity gate's pixel-identical previews. The hop's step-end jumps become hold keys one ms before each jump.
+
 If the owner wants any of these the spec's way, `spec.md` wins.
 
 ## Risks
