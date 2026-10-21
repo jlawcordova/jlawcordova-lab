@@ -125,6 +125,11 @@ run_example examples-harbor.txt examples-harbor.log harbor
 run_example examples-town.txt examples-town.log town
 echo "==> depth order: the pine moved behind the house, the override, the saved file"
 run_example examples-depth.txt examples-depth.log harbor
+echo "==> ambient loops and actions: the barrel's loop on the timeline, the boat's hop played, mid-play and at rest, and under Reduce Motion"
+run_example actions.txt actions.log harbor
+for shot in actions-mid-play-light actions-rest-light; do [[ -s "$shots/$shot.png" ]] || { echo "actions.txt didn't snapshot $shot" >&2; exit 1; }; done
+cmp -s "$shots/actions-mid-play-light.png" "$shots/actions-rest-light.png" && { echo "the boat looks the same mid-hop as at rest" >&2; exit 1; }
+echo "the hop played: mid-play differs from the rest frame"
 echo "==> the Agent chat: Claude Code's setup (the fake), chats, steps, a question, Stop"
 claude_home="$out/claude-home" chat_state="$out/chat-state"
 rm -rf "$claude_home" "$chat_state" && mkdir -p "$claude_home" "$chat_state"

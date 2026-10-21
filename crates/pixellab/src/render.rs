@@ -697,7 +697,16 @@ fn inner_object_image(sources: &Sources, name: &str, options: &ObjectImageOption
         _ => object_pixels(sources, name, *time, frame, play.clone()).map_err(|e| e.0)?,
     };
     let view: [i64; 4] = if resolved.block.is_none() {
-        [-resolved.anchor[0], -resolved.anchor[1], resolved.width, resolved.height]
+        let map = [-resolved.anchor[0], -resolved.anchor[1], resolved.width, resolved.height];
+        match b {
+            // At a `time` (ambient loops, a playing action) the layers move: the box grows to hold them.
+            Some(b) if time.is_some() => {
+                let (x0, y0) = ((b.min_x as i64).min(map[0]), (b.min_y as i64).min(map[1]));
+                let (x1, y1) = ((b.max_x as i64 + 1).max(map[0] + map[2]), (b.max_y as i64 + 1).max(map[1] + map[3]));
+                [x0, y0, x1 - x0, y1 - y0]
+            }
+            _ => map,
+        }
     } else if let Some(b) = b {
         [b.min_x as i64, b.min_y as i64, (b.max_x - b.min_x + 1) as i64, (b.max_y - b.min_y + 1) as i64]
     } else {

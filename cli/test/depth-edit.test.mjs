@@ -14,7 +14,7 @@ import { after, before, beforeEach, describe, test } from 'node:test';
 import { openDocument } from '../lib/document.mjs';
 import { registry } from '../lib/registry.mjs';
 import { Session } from '../lib/session.mjs';
-import { decodePng, makeDocument, readDoc, REPO, runCli, startServer, tempDir } from './helpers.mjs';
+import { decodePng, FORMAT1_EXAMPLES, makeDocument, readDoc, runCli, startServer, tempDir } from './helpers.mjs';
 
 // Four blocks side by side, listed back to front, and a pebble nothing overlaps.
 const STAND = `export default {
@@ -543,7 +543,7 @@ describe('R15: the harbor\'s pine moved behind the red house', () => {
   before(async () => {
     tmp = await tempDir('pixellab-harbor-');
     const root = join(tmp, 'harbor.pixellab');
-    await cp(join(REPO, 'examples', 'harbor.pixellab'), root, { recursive: true });
+    await cp(join(FORMAT1_EXAMPLES, 'harbor.pixellab'), root, { recursive: true });
     const harbor = await openDocument({ doc: root, env: { ...process.env, HOME: tmp } });
     s = new Session(harbor, { env: { ...process.env, PIXELLAB_STATE: join(tmp, 'state') } });
     sources = (await s.context().sources()).sources;
@@ -599,7 +599,7 @@ describe('R8: a footprint on the harbor\'s tree puts its scenes out of order', (
   before(async () => {
     tmp = await tempDir('pixellab-harbor-footprint-');
     const root = join(tmp, 'harbor.pixellab');
-    await cp(join(REPO, 'examples', 'harbor.pixellab'), root, { recursive: true });
+    await cp(join(FORMAT1_EXAMPLES, 'harbor.pixellab'), root, { recursive: true });
     const harbor = await openDocument({ doc: root, env: { ...process.env, HOME: tmp } });
     s = new Session(harbor, { env: { ...process.env, PIXELLAB_STATE: join(tmp, 'state') } });
   });

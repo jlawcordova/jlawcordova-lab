@@ -43,10 +43,19 @@ const WANT = (flag('--docs', 'sample,harbor,town,owner') ?? '').split(',').filte
 const REPORT = flag('--report');
 const KEEP = flag('--keep');
 
+// examples/ is in format 2 now; the Node CLI reads format 1, so the harbor and the town
+// are the format-1 examples at PR 2's merge commit (the parity gate's), by `git archive`.
+const FORMAT1_COMMIT = '00ef555';
+const FORMAT1_EXAMPLES = (() => {
+  const dir = mkdtempSync(join(tmpdir(), 'pixellab-parity-examples-'));
+  process.on('exit', () => rmSync(dir, { recursive: true, force: true }));
+  execFileSync('tar', ['-x', '-C', dir], { input: execFileSync('git', ['-C', REPO, 'archive', FORMAT1_COMMIT, 'examples/']) });
+  return join(dir, 'examples');
+})();
 const SOURCES = {
   sample: join(REPO, 'cli/test/fixtures/sample.pixellab'),
-  harbor: join(REPO, 'examples/harbor.pixellab'),
-  town: join(REPO, 'examples/town.pixellab'),
+  harbor: join(FORMAT1_EXAMPLES, 'harbor.pixellab'),
+  town: join(FORMAT1_EXAMPLES, 'town.pixellab'),
 };
 
 /** gzip sizes may differ by this much (the owner's call, 2026-10-21), or this many bytes on tiny values. */
