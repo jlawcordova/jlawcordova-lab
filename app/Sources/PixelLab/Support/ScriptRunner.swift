@@ -214,6 +214,10 @@ final class ScriptRunner {
             guard let r else { throw Failure(model.notice ?? "the edit failed") }
             return [r.summary, r.path.map { "path \($0)" }, r.reordered.flatMap { $0.isEmpty ? nil : "reordered \($0.count)" }].compactMap { $0 }.joined(separator: ", ")
         }
+        func needFrame(_ r: SceneFrameResult?) throws -> SceneFrameResult {
+            guard let r else { throw Failure(model.notice ?? "scene.frame failed") }
+            return r
+        }
         switch words[0] {
         case "open":
             guard let ref = DocRef(id: try arg(words, 1)) else { throw Failure("open scene:<name> or object:<name>") }
@@ -236,7 +240,7 @@ final class ScriptRunner {
             guard let t = StageTool(rawValue: try arg(words, 1)) else { throw Failure("tool select|place|pan|pencil|eraser|fill|picker") }
             editor.setTool(t)
             return nil
-        case "mode", "color", "stroke", "erase", "px", "fill", "pick", "grid", "onion", "resize", "layer", "frame", "animate", "still",
+        case "mode", "color", "stroke", "erase", "px", "fill", "pick", "grid", "onion", "resize", "layer", "animate", "still",
              "new", "newdialog", "newcancel", "newsubmit":
             return try await performObject(words, model: model)
         case "library":
@@ -244,8 +248,26 @@ final class ScriptRunner {
             _ = await model.thumbnails.art(try arg(words, 1))
             return nil
         case "level":
-            editor.placeLevel = try int(words, 1)
+            editor.setPlaceLevel(try int(words, 1))
             return nil
+        case "drop":
+            // ⌘↓: onto what is below the selection (docs/intents/2026-10-scene-canvas/spec.md, R16).
+            return try needEdit(await editor.dropSelection())
+        case "frame":
+            // An object's frame (frame next|add…) is the object editor's.
+            if model.document?.ref.kind == .object { return try await performObject(words, model: model) }
+            // The scene's published size: frame fit | box x,y,w,h | margin n | outline on|off (R8, R10).
+            switch try arg(words, 1) {
+            case "fit": _ = try needFrame(await model.frameCommand(["fit": true]))
+            case "box":
+                let n = try arg(words, 2).split(separator: ",").compactMap { Int($0) }
+                guard n.count == 4 else { throw Failure("frame box x,y,w,h") }
+                _ = try needFrame(await model.frameCommand(["box": .array(n.map { JSONValue($0) })]))
+            case "margin": _ = try needFrame(await model.frameCommand(["margin": JSONValue(try int(words, 2))]))
+            case "outline": model.showFrame = try arg(words, 2) == "on"
+            default: throw Failure("frame fit|box x,y,w,h|margin n|outline on|off")
+            }
+            return model.document?.frameInfo?.summary
         case "focus":
             editor.focusStage()
             return nil
@@ -293,6 +315,10 @@ final class ScriptRunner {
             if words.count >= 4 {
                 return try needEdit(await editor.place(object, at: Tile(col: try int(words, 1), row: try int(words, 2), level: try int(words, 3))))
             }
+            // `place <col> <row>`: no level, so the item goes on top of what is on the tile (R17).
+            if words.count == 3 {
+                return try needEdit(await editor.place(object, at: Tile(col: try int(words, 1), row: try int(words, 2), level: 0), stack: true))
+            }
             await editor.placeAtCursor()
             return doc?.selectedPath.map { "selected \($0)" }
         case "drag" where doc?.selectedItem == nil && !(doc?.selection.isEmpty ?? true):
@@ -327,6 +353,7 @@ final class ScriptRunner {
             if k.command {
                 // Menu shortcuts the script can name.
                 switch k.key {
+                case .down: await editor.dropSelection()
                 case .char("d"): await editor.duplicate()
                 case .char("g"): if k.shift { await model.layers.ungroup() } else { await model.layers.group() }
                 case .char("z"): if k.shift { await model.redo() } else { await model.undo() }
@@ -1220,6 +1247,12 @@ final class ScriptRunner {
                 let items = menu.items.filter { !$0.isSeparatorItem }.map { item in
                     let mods = item.keyEquivalentModifierMask
                     let key = item.keyEquivalent.isEmpty ? "" : " [\(mods.contains(.command) ? "⌘" : "")\(mods.contains(.option) ? "⌥" : "")\(item.keyEquivalent)]"
+                    if let sub = item.submenu {
+                        let inner = sub.items.filter { !$0.isSeparatorItem }.map { i in
+                            i.title + (i.keyEquivalent.isEmpty ? "" : " [\(i.keyEquivalentModifierMask.contains(.command) ? "⌘" : "")\(i.keyEquivalent == String(UnicodeScalar(NSDownArrowFunctionKey)!) ? "↓" : i.keyEquivalent)]")
+                        }
+                        return item.title + " { " + inner.joined(separator: "; ") + " }"
+                    }
                     return item.title + key
                 }
                 log("\(title) menu: \(items.joined(separator: " | "))")
@@ -1252,6 +1285,32 @@ final class ScriptRunner {
         case "dirty": got = String(doc?.isDirty ?? false)
         case "selected": got = doc?.selectedPath ?? "none"
         case "object": got = doc?.selectedItem?.object ?? "none"
+        case "movemenu":
+            // Edit › Move lists every stage key (R19): passes when its items hold the text.
+            guard let edit = NSApp.mainMenu?.items.first(where: { $0.title == "Edit" })?.submenu,
+                  let move = edit.items.first(where: { $0.title == "Move" })?.submenu else { throw Failure("no Edit › Move menu") }
+            let titles = move.items.filter { !$0.isSeparatorItem }.map { i in
+                i.title + (i.keyEquivalent == String(UnicodeScalar(NSDownArrowFunctionKey)!) && i.keyEquivalentModifierMask.contains(.command) ? " [⌘↓]" : "")
+            }.joined(separator: " | ")
+            guard titles.contains(want) else { throw Failure("Edit › Move has no “\(want)”: \(titles)") }
+            return "Edit › Move has \(want)"
+        case "frame": got = doc?.frameInfo?.frame ?? "none"
+        case "size": got = doc.map { "\(Int($0.publishSize.width)),\(Int($0.publishSize.height))" } ?? "none"
+        case "outline": got = model.showFrame ? "on" : "off"
+        case "window": got = doc?.window.map { "\(Int($0.minX)),\(Int($0.minY)),\(Int($0.width)),\(Int($0.height))" } ?? "none"
+        case "cursor": got = model.editor.cursorTile.map(\.description) ?? "none"
+        case "visible":
+            // The cursor tile (or "selected": the selected item) is inside what the stage shows (R18).
+            guard let o = doc?.origin, let view = model.editor.stageView as? StageInputView, let g = view.geometry else { got = "none"; break }
+            var tile: Tile?
+            let which = words.count > 2 ? words[2] : "cursor"
+            let wantVisible = words.count > 3 ? words[3] : "true"
+            if which == "selected" { tile = doc?.selectedItem?.at.tile.flatMap { $0.count == 3 ? Tile(col: $0[0], row: $0[1], level: $0[2]) : nil } } else { tile = model.editor.cursorTile }
+            guard let tile else { got = "none"; break }
+            let c = StageGeometry.tileToScene(col: tile.col, row: tile.row, level: tile.level, origin: o)
+            got = view.visibleRect.contains(g.viewRect(fromScene: CGRect(x: c.x - 16, y: c.y - 8, width: 32, height: 16))) ? "true" : "false"
+            guard got == wantVisible else { throw Failure("expected visible \(which) \(wantVisible), got \(got)") }
+            return "visible \(which) = \(got)"
         case "at": got = doc?.selectedItem?.at.short ?? "none"
         case "class": got = doc?.selectedItem?.class ?? ""
         case "items": got = String(doc?.items.count ?? 0)

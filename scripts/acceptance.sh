@@ -196,6 +196,23 @@ tail -1 "$out/migrate.log"
 grep -q 'all steps passed' "$out/migrate.log"
 [[ -f "$old/palette.json" && ! -e "$old/palette.mjs" && -z $(find "$old" -name '*.mjs') ]] || { echo "the migrated document still has .mjs sources" >&2; exit 1; }
 echo "the old-format copy is migrated: $(ls "$old/scenes" | wc -l | tr -d ' ') scenes, $(ls "$old/objects" | wc -l | tr -d ' ') objects, all .json"
+echo "==> a scene without a size, and keyboard block placement: scene new, a stack, Tab, the drop key, far from the art, publish"
+canvas="$out/examples/canvas.pixellab" canvas_state="$out/state-canvas"
+rm -rf "$canvas" "$canvas_state" && mkdir -p "$out/examples" "$canvas_state" && cp -R "$root/examples/harbor.pixellab" "$canvas" && migrate_doc "$canvas" > /dev/null
+PIXELLAB_STATE="$canvas_state" "$program" scene new meadow --document "$canvas" > /dev/null
+# `scene new` writes no viewBox (R1); give the scene an output so it publishes.
+grep -q viewBox "$canvas/scenes/meadow.json" && { echo "scene new wrote a viewBox (R1)" >&2; exit 1; }
+perl -0pi -e 's/\A\{\n/{\n  "output": "meadow.svg",\n/' "$canvas/scenes/meadow.json"
+sed "s#@OUT@#$shots#g" "$root/scripts/acceptance/canvas.txt" > "$out/canvas.txt"
+PIXELLAB_SCRIPT="$out/canvas.txt" PIXELLAB_DOC="$canvas" PIXELLAB_STATE="$canvas_state" "$app/Contents/MacOS/PixelLab" 2>&1 | grep '^script:' > "$out/canvas.log" || true
+tail -1 "$out/canvas.log"
+grep -q 'all steps passed' "$out/canvas.log"
+for f in harbor.svg harbor-flat.svg; do
+  cmp "$shots/canvas-before/$f" "$shots/canvas-after/$f" || { echo "$f changed while a scene without a size was made (R4)" >&2; exit 1; }
+done
+meadow_width=$(sed -n 's/.*<svg[^>]* width="\([0-9]*\)".*/\1/p' "$shots/canvas-after/meadow.svg" | head -1)
+[[ -n $meadow_width && $meadow_width -gt 128 ]] || { echo "the meadow's SVG is $meadow_width wide: it should fit what was placed far from the origin (R2)" >&2; exit 1; }
+echo "harbor SVGs byte-identical; the meadow publishes at ${meadow_width} px wide, fit to its content (the old default cut at 128)"
 echo "==> the temp site after the run"
 git -C "$site" diff --stat HEAD~1 HEAD
 git -C "$site" diff --stat

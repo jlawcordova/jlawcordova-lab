@@ -41,7 +41,7 @@ struct Tile: Hashable, Sendable, CustomStringConvertible {
 /// these too).
 struct KeyInput: Equatable, Sendable {
     enum Key: Equatable, Sendable {
-        case left, right, up, down, pageUp, pageDown
+        case left, right, up, down, pageUp, pageDown, tab
         case delete, returnKey, escape, space
         case char(Character)
     }
@@ -69,6 +69,7 @@ struct KeyInput: Equatable, Sendable {
         case "right": key = .right
         case "up": key = .up
         case "down": key = .down
+        case "tab": key = .tab
         case "pageup": key = .pageUp
         case "pagedown": key = .pageDown
         case "delete", "backspace": key = .delete
@@ -125,6 +126,10 @@ final class SceneEditor {
     var placeObject: String?
     /// The level the Place tool places at (follows the selected item's).
     var placeLevel = 0
+    /// The owner set the level on purpose (the stepper, ⇧↑ / Page Up on the cursor): a place uses it
+    /// as given. Otherwise a place puts the item on top of what is on the tile
+    /// (docs/intents/2026-10-scene-canvas/spec.md, R17).
+    var levelOnPurpose = false
     /// The tile under the pointer (Place tool).
     var hoverTile: Tile?
     /// The scene pixel under the pointer.
@@ -164,7 +169,14 @@ final class SceneEditor {
         hoverPixel = nil
         cursorTile = nil
         dropObject = nil
+        levelOnPurpose = false
         syncDrafts()
+    }
+
+    /// The Place level was chosen: the stepper, or the script hook.
+    func setPlaceLevel(_ level: Int) {
+        placeLevel = level
+        levelOnPurpose = true
     }
 
     // MARK: Selection
@@ -174,6 +186,7 @@ final class SceneEditor {
         doc.selectedPath = path
         if let item = doc.selectedItem {
             if let l = item.at.standingLevel { placeLevel = l }
+            levelOnPurpose = false
             if reveal { self.reveal(path!) }
             announce("\(item.object) selected, \(item.at.spoken)")
         }
@@ -330,7 +343,7 @@ final class SceneEditor {
             let px = geometry.scenePixel(fromView: p)
             await place(object, px: (px.x, px.y))
         } else if let t = geometry.tile(atView: p, level: placeLevel) {
-            await place(object, at: Tile(col: t.col, row: t.row, level: t.level))
+            await place(object, at: Tile(col: t.col, row: t.row, level: t.level), stack: !levelOnPurpose)
         }
     }
 
@@ -340,16 +353,26 @@ final class SceneEditor {
             app?.notice = "Choose an object in the Library to place."
             return
         }
-        guard let t = cursorTile ?? defaultCursor() else { return }
-        await place(object, at: t)
+        guard var t = cursorTile ?? defaultCursor() else { return }
+        // A level the owner set (the stepper, ⇧↑) is used as given; otherwise the item goes on top (R17).
+        if levelOnPurpose { t.level = placeLevel }
+        await place(object, at: t, stack: !levelOnPurpose)
     }
 
     /// Places into the selected layer, the selected item's, or the one you're inside (D13).
     @discardableResult
-    func place(_ object: String, at tile: Tile) async -> EditResult? {
+    func place(_ object: String, at tile: Tile, stack: Bool = false) async -> EditResult? {
         cursorTile = tile
         let into = app?.layers.placeParams ?? [:]
-        return await edit("scene.place", ["object": .string(object), "at": tile.json].merging(into) { a, _ in a })
+        // Two numbers say "no level": the item goes on top of the block on that tile (R17).
+        let at: JSONValue = stack ? [JSONValue(tile.col), JSONValue(tile.row)] : tile.json
+        let r = await edit("scene.place", ["object": .string(object), "at": at].merging(into) { a, _ in a })
+        if stack, let t = r?.itemTile {
+            cursorTile = t
+            placeLevel = t.level
+            if hoverTile != nil { hoverTile = t }
+        }
+        return r
     }
 
     @discardableResult
@@ -402,8 +425,10 @@ final class SceneEditor {
         t.level += dl
         cursorTile = t
         placeLevel = t.level
+        if dl != 0 { levelOnPurpose = true }
         if tool == .place { hoverTile = t }
         app?.reachTile(t)
+        revealOnStage(t)
         announce("Cursor at column \(t.col), row \(t.row), level \(t.level)")
     }
 
@@ -470,6 +495,52 @@ final class SceneEditor {
     @discardableResult func duplicate() async -> EditResult? { await itemCommand("scene.duplicate") }
     @discardableResult func snap() async -> EditResult? { await itemCommand("scene.snap") }
 
+    /// ⌘↓: drop the selection onto what it stands over, as one undo step (R16). The
+    /// summary says where it rests ("on top of grass", "on the ground").
+    @discardableResult
+    func dropSelection() async -> EditResult? {
+        guard selected != nil else {
+            app?.notice = "Select an item to drop."
+            announce("Select an item to drop")
+            return nil
+        }
+        let r = await itemCommand("scene.drop")
+        if let t = r?.itemTile { cursorTile = t; placeLevel = t.level; levelOnPurpose = false }
+        return r
+    }
+
+    /// Tab / ⇧Tab: select the next or previous item in the scene's depth order (of the
+    /// layer you're inside, when you're inside one), wrapping at the ends (R15).
+    @discardableResult
+    func selectNext(forward: Bool) -> Bool {
+        guard let doc, let layers = app?.layers else { return false }
+        let tree = doc.layerTree
+        let order = tree.order.filter { tree.pickable($0, inside: layers.inside, locked: layers.locked) && (layers.inside == nil || tree.chain(ofItem: $0).contains(layers.inside!)) && !tree.isHidden($0, hidden: layers.hidden) }
+        guard !order.isEmpty else { return false }
+        let next: String
+        if let current = doc.selectedPath, let i = order.firstIndex(of: current) {
+            next = order[(i + (forward ? 1 : order.count - 1)) % order.count]
+        } else {
+            next = forward ? order[0] : order[order.count - 1]
+        }
+        select(next)
+        revealOnStage(doc.itemsByPath[next]?.at.tile)
+        return true
+    }
+
+    /// Scrolls the stage so a tile (the cursor, or an item's) is in view, past the edge of the art too (R18).
+    func revealOnStage(_ tile: [Int]?) {
+        guard let t = tile, t.count == 3 else { return }
+        revealOnStage(Tile(col: t[0], row: t[1], level: t[2]))
+    }
+
+    func revealOnStage(_ tile: Tile) {
+        guard let origin = doc?.origin, let view = stageView as? StageInputView else { return }
+        let c = StageGeometry.tileToScene(col: tile.col, row: tile.row, level: tile.level, origin: origin)
+        // The tile's top face and the block under it.
+        view.reveal(sceneRect: CGRect(x: c.x - 16, y: c.y - 24, width: 32, height: 48))
+    }
+
     @discardableResult
     func remove() async -> EditResult? {
         guard selected != nil else { return nil }
@@ -498,6 +569,7 @@ final class SceneEditor {
         do {
             let r: EditResult = try await connection.call(method, p)
             if app.document === doc { app.layers.followSort(r.reordered) }
+            if let t = r.itemTile, app.document === doc { revealOnStage(t) }
             if selectResult, method != "scene.remove", let path = r.path, app.document === doc {
                 doc.selectedPath = path
                 reveal(path)
@@ -520,8 +592,15 @@ final class SceneEditor {
     /// Stage keys. Returns false for keys the stage doesn't use.
     func handleKey(_ k: KeyInput) -> Bool {
         guard let app else { return false }
+        // ⌘↓: drop onto what is below (also the Edit › Move menu's shortcut).
+        if k.command, k.key == .down, !k.control, !k.option, !k.shift {
+            Task { await dropSelection() }
+            return true
+        }
         if k.command || k.control { return false }
         switch k.key {
+        case .tab:
+            return !k.option && selectNext(forward: !k.shift)
         case .escape:
             // A drag, the menu, the selection, then the layer you're inside, then the tool.
             let layers = app.layers

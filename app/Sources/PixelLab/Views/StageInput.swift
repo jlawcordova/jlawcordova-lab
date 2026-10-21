@@ -67,7 +67,26 @@ final class StageInputView: NSView {
             let p = new.viewPoint(fromScene: center)
             clip.scroll(to: CGPoint(x: max(p.x - size.width / 2, 0), y: max(p.y - size.height / 2, 0)))
             scroll.reflectScrolledClipView(clip)
+            self?.applyReveal()
         }
+    }
+
+    /// A scene rect to keep in view, applied again once the workspace has grown to hold it.
+    private var pendingReveal: CGRect?
+
+    /// Scrolls so a rect in scene pixels is visible, with a margin, at the zoom the owner has (R18).
+    func reveal(sceneRect: CGRect) {
+        pendingReveal = sceneRect
+        applyReveal()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            self?.applyReveal()
+            self?.pendingReveal = nil
+        }
+    }
+
+    private func applyReveal() {
+        guard let g = geometry, let r = pendingReveal else { return }
+        scrollToVisible(g.viewRect(fromScene: r).insetBy(dx: -48, dy: -48))
     }
 
     override var isFlipped: Bool { true }
@@ -80,7 +99,7 @@ final class StageInputView: NSView {
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityLabel("Stage")
-        setAccessibilityHelp("Scenes: V select, A place, H pan. A click picks a layer, a double-click goes inside it, Shift-click adds to the selection; the Layers list selects from the keyboard. Arrows move the selection by a tile, Option-arrows one item by a pixel, Shift-up and down by a level. Command-G groups, Shift-Command-G ungroups. Return places the library object at the cursor. Objects: B pencil, E eraser, G fill, I picker; arrows move the pixel cursor, Return paints at it, Delete erases it, [ and ] change layer, Page Up and Page Down change frame.")
+        setAccessibilityHelp("Scenes: V select, A place, H pan. A click picks a layer, a double-click goes inside it, Shift-click adds to the selection; the Layers list selects from the keyboard. Arrows move the selection by a tile, Option-arrows one item by a pixel, Shift-up and down by a level. Command-G groups, Shift-Command-G ungroups. Tab and Shift-Tab select the next and previous item. Command-Down drops the selection onto what is below it. Return places the library object at the cursor, on top of a block that is there. Objects: B pencil, E eraser, G fill, I picker; arrows move the pixel cursor, Return paints at it, Delete erases it, [ and ] change layer, Page Up and Page Down change frame.")
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
@@ -267,6 +286,7 @@ final class StageInputView: NSView {
         case 124: key = .right
         case 125: key = .down
         case 126: key = .up
+        case 48: key = .tab
         case 116: key = .pageUp
         case 121: key = .pageDown
         case 51, 117: key = .delete
