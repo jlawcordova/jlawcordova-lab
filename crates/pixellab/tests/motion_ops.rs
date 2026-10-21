@@ -2,8 +2,20 @@
 //! operations (`pixellab::motion_ops`). Expectations marked "from Node" were
 //! computed by running the Node functions once.
 
-use pixellab::errors::CommandError;
+#![allow(clippy::result_large_err)]
+
+mod common;
+
+use std::collections::BTreeMap;
+
+use engine::engine::{load_sources, validate};
+use engine::format::read_docs;
+use pixellab::context::{Ctx, DocKind};
+use pixellab::document::{open_document, OpenOptions};
+use pixellab::errors::{CommandError, Error};
 use pixellab::motion_ops::{self, KeyValues, PathTiming};
+use pixellab::registry::registry;
+use pixellab::session::{Mode, Options, Session};
 use serde_json::{json, Value};
 
 fn moving() -> Value {
@@ -87,10 +99,41 @@ fn r12_add_a_track_an_item_needs_an_id_set_move_show_and_pose_keys_move_and_dele
 }
 
 #[test]
-#[ignore = "needs U23"]
 fn r12_add_a_track_an_item_needs_an_id_set_move_show_and_pose_keys_move_and_delete_them_remove_the_track_through_the_commands() {
-    // The no_id refusal, the unknown pose (usage), the empty warnings and
-    // check's problems after the edits belong to the commands.
+    let fx = Fx::new();
+    let mut s = fx.session();
+    assert_eq!(rejects(call(&mut s, "scene.track.add", json!({ "item": "3" }), "moving")), "no_id");
+    assert_eq!(rejects(call(&mut s, "scene.track.add", json!({ "item": "cart" }), "moving")), "track_exists");
+    let added = call(&mut s, "scene.track.add", json!({ "item": "bird" }), "moving").unwrap();
+    assert_eq!(added["track"], json!({ "item": "bird", "keys": [{ "t": 0 }] }));
+
+    let moved = call(&mut s, "scene.key.set", json!({ "item": "bird", "time": 500, "move": [4, -2] }), "moving").unwrap();
+    assert_eq!(moved["key"], json!({ "t": 500, "move": [4, -2] }));
+    assert_eq!(moved["warnings"], json!([]));
+    call(&mut s, "scene.key.set", json!({ "item": "bird", "time": 500, "show": false, "pose": "block" }), "moving").unwrap();
+    call(&mut s, "scene.key.set", json!({ "item": "bird", "time": 1500, "show": true }), "moving").unwrap();
+    assert_eq!(
+        keys_of_scene(&mut s, "bird"),
+        json!([{ "t": 0 }, { "t": 500, "move": [4, -2], "show": false, "pose": "block" }, { "t": 1500, "show": true }])
+    );
+    call(&mut s, "scene.key.set", json!({ "item": "bird", "time": 500, "clear": ["pose"] }), "moving").unwrap();
+    assert_eq!(keys_of_scene(&mut s, "bird")[1], json!({ "t": 500, "move": [4, -2], "show": false }));
+
+    call(&mut s, "scene.key.move", json!({ "item": "bird", "time": 1500, "to": 1200 }), "moving").unwrap();
+    let times: Vec<Value> = keys_of_scene(&mut s, "bird").as_array().unwrap().iter().map(|k| k["t"].clone()).collect();
+    assert_eq!(times, [json!(0), json!(500), json!(1200)]);
+    assert_eq!(rejects(call(&mut s, "scene.key.move", json!({ "item": "bird", "time": 1200, "to": 500 }), "moving")), "key_exists");
+    assert_eq!(rejects(call(&mut s, "scene.key.move", json!({ "item": "bird", "time": 0, "to": 100 }), "moving")), "first_key");
+    assert_eq!(rejects(call(&mut s, "scene.key.set", json!({ "item": "bird", "time": 2000, "show": true }), "moving")), "out_of_range");
+    call(&mut s, "scene.key.delete", json!({ "item": "bird", "time": 1200 }), "moving").unwrap();
+    assert_eq!(rejects(call(&mut s, "scene.key.delete", json!({ "item": "bird", "time": 0 }), "moving")), "first_key");
+    assert_eq!(rejects(call(&mut s, "scene.key.set", json!({ "item": "bird", "time": 100, "pose": "no-such-object" }), "moving")), "usage");
+    assert_eq!(problems(&mut s, "moving"), Vec::<String>::new(), "what the commands wrote validates");
+
+    call(&mut s, "scene.track.remove", json!({ "item": "bird" }), "moving").unwrap();
+    let items: Vec<Value> = tracks(&mut s).as_array().unwrap().iter().map(|t| t["item"].clone()).collect();
+    assert_eq!(items, [json!("cart")]);
+    assert_eq!(rejects(call(&mut s, "scene.track.remove", json!({ "item": "bird" }), "moving")), "no_track");
 }
 
 #[test]
@@ -160,7 +203,7 @@ fn r13_check_warns_about_each_off_grid_move_the_loop_back_included_without_faili
 }
 
 #[test]
-#[ignore = "needs U23"]
+#[ignore = "needs U25"]
 fn r13_check_warns_about_each_off_grid_move_the_loop_back_included_without_failing_through_check() {
     // check's ok, the all-scenes count of 2, the object's none, and the CLI's "2 warnings" and exit code 0.
 }
@@ -256,9 +299,47 @@ fn r14_end_spreads_the_path_between_two_times_too_long_a_path_or_a_bad_one_is_re
 }
 
 #[test]
-#[ignore = "needs U23"]
 fn r14_end_spreads_the_path_between_two_times_too_long_a_path_or_a_bad_one_is_refused_through_the_command() {
-    // Neither --speed nor --end (usage) and an item with no id (no_id).
+    let fx = Fx::new();
+    let mut s = fx.session();
+    call(&mut s, "scene.track.add", json!({ "item": "bird" }), "moving").unwrap();
+    let r =
+        call(&mut s, "scene.motion.path", json!({ "item": "bird", "points": [[0, 0], [8, 4], [8, 0]], "start": 0, "end": 1000 }), "moving")
+            .unwrap();
+    let times: Vec<Value> = r["keys"].as_array().unwrap().iter().map(|k| k["t"].clone()).collect();
+    assert_eq!(times, [json!(0), json!(691), json!(1000)]);
+    let bad = |s: &mut Session, p: Value| rejects(call(s, "scene.motion.path", p, "moving"));
+    assert_eq!(bad(&mut s, json!({ "item": "bird", "points": [[0, 0], [100, 0]], "speed": 10 })), "too_long");
+    assert_eq!(bad(&mut s, json!({ "item": "bird", "points": [[0, 0], [0, 0]], "speed": 10 })), "usage");
+    assert_eq!(bad(&mut s, json!({ "item": "bird", "points": [[0, 0], [4, 0]] })), "usage");
+    assert_eq!(bad(&mut s, json!({ "item": "3", "points": [[0, 0], [4, 0]], "speed": 10 })), "no_id");
+}
+
+#[test]
+fn r14_a_polyline_becomes_on_grid_keys_at_a_steady_speed_keeping_the_show_and_pose_keys_on_the_way_through_the_command() {
+    let fx = Fx::new();
+    let mut s = fx.session();
+    call(&mut s, "scene.key.set", json!({ "item": "cart", "time": 1000, "clear": ["move"], "pose": "block" }), "moving").unwrap();
+    let r = call(
+        &mut s,
+        "scene.motion.path",
+        json!({ "item": "cart", "points": [[0, 0], [16, -3], [16, 5]], "start": 100, "speed": 20 }),
+        "moving",
+    )
+    .unwrap();
+    assert_eq!(
+        r["keys"],
+        json!([{ "t": 100, "move": [0, 0] }, { "t": 435, "move": [6, -3] }, { "t": 935, "move": [16, -3] }, { "t": 1335, "move": [16, 5] }])
+    );
+    let keys = keys_of_scene(&mut s, "cart");
+    let times: Vec<Value> = keys.as_array().unwrap().iter().map(|k| k["t"].clone()).collect();
+    assert_eq!(times, [json!(0), json!(100), json!(435), json!(935), json!(1000), json!(1335)]);
+    assert_eq!(keys[4], json!({ "t": 1000, "move": [16, -2], "pose": "block" }));
+    assert_eq!(
+        r["warnings"],
+        json!(["scenes/moving.json: motion.tracks[0] (cart): 1335 → 2000 ms moves (-16, -5) in 1 step of (-16, -5); on the grid each step is 1 px straight, 1:1 or 2:1 (scene_motion_path makes such keys)"])
+    );
+    assert_eq!(problems(&mut s, "moving"), Vec::<String>::new());
 }
 
 #[test]
@@ -303,4 +384,70 @@ fn motion_ops_messages_and_codes_match_node() {
     assert_eq!(e.message, "a 900 ms loop would cut off keys: cart at 1000 ms, bird at 1200 ms; move or delete them first");
     let mut empty = json!({});
     assert_eq!(motion_ops::set_duration(&mut empty, 500.0).unwrap()["message"], "Made the scene's motion, 500 ms long");
+}
+
+// --- helpers for the command-level tests ---
+
+/// A temp copy of the sample document with the moving and still scenes added, and a state folder.
+struct Fx {
+    doc: common::TempDocument,
+    state: std::path::PathBuf,
+}
+
+impl Fx {
+    fn new() -> Fx {
+        let doc = common::make_document();
+        let state = common::temp_dir("pixellab-state-");
+        for (name, scene) in [("moving", moving()), ("still", still())] {
+            doc.write(&format!("scenes/{name}.json"), &engine::format::stringify_pretty(&scene));
+        }
+        Fx { doc, state }
+    }
+
+    fn session(&self) -> Session {
+        let mut env = self.doc.env();
+        env.insert("PIXELLAB_STATE".into(), self.state.to_string_lossy().into_owned());
+        let document = open_document(&OpenOptions {
+            doc: Some(self.doc.root.to_string_lossy().into_owned()),
+            site: None,
+            env: env.clone(),
+            cwd: self.doc.root.clone(),
+        })
+        .unwrap();
+        Session::new(document, Options { mode: Mode::Direct, env, agent: Some("test".into()), ..Options::default() })
+    }
+}
+
+fn call(s: &mut Session, name: &str, params: Value, scene: &str) -> Result<Value, Error> {
+    let mut p = json!({ "name": scene });
+    for (k, v) in params.as_object().unwrap() {
+        p[k] = v.clone();
+    }
+    let mut ctx = Ctx::new(s);
+    registry().call(&mut ctx, name, p, false)
+}
+
+fn rejects(r: Result<Value, Error>) -> String {
+    match r.expect_err("an error") {
+        Error::Command(c) => c.code,
+        Error::Internal(m) => m,
+    }
+}
+
+fn tracks(s: &mut Session) -> Value {
+    s.doc(DocKind::Scene, "moving").unwrap()["motion"]["tracks"].clone()
+}
+
+fn keys_of_scene(s: &mut Session, id: &str) -> Value {
+    tracks(s).as_array().unwrap().iter().find(|t| t["item"] == json!(id)).expect("a track")["keys"].clone()
+}
+
+/// The engine's problems for a scene of the session, next to the sample document's palette and objects.
+fn problems(s: &mut Session, name: &str) -> Vec<String> {
+    let docs = read_docs(&common::fixture());
+    let objects = BTreeMap::from_iter(docs.objects.clone());
+    let scenes = BTreeMap::from([(name.to_string(), s.doc(DocKind::Scene, name).unwrap())]);
+    let all = load_sources(docs.palette.clone().unwrap_or(Value::Null), objects, scenes);
+    let prefix = format!("scenes/{name}.json: ");
+    validate(&all).into_iter().filter_map(|p| p.strip_prefix(&prefix).map(str::to_string)).collect()
 }

@@ -2120,7 +2120,7 @@ pub fn scene_at(sources: &Sources, name: &str, time: f64) -> Result<Value> {
     let arranged = arrange(sources, &items_of(scene), at.origin, &tracks)?;
     let items = at.list(&arranged, &[])?;
     let mut still = scene.as_object().cloned().unwrap_or_default();
-    still.remove("motion");
+    still.shift_remove("motion");
     still.insert("items".into(), Value::Array(items));
     Ok(Value::Object(still))
 }
