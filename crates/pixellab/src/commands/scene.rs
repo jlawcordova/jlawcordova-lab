@@ -1,7 +1,6 @@
 //! scene.list, scene.show, scene.items and scene.render (ports cli/lib/commands/scene.mjs).
 
 use engine::engine::{js_len, js_space, js_string, truthy};
-use engine::omap::OSet;
 use engine::serialize::{entries, ordered};
 use serde_json::{json, Map, Value};
 
@@ -33,97 +32,8 @@ pub fn theme() -> Value {
     })
 }
 
-// ---- scene layers, as much of layer-ops.mjs as these commands read ----
-// (layer_ops.rs is U18's; these are the few functions scene.render and
-// scene.place need, and can move there.)
-
-/// The scene's layers (an empty list when it has none) (`layersOf`).
-fn layers_of(doc: &Value) -> Vec<&Value> {
-    doc.get("layers").and_then(Value::as_array).map(|l| l.iter().collect()).unwrap_or_default()
-}
-
-/// A layer by its id, or by its name when only one layer has it (`findLayer`).
-/// Returns a copy of the layer.
-pub fn find_layer(doc: &Value, reference: &str) -> Result<Value> {
-    let layers = layers_of(doc);
-    let is = |l: &&Value, key: &str| l.get(key).and_then(Value::as_str) == Some(reference);
-    if let Some(l) = layers.iter().find(|l| is(l, "id")) {
-        return Ok((*l).clone());
-    }
-    let named: Vec<&&Value> = layers.iter().filter(|l| is(l, "name")).collect();
-    let quoted = engine::format::stringify(&Value::String(reference.to_string()));
-    if named.len() == 1 {
-        return Ok((**named[0]).clone());
-    }
-    if named.len() > 1 {
-        let ids: Vec<String> = named.iter().map(|l| str_of(l.get("id"))).collect();
-        return Err(CommandError::new(
-            format!("{} layers are called {quoted}; give one's id ({})", named.len(), ids.join(", ")),
-            "ambiguous",
-        )
-        .into());
-    }
-    let known: Vec<String> = layers.iter().map(|l| str_of(l.get("id"))).collect();
-    let has = if known.is_empty() { "; it has no layers yet".to_string() } else { format!(" (it has {})", known.join(", ")) };
-    Err(CommandError::new(format!("no layer {quoted} in this scene{has}"), "not_found").into())
-}
-
-/// A layer's id and the ids of every layer inside it (`withInner`).
-fn with_inner(doc: &Value, id: &str) -> Vec<String> {
-    let mut out = vec![id.to_string()];
-    let mut grew = true;
-    while grew {
-        grew = false;
-        for l in layers_of(doc) {
-            let (Some(parent), Some(lid)) = (l.get("parent").and_then(Value::as_str), l.get("id").and_then(Value::as_str)) else {
-                continue;
-            };
-            if out.iter().any(|o| o == parent) && !out.iter().any(|o| o == lid) {
-                out.push(lid.to_string());
-                grew = true;
-            }
-        }
-    }
-    out
-}
-
-/// Every layer id in `ids` and inside them (`closure`).
-pub fn closure(doc: &Value, ids: &[String]) -> OSet<String> {
-    let mut out = OSet::new();
-    for id in ids {
-        for inner in with_inner(doc, id) {
-            out.add(inner);
-        }
-    }
-    out
-}
-
-/// Sets (or with None takes off) an item's layer, keeping the canonical key
-/// order object, id, class, layer, depth, at (`setItemLayer`).
-pub fn set_item_layer(item: &mut Value, layer: Option<&str>) {
-    let Some(map) = item.as_object_mut() else { return };
-    let old = std::mem::take(map);
-    let mut rebuilt = Map::new();
-    let layer_value = layer.map(|l| Value::String(l.to_string()));
-    for (key, value) in [
-        ("object", old.get("object").cloned()),
-        ("id", old.get("id").cloned()),
-        ("class", old.get("class").cloned()),
-        ("layer", layer_value),
-        ("depth", old.get("depth").cloned()),
-        ("at", old.get("at").cloned()),
-    ] {
-        if let Some(v) = value {
-            rebuilt.insert(key.into(), v);
-        }
-    }
-    for (key, value) in old {
-        if !["object", "id", "class", "layer", "depth", "at"].contains(&key.as_str()) {
-            rebuilt.insert(key, value);
-        }
-    }
-    *map = rebuilt;
-}
+// The layer helpers scene.render and scene.place use.
+pub use crate::layer_ops::{closure, find_layer, set_item_layer};
 
 // ---- the commands ----
 
