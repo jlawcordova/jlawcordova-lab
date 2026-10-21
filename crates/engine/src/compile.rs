@@ -452,16 +452,8 @@ fn hex_of(sources: &Sources) -> impl Fn(&str) -> String + '_ {
     |color: &str| sources.colors.get(color).map_or_else(|| "undefined".to_string(), |c| c.hex.clone())
 }
 
-/// `PIXELLAB_LEGACY_SVG=1` makes the compiler write the SVGs as the Node CLI
-/// did, unscoped and with no frame loops in them, so the parity check (spec
-/// R3) can still compare them until cutover. Test-only; read here alone.
-fn legacy_svg() -> bool {
-    std::env::var("PIXELLAB_LEGACY_SVG").is_ok_and(|v| v == "1")
-}
-
 fn rect_svg(sources: &Sources, name: &str, order: Order) -> Result<String> {
-    let scope = if legacy_svg() { None } else { Some(name) };
-    Ok(to_rect_svg(&render_scene_with(sources, name, order, scope)?, &hex_of(sources)))
+    Ok(to_rect_svg(&render_scene_with(sources, name, order, Some(name))?, &hex_of(sources)))
 }
 
 /// Renders a scene and runs it through the optimizer, lossless check and

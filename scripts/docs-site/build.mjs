@@ -32,7 +32,7 @@ export const PAGES = /** @type {Page[]} */ ([
   { section: 'Guides', file: 'docs/architecture.md', title: 'Architecture' },
   { section: 'Guides', file: 'docs/contributing.md', title: 'Contributing' },
   { section: 'Guides', file: 'docs/testing.md', title: 'Testing' },
-  { section: 'Code', file: 'cli/README.md', title: 'CLI and servers' },
+  { section: 'Code', file: 'crates/pixellab/README.md', title: 'The program (CLI and servers)' },
   { section: 'Code', file: 'app/README.md', title: 'Mac app' },
   { section: 'Code', file: 'scripts/README.md', title: 'Scripts' },
   { section: 'Code', file: 'examples/README.md', title: 'Example documents' },
@@ -63,7 +63,7 @@ export function findIntents(root = REPO_ROOT) {
 }
 const rank = (/** @type {string} */ f) => (STAGES.includes(f) ? STAGES.indexOf(f) : STAGES.length);
 
-/** Where a source file's page goes: docs/cli.md → docs/cli.html, cli/README.md → cli/index.html. */
+/** Where a source file's page goes: docs/cli.md → docs/cli.html, crates/pixellab/README.md → crates/pixellab/index.html. */
 export function outPath(/** @type {string} */ file) {
   return file.replace(/(^|\/)README\.md$/, '$1index.html').replace(/\.md$/, '.html');
 }

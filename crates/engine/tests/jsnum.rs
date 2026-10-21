@@ -1,5 +1,5 @@
 //! JavaScript's number rules (plan step 3), against the cases
-//! `node scripts/goldens.mjs --jsnum` collected from Node: Math.round,
+//! collected from Node before it was removed: Math.round,
 //! toFixed(0–4) and String(x) of every number the corpus's motion and sizes
 //! print, and the edge cases.
 

@@ -4,50 +4,64 @@ What proves a change works, from the fastest check to the slowest. Run the ones 
 
 | You changed | Run |
 | --- | --- |
-| anything in `cli/` | `npm test` (must show `# fail 0`) |
-| a command | `npm run docs:cli`, then `npm test`; `git status` shows only your edits |
+| anything in `crates/` | `cargo fmt --check`, `cargo test` (every test passes) |
+| anything in `crates/`, `scripts/` or `package.json` | `npm test` (must show `# fail 0`) |
+| a command | `npm run docs:cli`, then `cargo test`; `git status` shows only your edits |
 | anything in `app/` | `swift build --package-path app`, `scripts/test-app.sh` |
-| `app/`, `cli/` or `scripts/acceptance/` | `scripts/build-app.sh`, then `scripts/acceptance.sh` |
+| `app/`, `crates/` or `scripts/acceptance/` | `scripts/build-app.sh`, then `scripts/acceptance.sh` |
 | something you can see | a script-hook run with `expect` lines, and snapshots in dark and light that you look at |
 | the docs | `npm run docs:site` (fails on a broken link) |
 
-## The CLI suites
+Rust is installed with rustup, and `rust-toolchain.toml` pins the toolchain, so `cargo` picks it up on its own. If `cargo` isn't on your `PATH`, `export PATH="$HOME/.cargo/bin:$PATH"` first.
+
+## The Rust suites
 
 ```sh
-npm test                                        # node --test "cli/test/**/*.test.mjs"
-node --test cli/test/scene-ops.test.mjs         # one file
-node --test --test-name-pattern "R3" cli/test/  # by name
+cargo fmt --check                      # rustfmt.toml: 140 columns
+cargo test                             # every crate's tests/
+cargo test -p pixellab-engine          # the engine alone
+cargo test -p pixellab --test layers   # one file of the program's tests
+cargo test r3_                         # by name (test names start with the requirement, in lower case)
 ```
 
-The suites use `node:test` and `node:assert/strict`, nothing else. The core suites run on the **sample document** in `cli/test/fixtures/sample.pixellab/` (a palette, two objects, two scenes), copied into a temp folder by `makeDocument()` in `cli/test/helpers.mjs`, so they need no site checkout. The suites that pin the owner's art **never touch the real site checkout**: `makeSite()` copies its art (the `*.pixellab`, or the older `source/` folder, laid out as a legacy checkout), `variables.css` and `package.json` into a temp folder, with an empty `HOME` next to it so no real config file is read, and every such test points `--site` at the copy. The copy is made from `~/Projects/jlawcordova.github.io`, or from `PIXELLAB_TEST_SITE` (CI clones the site and sets it). Without a site to copy, those suites are skipped with a message, not failed: `PIXELLAB_TEST_SITE=/nonexistent npm test` shows what runs on the fixture alone.
-
-Other helpers: `runCli()` and `spawnCli()` run the real binary, `startServer()` starts `serve --stdio` or `--mcp` and speaks JSON-RPC to it, `decodePng()` reads a render's pixels, `readDoc()` imports a written source.
+The suites are integration tests in `crates/engine/tests/` and `crates/pixellab/tests/`, with the standard test harness and nothing else. They run on the **sample document** in `fixtures/sample.pixellab/` (format 2: a palette, two objects, two scenes), copied into a temp folder by `make_document()` in `crates/pixellab/tests/common/mod.rs`, so they need no site checkout. `make_site()` lays the same copy out as a site checkout (`src/assets/pixel-art/sample.pixellab`, with a `variables.css`), for the tests of `--site`. Both come with an empty `HOME` next to the copy, so no real config file is read. **Tests never touch the owner's site checkout or the documents in `examples/`:** they work on temp copies and point the program at them. `fixtures/format1/sample.pixellab/` is the same document in the old format, the input for the migrate tests. The program's tests run the real executable for the CLI and the two servers (`serve --stdio`, `serve --mcp`) and speak JSON-RPC to it.
 
 | Suite | Covers |
 | --- | --- |
-| `params.test.mjs` | `checkParams`, the command-line parser, registry definitions |
-| `help.test.mjs` | help text, exit codes, `docs/cli.md` being current |
-| `document.test.mjs` | finding the document (flags, env, config, a site checkout), the manifest, `document new` and `copy`, loading sources |
-| `engine.test.mjs` | the engine itself (ported from the site): parsing, validation messages, rendering, the serializer, edits, previews |
-| `compile.test.mjs` | the optimizer and lossless check (ported), `compileScene` and `compileAll`, the site's art compiling byte-identical |
-| `art-commands.test.mjs` | `art preview` and `art sizes` |
-| `package.test.mjs` | the package's exports, files and version |
-| `commands.test.mjs` | the read commands |
-| `render.test.mjs` | PNGs, item bounds, poses, the night theme |
-| `scene-ops.test.mjs` | the scene edits ported from the lab |
-| `edit-commands.test.mjs` | one-shot edits, dry runs, conflicts, sessions and undo, `art build` (publishing) |
-| `servers.test.mjs` | `serve --stdio`, `serve --mcp` (proposals, activity), `--direct`, `doc.stale`, `open/<pid>.json`, settling over MCP |
-| `sync.test.mjs` | settling proposals, `doc.reload`, edits since disk, the app's open docs, `doc.merge` and the merge in `proposal.apply` |
-| `merge.test.mjs` | the three-way line merge |
-| `groups.test.mjs` | group attributes following moves, `scene.group.set`, placing into groups |
-| `layers.test.mjs` | scene layers: the format and its checks, the layer commands, placing into a layer, renders that hide or focus, the art staying byte-identical, merging |
-| `examples.test.mjs` | the documents in `examples/`: they match `scripts/make-examples.mjs`, check clean, nest and move as described, and the harbor builds the same SVG with and without layers |
-| `motion-commands.test.mjs` | tracks and keys, `check`'s off-grid warnings, `scene.motion.path` |
-| `map-set.test.mjs` | `object.map.set` |
-| `activity-and-proposals.test.mjs` | activity summaries, proposal order |
-| `docs-site.test.mjs` | the docs site: Markdown rendering, anchors, links, the full build |
+| `engine/tests/engine.rs`, `iso.rs`, `svg_starter.rs`, `edit.rs` | the engine itself: parsing, validation messages, the grid and block faces, rendering, the rect SVG, the starters, the serializer, edits |
+| `engine/tests/format.rs`, `jsnum.rs`, `migrate.rs` | format 2's canonical text (every fixture file is its own serialization), JavaScript's number printing, the format-1 reader |
+| `engine/tests/compile.rs`, `output.rs`, `style.rs` | the optimizer and lossless check, compiling a scene or a document, the output being deterministic and self-contained, the SVG's own `<style>` |
+| `engine/tests/depth.rs`, `depth_motion.rs`, `motion_site.rs`, `ambient.rs` | the depth order, motion and the copies it draws, ambient loops and actions |
+| `engine/tests/preview.rs` | the PNG previews |
+| `pixellab/tests/params.rs`, `help.rs`, `jsonrpc.rs` | `check_params`, the command-line parser, help text and exit codes, the JSON-RPC framing |
+| `pixellab/tests/document.rs`, `migrate.rs`, `check_canonical.rs` | finding the document (flags, env, config, a site checkout), the manifest, `document new` and `copy`, `document migrate` and the old format's problem, `check`'s canonical-form warning |
+| `pixellab/tests/commands.rs`, `render.rs` | the read commands; PNGs, item bounds, poses, the night theme |
+| `pixellab/tests/art_commands.rs`, `art_budget.rs`, `art_images.rs` | `art preview`, `sizes` and `build`, budgets as warnings, a scene's image |
+| `pixellab/tests/scene_ops.rs`, `scene_commands.rs`, `object_commands.rs`, `groups.rs` | the scene edits ported from the lab, the scene and object commands, group attributes following moves |
+| `pixellab/tests/layers.rs`, `layer_motion_commands.rs`, `motion_ops.rs`, `ambient_commands.rs`, `depth_edit.rs`, `depth_motion.rs` | scene layers, tracks and keys, ambient loops and actions as commands, depth order after every edit, the preview at a time matching the SVG |
+| `pixellab/tests/session.rs`, `edit_commands.rs`, `sync.rs`, `merge.rs`, `watch.rs` | sessions, undo and redo, saves and conflicts, proposals, settling over MCP, `doc.reload`, `doc.merge`, the three-way line merge, watching by polling |
+| `pixellab/tests/servers.rs`, `chat.rs`, `state.rs`, `retire.rs` | `serve --stdio` and `serve --mcp` (proposals, activity, `--direct`, `doc.stale`), the Agent chat's CLI side, the state dir and activity summaries, old proposals moving to the new state |
 
-Name new tests after the requirement they prove, from the change's `spec.md`: `test('R3: …')`. Never skip or delete a failing test; fix the code.
+## The repo's Node tests
+
+```sh
+npm test       # cargo build --release, then node --test "scripts/test/**/*.test.mjs"
+```
+
+`npm test` builds the program first, then runs the suites for the repo's own tooling (they use `node:test` and `node:assert/strict`, nothing else):
+
+| Suite | Covers |
+| --- | --- |
+| `examples.test.mjs` | the documents in `examples/`: they match `scripts/make-examples.mjs`, are format 2, check clean and canonical, nest and move as described, and the harbor builds the same SVG with and without layers |
+| `docs-site.test.mjs` | the docs site: Markdown rendering, anchors, links, the full build |
+| `package.test.mjs` | `package.json`: the name and version, and that nothing exports an engine or reads the removed test-only switch |
+
+## Adding a test
+
+- **Name it after the requirement it proves,** from the change's `spec.md`: `fn r3_gzip_sizes_are_within_budget()` in Rust, or `test('R3: …')` in `scripts/test/`. The test output should read as a list of requirements. Never skip, `#[ignore]` or delete a failing test; fix the code.
+- **Put it in the crate it belongs to.** Something the engine does on data (validate, render, compile, order) is a test in `crates/engine/tests/`, using `tests/common.rs`. Something a command, a door or a session does is in `crates/pixellab/tests/`: `mod common;`, then `common::make_document()` or `make_site()`, and call the registry, the CLI or a server over the temp copy.
+- **Temp copies only.** A test that writes uses a copy it made; it never reads or writes `~/Projects/jlawcordova.github.io`, a document in `examples/`, or the real state dir (point `PIXELLAB_STATE` at a temp folder).
+- **Check bytes, not looks,** where output is meant to be stable: compare a rendered SVG or canonical text as a string. The tests of the program's output were checked against the old Node CLI when the engine moved to Rust (the parity and visual gates, recorded in PRs [#32](https://github.com/jlawcordova/jlawcordova-lab/pull/32) and [#34](https://github.com/jlawcordova/jlawcordova-lab/pull/34)); those scripts were removed at cutover.
 
 ## The app's unit tests
 
@@ -68,7 +82,7 @@ PIXELLAB_SCRIPT=script.txt PIXELLAB_DOC=/tmp/copy.pixellab PIXELLAB_STATE=/tmp/s
 
 It refuses to run without `PIXELLAB_DOC` (or `PIXELLAB_SITE`, a temp copy of the site), or against the real checkout or anything inside it (scripts save and publish), logs each step to stderr as `script: …`, and exits 0 only if every step and `expect` passed (1 if any failed, 2 if it couldn't start).
 
-**Make the temp copy.** A document is a folder, so copy it (`pixellab document copy --to /tmp/copy.pixellab` does it from the CLI, and gives a legacy `source/` folder a manifest). The acceptance pass copies the whole site instead, so `publish` lands where the site's SVGs are:
+**Make the temp copy.** A document is a folder, so copy it (`pixellab document copy --to /tmp/copy.pixellab` does it from the CLI). The acceptance pass copies the whole site instead, so `publish` lands where the site's SVGs are:
 
 ```sh
 site=$(mktemp -d)/site && mkdir -p "$site"
@@ -92,7 +106,7 @@ appearance light
 snapshot /tmp/shots/placed-light.png
 ```
 
-There are actions for scene mode (`select`, `click`, `hover`, `place`, `drag`, `key`, `move`, `nudge`, `set`, `undo`, `save`, `build`, `time`, …), object mode (`mode object`, `color`, `stroke`, `mousepath`, `erase`, `px`, `fill`, `pick`, `layer`, `frame`, `animate`, `onion`, `new object`, …), the Agent window (`agent open`, `proposal select`, `approve`, `reject`, `answer`, `ghost`, `agentkey`, …), scene layers (`select layer:<id>`, `click <x> <y> shift`, `dblclick`, `rightclick <x> <y>` and `rightclick row <target>` (a real right-click through the window), `menu group`, `group`, `ungroup`, `inside`, `hide`, `lock`, `rename`, `movedby`, `layernudge`, `placeinto`, `layerskey`, …), depth (`depth front|back|auto` sets the inspector's Depth control, `groupdepth <path>|selected front|back|auto` an SVG group's, `sort` presses the Checks panel's Sort button, `footprint <w>,<d>` sets the open sprite's footprint in the object inspector) the Agent chat (`righttab agent`, `setup install|signin|wait <state>`, `chat send <text>`, `chat wait`, `chat stop`, `chatkey tab|return|shift+return`, `choose <n>`, `link <text>`, `chip pin <target>`, `savenow`, `card approve|reject|ghost`, `altclick <x> <y>`, `selectuses`, `activity chats`, `askclaude`, …, run with the fake Claude Code below) and files changing on disk (`cli <args…>` runs the bundled CLI on the script's document, as an outside editor; `stale merge|reload|keep` presses the changed-on-disk bar's buttons), and `expect`s for each (`expect pixel 7,7 roof-1`, `expect scenepixel x,y #RRGGBB`, `expect proposals 2`, `expect stale true`, `expect depth front`, `expect order pine@0,1,0 walls` (entries in list order: a path, `#id`, `selected`, an object name or `name@col,row,level`), `expect level 4`, `expect footprint 2,2`, `expect warning out_of_order`, `expect nowarning out_of_order`, `expect groupdepth 3 back`, `expect cli moved`, `expect selection layer:group-1`, `expect inside group-2`, `expect menu Group,Ungroup`, `expect setup ready`, `expect steps 5`, `expect chips pine 83,pine 84`, `expect context item 51 object=rock`, `expect banner Previewing proposal #4 from the chat “…”`, …). The full list is the comment at the top of `app/Sources/PixelLab/Support/ScriptRunner.swift`; add to it when a feature needs a new action.
+There are actions for scene mode (`select`, `click`, `hover`, `place`, `drag`, `key`, `move`, `nudge`, `set`, `undo`, `save`, `build`, `time`, …), object mode (`mode object`, `color`, `stroke`, `mousepath`, `erase`, `px`, `fill`, `pick`, `layer`, `frame`, `animate`, `onion`, `new object`, …), the Agent window (`agent open`, `proposal select`, `approve`, `reject`, `answer`, `ghost`, `agentkey`, …), scene layers (`select layer:<id>`, `click <x> <y> shift`, `dblclick`, `rightclick <x> <y>` and `rightclick row <target>` (a real right-click through the window), `menu group`, `group`, `ungroup`, `inside`, `hide`, `lock`, `rename`, `movedby`, `layernudge`, `placeinto`, `layerskey`, …), depth (`depth front|back|auto` sets the inspector's Depth control, `groupdepth <path>|selected front|back|auto` an SVG group's, `sort` presses the Checks panel's Sort button, `footprint <w>,<d>` sets the open sprite's footprint in the object inspector) the Agent chat (`righttab agent`, `setup install|signin|wait <state>`, `chat send <text>`, `chat wait`, `chat stop`, `chatkey tab|return|shift+return`, `choose <n>`, `link <text>`, `chip pin <target>`, `savenow`, `card approve|reject|ghost`, `altclick <x> <y>`, `selectuses`, `activity chats`, `askclaude`, …, run with the fake Claude Code below) and files changing on disk (`cli <args…>` runs the bundled program on the script's document, as an outside editor; `stale merge|reload|keep` presses the changed-on-disk bar's buttons), and `expect`s for each (`expect pixel 7,7 roof-1`, `expect scenepixel x,y #RRGGBB`, `expect proposals 2`, `expect stale true`, `expect depth front`, `expect order pine@0,1,0 walls` (entries in list order: a path, `#id`, `selected`, an object name or `name@col,row,level`), `expect level 4`, `expect footprint 2,2`, `expect warning out_of_order`, `expect nowarning out_of_order`, `expect groupdepth 3 back`, `expect cli moved`, `expect selection layer:group-1`, `expect inside group-2`, `expect menu Group,Ungroup`, `expect setup ready`, `expect steps 5`, `expect chips pine 83,pine 84`, `expect context item 51 object=rock`, `expect banner Previewing proposal #4 from the chat “…”`, …). The full list is the comment at the top of `app/Sources/PixelLab/Support/ScriptRunner.swift`; add to it when a feature needs a new action.
 
 **The Agent chat's fake Claude Code.** Scripts never run the owner's `claude`: under the hook `PIXELLAB_CLAUDE_HOME` replaces `~` in the search (and skips Homebrew and the login shell), and `PIXELLAB_CLAUDE_INSTALLER` replaces Anthropic's installer. Point them at `scripts/fake-claude/` ([its README](../scripts/fake-claude/README.md)): `HOME=<temp home> scripts/fake-claude/install.sh` installs the fake there, `FAKE_CLAUDE_SIGNED_IN=1` starts it signed in, and its turns (`turns.json`) do their tool calls through the real MCP server, so proposals, activity and cards are real. It refuses a turn without the flags that keep the chat to Pixel Lab's tools.
 
@@ -111,11 +125,12 @@ Snapshots draw the window with `cacheDisplay`, so pixel art stays nearest-neighb
 scripts/build-app.sh && scripts/acceptance.sh
 ```
 
-End to end on a temp copy of the site: scene edits, save and publish (six SVGs into the temp site); object painting and save; an agent saving two proposals over MCP through the bundled CLI; the Agent window ghosting, approving and rejecting them; a doc with unsaved edits changed on disk and merged, reloaded and kept, and another proposal approved into an unsaved copy (`stale.txt`); Save As to a copy, reopening it and publishing from it into a folder; and scene layers (`layers.txt`): grouping, renaming, picking, going inside, the layer menu on the stage and on a row, hiding, locking, dragging and nudging, placing into a layer and ungrouping, with the runner checking that the hero island's SVG is byte-identical before and after its layers were saved and that the saved scene holds no hidden or locked state; then the example documents (`examples-harbor.txt`, `examples-town.txt`, each on a temp copy of an `examples/` document), with layers read from a file three and four levels deep; and the Agent chat against the fake Claude Code: its setup from no `claude` to signed in and chats on a harbor copy (`chat-setup.txt`), a chat's proposals on the site approved and rejected from their cards, with the Agent window's sources and Chats filter (`chat.txt`), the selection as context on a harbor copy: layer chips, ⌥-click, pins, unsaved items, a question and ghosts per chat (`chat-harbor.txt`); and a chat across three launches: its Claude session resumed, a proposal rejected with the CLI while the app is closed reading Settled elsewhere, and a lost session started again (`chat-relaunch-1/2/3.txt`). Run it whenever `app/`, `cli/` or `scripts/acceptance/` changed. Its `expect` lines pin the art as it was on 2026-10-21: after the site's art changes, update the scripts in `scripts/acceptance/`.
+End to end on a temp copy of the site, which is migrated to format 2 with the bundled program first (the real checkout is only read): scene edits, save and publish (six SVGs into the temp site); object painting and save; an agent saving two proposals over MCP through the bundled program; the Agent window ghosting, approving and rejecting them; a doc with unsaved edits changed on disk and merged, reloaded and kept, and another proposal approved into an unsaved copy (`stale.txt`); Save As to a copy, reopening it and publishing from it into a folder (`document.txt`); a document left in format 1, which the app meets with the old-format problem and **Migrate…** (`migrate.txt`); ambient loops and actions played on the stage, on a harbor copy (`actions.txt`); and scene layers (`layers.txt`): grouping, renaming, picking, going inside, the layer menu on the stage and on a row, hiding, locking, dragging and nudging, placing into a layer and ungrouping, with the runner checking that the hero island's SVG is byte-identical before and after its layers were saved and that the saved scene holds no hidden or locked state; then the example documents (`examples-harbor.txt`, `examples-town.txt`, each on a temp copy of an `examples/` document), with layers read from a file three and four levels deep; and the Agent chat against the fake Claude Code: its setup from no `claude` to signed in and chats on a harbor copy (`chat-setup.txt`), a chat's proposals on the site approved and rejected from their cards, with the Agent window's sources and Chats filter (`chat.txt`), the selection as context on a harbor copy: layer chips, ⌥-click, pins, unsaved items, a question and ghosts per chat (`chat-harbor.txt`); and a chat across three launches: its Claude session resumed, a proposal rejected with the CLI while the app is closed reading Settled elsewhere, and a lost session started again (`chat-relaunch-1/2/3.txt`). Run it whenever `app/`, `crates/` or `scripts/acceptance/` changed. The scripts run the program from the app bundle (`Contents/Helpers/pixellab`), so what they check is the program the app ships; the agent and stale scripts (`mcp-agent.mjs`, `stale-agent.mjs`) and the fake Claude Code are Node, as repo tooling. Its `expect` lines pin the art as it was on 2026-10-21: after the site's art changes, update the scripts in `scripts/acceptance/`.
 
 ## CI
 
-- **Docs site** (`.github/workflows/docs.yml`) runs on every pull request and push to `main`: it checks `docs/cli.md` is current, runs the docs-site tests and builds the site, then deploys `main` to GitHub Pages.
-- **Release Pixel Lab** (`.github/workflows/release.yml`) runs on a `v<version>` tag: the CLI tests against a fresh clone of the site, the app's unit tests, the app build, packaging and a smoke test of the installed app. It doesn't run the acceptance pass (that pins the art), so run that before tagging.
+- **Tests** (`.github/workflows/test.yml`) runs on every pull request and push to `main`, on Linux with no site checkout: `cargo fmt --check`, `cargo test` and `npm test`, on the toolchain `rust-toolchain.toml` pins.
+- **Docs site** (`.github/workflows/docs.yml`) runs on every pull request and push to `main`: it builds the program, checks `docs/cli.md` is current, runs the docs-site tests and builds the site, then deploys `main` to GitHub Pages.
+- **Release Pixel Lab** (`.github/workflows/release.yml`) runs on a `v<version>` tag: `cargo test --locked`, the repo's Node tests, the app's unit tests, the app build, packaging of the app and of the program for macOS and Linux, and a smoke test of the installed app. It doesn't run the acceptance pass (that pins the art and needs a Mac with the owner's site), so run that before tagging.
 
-There is no CI run of the full test suite on pull requests yet: the PR's pasted output is the evidence.
+The app's build, its unit tests and the acceptance pass don't run on pull requests: the PR's pasted output is the evidence for those.
