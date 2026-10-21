@@ -797,7 +797,7 @@ fn extends_chain(sources: &Sources, name: &str) -> (Vec<String>, bool) {
 }
 
 const DEPTHS: [&str; 2] = ["front", "back"];
-const SCENE_PROPS: [&str; 8] = ["notes", "output", "image", "viewBox", "origin", "layers", "items", "motion"];
+const SCENE_PROPS: [&str; 9] = ["notes", "output", "image", "viewBox", "margin", "origin", "layers", "items", "motion"];
 const IMAGE_PROPS: [&str; 2] = ["file", "scale"];
 
 /// `image: { file: "name.png", scale: 1..16 }` (R18, D5).
@@ -911,9 +911,15 @@ fn validate_scene(sources: &Sources, name: &str, outputs: &mut HashMap<String, S
     if has(s, "image") {
         validate_image(s.get("image"), &mut add);
     }
-    let vb = s.get("viewBox");
-    if !is_whole(vb, 4) || num_at(vb.unwrap(), 2) <= 0.0 || num_at(vb.unwrap(), 3) <= 0.0 {
-        add("viewBox must be four whole numbers: x, y, width, height (width and height above 0)".into());
+    // A scene without a viewBox fits what it paints when it is published (scene-canvas spec R2, R12).
+    if has(s, "viewBox") {
+        let vb = s.get("viewBox");
+        if !is_whole(vb, 4) || num_at(vb.unwrap(), 2) <= 0.0 || num_at(vb.unwrap(), 3) <= 0.0 {
+            add("viewBox must be four whole numbers: x, y, width, height (width and height above 0)".into());
+        }
+    }
+    if has(s, "margin") && !s.get("margin").is_some_and(|m| is_int(m) && m.as_f64().unwrap_or(-1.0) >= 0.0) {
+        add("margin must be a whole number of pixels, 0 or more".into());
     }
     if has(s, "origin") && !is_whole(s.get("origin"), 2) {
         add("origin must be two whole numbers".into());

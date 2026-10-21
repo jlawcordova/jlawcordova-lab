@@ -16,9 +16,10 @@ pub fn starter_palette() -> Value {
     crate::format::parse(STARTER_PALETTE).expect("starter-palette.json is valid")
 }
 
-/// An empty scene: a 128×128 view around tile [0, 0, 0] (`starterScene`).
+/// An empty scene around tile [0, 0, 0] (`starterScene`). It has no
+/// `viewBox`: it publishes at the box that fits what is in it.
 pub fn starter_scene() -> Value {
-    json!({ "viewBox": [-64, -64, 128, 128], "origin": [0, 0], "items": [] })
+    json!({ "origin": [0, 0], "items": [] })
 }
 
 /// An empty sprite, anchored at its bottom center (`starterSprite`).

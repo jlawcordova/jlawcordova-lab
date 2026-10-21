@@ -67,7 +67,7 @@ pub const LAYER: &[&str] = &["keys", "class", "loop", "prefix", "frames", "map",
 /// A block's sides.
 pub const SIDES: &[&str] = &["keys", "left", "right"];
 /// A scene.
-pub const SCENE: &[&str] = &["notes", "output", "image", "viewBox", "origin", "layers", "items", "motion"];
+pub const SCENE: &[&str] = &["notes", "output", "image", "viewBox", "margin", "origin", "layers", "items", "motion"];
 /// A scene's layer entry.
 pub const SCENE_LAYER: &[&str] = &["id", "name", "parent"];
 /// A placed item.
