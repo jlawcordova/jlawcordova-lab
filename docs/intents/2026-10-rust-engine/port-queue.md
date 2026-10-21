@@ -17,10 +17,10 @@ A unit's checks: `cargo fmt --check`, `cargo test` for its crate, its ported sui
 | U7 | `compile.mjs` → `compile.rs` (budgets, lossless, `git` subprocess) | `compile.test.mjs`, corpus SVGs | U2–U5 | O | waiting |
 | U8 | `preview.mjs` → `preview.rs` | preview cases of `render.test.mjs`, corpus PNGs | U1, U3 | S | waiting |
 | U9 | the rest of `engine.test.mjs` | → `tests/engine.rs`, in two units by `describe` block | U3–U6 | S | waiting |
-| U10 | `errors.mjs`, `argv.mjs`, `params.mjs` | `params.test.mjs` | PR 1 | S | ready |
+| U10 | `errors.mjs`, `argv.mjs`, `params.mjs` | `params.test.mjs` | PR 1 | S | merged |
 | U11 | `jsonrpc.mjs` | its cases in `servers.test.mjs` | PR 1 | S | merged |
-| U12 | `state.mjs`, `activity-summary.mjs` | `activity-and-proposals.test.mjs` | U10 | S | waiting |
-| U13 | `document.mjs` → `document.rs` (resolution, manifest, R9's problem) | `document.test.mjs` | U10 | S | waiting |
+| U12 | `state.mjs`, `activity-summary.mjs` | `activity-and-proposals.test.mjs` | U10 | S | merged |
+| U13 | `document.mjs` → `document.rs` (resolution, manifest, R9's problem) | `document.test.mjs` | U10 | S | merged |
 | U14 | `session.mjs`, `open-docs.mjs`, `context.mjs` | `sync.test.mjs` | U3, U6, U12, U13 | O | waiting |
 | U15 | `merge.mjs`, `diff.mjs` | `merge.test.mjs` | U3 | O | waiting |
 | U16 | `watch.mjs` → `watch.rs` (polling, D2) | its cases in `sync.test.mjs` | U13 | S | waiting |
@@ -28,7 +28,7 @@ A unit's checks: `cargo fmt --check`, `cargo test` for its crate, its ported sui
 | U18 | `layer-ops.mjs` | `layers.test.mjs` | U17 | S | waiting |
 | U19 | `motion-ops.mjs` | `motion-commands.test.mjs` | U5 | S | waiting |
 | U20 | `render.mjs` | `render.test.mjs` | U7, U8 | S | waiting |
-| U21 | `registry.mjs`, `cli.mjs`, `help.mjs`, `bin/pixellab.mjs` → `registry.rs`, `cli.rs`, `help.rs`, `main.rs` | `help.test.mjs`, `commands.test.mjs` | U10 | S | waiting |
+| U21 | `registry.mjs`, `cli.mjs`, `help.mjs`, `bin/pixellab.mjs` → `registry.rs`, `cli.rs`, `help.rs`, `main.rs` | `help.test.mjs`, `commands.test.mjs` | U10 | S | merged |
 | U22 | `commands/scene.mjs`, `scene-edit.mjs` | scene parts of `edit-commands.test.mjs` | U14, U17, U21 | S | waiting |
 | U23 | `commands/scene-layers.mjs`, `scene-motion.mjs` |  | U18, U19, U21 | S | waiting |
 | U24 | `commands/object.mjs`, `object-edit.mjs` | `map-set.test.mjs`, object parts of `edit-commands.test.mjs` | U14, U21 | S | waiting |
