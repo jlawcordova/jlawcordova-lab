@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use engine::engine as eng;
-use engine::engine::{Child, ColorName, Group, Layer, Order, Rendered};
+use engine::engine::{composite, Child, ColorName, CompositeOptions, Group, Layer, Order, Rendered};
 use engine::format::{parse, serialize_palette};
 use engine::starter::{starter_block, starter_extends, starter_palette, starter_scene, starter_sprite, STARTER_PALETTE};
 use engine::svg::to_rect_svg;
@@ -91,7 +91,7 @@ fn an_empty_style_writes_nothing() {
     );
 }
 
-// ------------------------------------------- ports needing the renderer (U3)
+// ------------------------------------------------ ports needing the renderer
 
 const PALETTE: &str = r##"{ "world": { "ink": "#2E2418", "cream": "#F4EDE0", "grass-2": "#8FA56E", "grass-4": "#4E6B3A", "wood-3": "#7A4E2D" }, "outfit": { "teal-1": "#7FA89B" } }"##;
 
@@ -112,6 +112,14 @@ fn scene(items: Value, extra: Value) -> Value {
     s
 }
 
+/// The flattened pixels of a scene, sorted: `[...composite(root)].sort()`.
+fn flat_of(sources: &eng::Sources, name: &str) -> Vec<(i32, i32, String)> {
+    let root = eng::render_scene(sources, name, Order::Depth).unwrap().root;
+    let mut out: Vec<_> = composite(&root, CompositeOptions::default()).iter().map(|(p, c)| (p.0, p.1, c.to_string())).collect();
+    out.sort();
+    out
+}
+
 fn svg_of(sources: &eng::Sources, name: &str) -> String {
     let rendered = eng::render_scene(sources, name, Order::Depth).unwrap();
     to_rect_svg(&rendered, &|n| sources.colors.get(n).unwrap().hex.clone())
@@ -124,7 +132,6 @@ fn inner(svg: &str) -> String {
 }
 
 #[test]
-#[ignore = "needs U3"]
 fn r5_layers_paint_bottom_to_top_and_a_class_layer_gets_its_own_group() {
     let coat = json!({ "kind": "sprite", "keys": { "g": "grass-2", "i": "ink" }, "layers": [{ "map": ["gg"] }, { "class": "cbob", "map": [".i"] }] });
     let sources = src(vec![("coat", coat)], vec![("s", scene(json!([{ "object": "coat", "at": { "px": [0, 0] } }]), json!({})))]);
@@ -132,10 +139,10 @@ fn r5_layers_paint_bottom_to_top_and_a_class_layer_gets_its_own_group() {
         svg_of(&sources, "s"),
         "<svg xmlns=\"http://www.w3.org/2000/svg\" aria-hidden=\"true\" viewBox=\"0 0 8 8\" shape-rendering=\"crispEdges\"><g fill=\"#8FA56E\"><rect x=\"0\" y=\"0\" width=\"2\" height=\"1\"/></g><g class=\"cbob\"><g fill=\"#2E2418\"><rect x=\"1\" y=\"0\" width=\"1\" height=\"1\"/></g></g></svg>"
     );
+    assert_eq!(flat_of(&sources, "s"), vec![(0, 0, "grass-2".to_string()), (1, 0, "ink".to_string())]);
 }
 
 #[test]
-#[ignore = "needs U3"]
 fn r5_a_frame_loop_compiles_to_loop_prefix_n_groups_and_frame_0_is_the_static_frame() {
     let fall = json!({ "kind": "sprite", "keys": { "w": "cream" }, "layers": [{ "loop": "wf", "prefix": "w", "frames": [["w."], [".w"], [".."]] }] });
     let sources = src(vec![("fall", fall)], vec![("s", scene(json!([{ "object": "fall", "at": { "px": [0, 0] } }]), json!({})))]);
@@ -143,10 +150,10 @@ fn r5_a_frame_loop_compiles_to_loop_prefix_n_groups_and_frame_0_is_the_static_fr
         inner(&svg_of(&sources, "s")),
         "<g class=\"wf w0\"><g fill=\"#F4EDE0\"><rect x=\"0\" y=\"0\" width=\"1\" height=\"1\"/></g></g><g class=\"wf w1\"><g fill=\"#F4EDE0\"><rect x=\"1\" y=\"0\" width=\"1\" height=\"1\"/></g></g><g class=\"wf w2\"></g>"
     );
+    assert_eq!(flat_of(&sources, "s"), vec![(0, 0, "cream".to_string())]);
 }
 
 #[test]
-#[ignore = "needs U3"]
 fn r5_colors_are_first_painted_in_key_order_and_runs_are_sorted_by_y_then_x() {
     let tree = sprite(&["gi", "ig", "gg"], json!({ "i": "ink", "g": "grass-2" }));
     let sources = src(vec![("tree", tree)], vec![("s", scene(json!([{ "object": "tree", "at": { "px": [0, 0] } }]), json!({})))]);
@@ -157,7 +164,6 @@ fn r5_colors_are_first_painted_in_key_order_and_runs_are_sorted_by_y_then_x() {
 }
 
 #[test]
-#[ignore = "needs U3"]
 fn r3_items_paint_in_source_order_and_later_paint_wins_in_a_layer() {
     let dot = sprite(&["g"], json!({ "g": "grass-2" }));
     let ink = sprite(&["i"], json!({ "i": "ink" }));
@@ -169,7 +175,6 @@ fn r3_items_paint_in_source_order_and_later_paint_wins_in_a_layer() {
 }
 
 #[test]
-#[ignore = "needs U3"]
 fn r3_groups_carry_their_attributes_in_source_order_and_placement_classes_wrap_the_object() {
     let dot = sprite(&["g"], json!({ "g": "grass-2" }));
     let ink = sprite(&["i"], json!({ "i": "ink" }));
@@ -185,7 +190,6 @@ fn r3_groups_carry_their_attributes_in_source_order_and_placement_classes_wrap_t
 }
 
 #[test]
-#[ignore = "needs U3"]
 fn r3_the_root_carries_the_scene_viewbox_in_todays_attribute_order() {
     let sources = src(vec![], vec![("s", scene(json!([]), json!({ "viewBox": [-51, -9, 103, 72] })))]);
     assert_eq!(
