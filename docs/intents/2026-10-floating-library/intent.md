@@ -45,6 +45,7 @@ In it:
 - The Library opens from the floating bar as icons only. The tiles are small, with no names, no close button and no instructions. A large library scrolls inside it with a thin scroll bar that doesn't shift the layout.
 - Publish sits beside Save in the right panel.
 - The proposals badge that was on the Agent button moves to the Agent tab.
+- In Layers, an item's row has the same hide and lock buttons as a group's row, in place of its position label. The owner asked for this on 2026-10-22, in a comment on the prototype, and asked for it in this change.
 
 The prototype fakes the app; the app matches its look and behavior, not its code.
 
@@ -62,7 +63,8 @@ The prototype fakes the app; the app matches its look and behavior, not its code
 - No new dependencies without asking.
 - Out of scope:
   - Autosave (`../2026-10-autosave/intent.md`).
-  - Any change to the document, the engine, the CLI or MCP.
+  - Any change to the document or the engine.
+  - Any change to the CLI or MCP, apart from what hiding a single item needs.
 
 ## Open questions
 - Should pinch zoom stop at the zoom levels there are today, or reach further?
