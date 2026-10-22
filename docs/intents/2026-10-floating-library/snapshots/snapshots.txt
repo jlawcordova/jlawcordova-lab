@@ -1,0 +1,42 @@
+# The step 11 snapshots, from a temp copy of the harbor example:
+#   cp -R examples/harbor.pixellab "$tmp/" && mkdir "$tmp/state" && \
+#   sed "s#@OUT@#docs/intents/2026-10-floating-library/snapshots#g" this-file > "$tmp/s.txt" && \
+#   PIXELLAB_SCRIPT="$tmp/s.txt" PIXELLAB_DOC="$tmp/harbor.pixellab" PIXELLAB_STATE="$tmp/state" "build/Pixel Lab.app/Contents/MacOS/PixelLab"
+# Item 51 is the rock at 0,7,0 (in no layer); 14.0 a pine in Trees.
+size 1440x900
+appearance dark
+open scene:harbor
+select none
+snapshot @OUT@/scene-dark.png
+library open
+library pine
+hover 2 1 0
+snapshot @OUT@/library-dark.png
+select none
+focus
+key esc
+key esc
+hide 51
+select 14.0
+snapshot @OUT@/layers-hidden-dark.png
+show 51
+select none
+editobject walls
+snapshot @OUT@/object-dark.png
+back
+appearance light
+snapshot @OUT@/scene-light.png
+library open
+library pine
+hover 2 1 0
+snapshot @OUT@/library-light.png
+library close
+tool select
+select none
+hide 51
+select 14.0
+snapshot @OUT@/layers-hidden-light.png
+show 51
+editobject walls
+snapshot @OUT@/object-light.png
+back

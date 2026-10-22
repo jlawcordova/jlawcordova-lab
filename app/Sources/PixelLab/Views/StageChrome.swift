@@ -63,7 +63,7 @@ struct BackPill: View {
             Button { Task { await model.backToScene() } } label: {
                 HStack(spacing: 3) {
                     Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
-                    Text("Back").font(Theme.nameFont(12, weight: .medium))
+                    Text("Back").font(Theme.nameFont(12, weight: .medium)).lineLimit(1).fixedSize()
                 }
                 .foregroundStyle(Theme.ink)
                 .padding(.horizontal, 6)
@@ -99,6 +99,7 @@ struct BackPill: View {
         }
         .padding(.horizontal, 3)
         .frame(height: 30)
+        .fixedSize(horizontal: true, vertical: false)
         .background(Theme.halo, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
         .accessibilityElement(children: .contain)
