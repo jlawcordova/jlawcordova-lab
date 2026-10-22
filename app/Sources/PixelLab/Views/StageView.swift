@@ -40,9 +40,6 @@ struct StageView: View {
                 PlacePill().padding(12)
             }
         }
-        .overlay(alignment: .bottomTrailing) {
-            ZoomReadout().padding(12)
-        }
         .overlay(alignment: .bottom) {
             if model.document != nil, !(model.agent.previewing && model.agent.ghostShown) {
                 VStack(spacing: 8) {

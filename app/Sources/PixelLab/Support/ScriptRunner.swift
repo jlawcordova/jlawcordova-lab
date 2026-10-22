@@ -29,7 +29,7 @@ import Foundation
 ///     librarydrop <name> <col> <row> <level>   (a drop from the Library onto a tile)   expect floatingbar <ids>   expect toolbar none
 ///     expect inspector shown   (the right column is on screen)
 ///     editobject [<name>]   back   expect returnscene <name|none>   (Edit Object on the selected item or a named object; Back)
-///     expect readout <2×|none>   expect anchor kept   (the last pinch left its scene point where it was)
+///     expect anchor kept   (the last pinch left its scene point where it was)
 ///     search <text>   wait <ms>   snapshot <file.png>   log <text>
 ///     settings open|close   snapshot settings <file.png>   (the Settings window)
 ///     cli <args…>  (the bundled program on the script's document: an outside edit to the files)
@@ -557,7 +557,8 @@ final class ScriptRunner {
             // A pinch by a factor (a magnify event's effect), anchored at a scene pixel or the middle: pinchby 1.1 [<x> <y>].
             guard let view = editor.stageView as? StageInputView, let geometry = view.geometry, let factor = Double(try arg(words, 1)) else { throw Failure("pinchby <factor> [<x> <y>]") }
             let at: CGPoint? = words.count >= 4 ? geometry.viewPoint(fromScene: CGPoint(x: try int(words, 2), y: try int(words, 3))) : nil
-            model.scaleZoom(by: CGFloat(factor), anchor: at)
+            // The scroll view's own magnification and the end of the gesture, as a pinch makes them.
+            view.simulatePinch(factor: CGFloat(factor), atView: at)
             return "zoom \(model.zoomText)"
         case "zoomkey":
             // ⌘= / ⌘−, centered on the stage.
@@ -1486,7 +1487,6 @@ final class ScriptRunner {
         case "inspector" where want == "shown":
             // The right column is on screen at its least width or more (R13).
             got = model.rightColumnWidth >= 260 ? "shown" : "hidden (\(Int(model.rightColumnWidth)) pt)"
-        case "readout": got = model.zoomReadout?.text ?? "none"
         case "anchor":
             // The last anchored zoom left its scene point where it was on screen (within a point).
             guard let drift = (model.editor.stageView as? StageInputView)?.anchorDrift else { throw Failure("no anchored zoom yet") }

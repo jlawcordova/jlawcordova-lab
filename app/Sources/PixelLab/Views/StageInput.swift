@@ -33,6 +33,7 @@ struct StageInput: NSViewRepresentable {
             v.window?.invalidateCursorRects(for: v)
         }
         if editor.stageView !== v { editor.stageView = v }
+        v.refreshMagnification()
         if v.tool != tool || v.placing != placing || v.handHeld != objects.handHeld {
             v.handHeld = objects.handHeld
             v.tool = tool
@@ -132,6 +133,12 @@ final class StageInputView: NSView {
         scrollToVisible(g.viewRect(fromScene: r).insetBy(dx: -48, dy: -48))
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // The hosting scroll view is in place a moment after this view.
+        DispatchQueue.main.async { [weak self] in self?.setUpMagnification() }
+    }
+
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -199,25 +206,92 @@ final class StageInputView: NSView {
 
     // MARK: Zoom
 
-    /// A pinch zooms as the fingers do: each event scales the zoom by its magnification, so the art grows
-    /// smoothly between the levels, within the kind's first and last. The zoom is announced once, at the end.
-    override func magnify(with event: NSEvent) {
-        editor?.app?.scaleZoom(by: 1 + event.magnification, anchor: point(event))
-        if event.phase == .ended || event.phase == .cancelled { editor?.app?.announceZoom() }
+    /// The zoom or the kind changed: the pinch's limits follow it.
+    func refreshMagnification() {
+        guard let scroll = enclosingScrollView, scroll.allowsMagnification, abs(scroll.magnification - 1) < 0.0005 else { return }
+        setUpMagnification()
     }
 
-    /// ⌘-scroll zooms too: a trackpad smoothly, a notch of a mouse wheel by a quarter. Plain scrolling goes
-    /// to the scroll view.
+    /// A pinch is the scroll view's own (`allowsMagnification`): the stage follows the fingers on the GPU, with the
+    /// pixel under them kept by AppKit, and when they lift the magnification becomes the zoom (`commitMagnification`).
+    /// This view leaves `magnify(with:)` to the responder chain for that.
+    private var magnifyObservers: [NSObjectProtocol] = []
+    private var wheelCommit: DispatchWorkItem?
+
+    /// Gives the scroll view its pinch, within the kind's first and last zoom, and watches it end.
+    private func setUpMagnification() {
+        guard let scroll = enclosingScrollView else { return }
+        scroll.allowsMagnification = true
+        let zoom = Double(editor?.app?.zoomScale ?? 1)
+        let range = editor?.app?.zoomRange ?? 1...4
+        // The magnification is relative to the zoom the stage is laid out at.
+        scroll.minMagnification = max(range.lowerBound / zoom, 0.05)
+        scroll.maxMagnification = max(range.upperBound / zoom, 1)
+        guard magnifyObservers.isEmpty else { return }
+        let center = NotificationCenter.default
+        magnifyObservers = [
+            center.addObserver(forName: NSScrollView.willStartLiveMagnifyNotification, object: scroll, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.setUpMagnification(); self?.pixelsStayCrisp() }
+            },
+            center.addObserver(forName: NSScrollView.didEndLiveMagnifyNotification, object: scroll, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.commitMagnification() }
+            },
+        ]
+    }
+
+    /// While the stage is scaled by the pinch, draw its layers without smoothing, so pixels stay square.
+    private func pixelsStayCrisp() {
+        func walk(_ layer: CALayer) {
+            layer.magnificationFilter = .nearest
+            layer.minificationFilter = .nearest
+            layer.sublayers?.forEach(walk)
+        }
+        if let layer = enclosingScrollView?.documentView?.layer { walk(layer) }
+    }
+
+    /// The fingers lifted: the magnification becomes the stage's zoom, laid out crisply, and the view stays
+    /// where it was (the top-left of what was visible keeps its scene point).
+    func commitMagnification() {
+        guard let scroll = enclosingScrollView, let g = geometry, let app = editor?.app else { return }
+        let m = scroll.magnification
+        guard abs(m - 1) > 0.0005 else { return }
+        let origin = scroll.contentView.bounds.origin
+        zoomAnchor = (g.scenePoint(fromView: origin), .zero)
+        let target = Double(g.zoom) * Double(m)
+        scroll.magnification = 1
+        app.setZoomScale(target)
+        app.announceZoom()
+    }
+
+    /// The script hook's pinch: the scroll view's own magnification by `factor` about a view point (the middle of
+    /// the stage without one), then the end of the gesture.
+    func simulatePinch(factor: CGFloat, atView p: CGPoint?) {
+        guard let scroll = enclosingScrollView else { return }
+        setUpMagnification()
+        let b = scroll.contentView.bounds
+        let at = p ?? CGPoint(x: b.midX, y: b.midY)
+        scroll.setMagnification(min(max(scroll.magnification * factor, scroll.minMagnification), scroll.maxMagnification), centeredAt: at)
+        commitMagnification()
+    }
+
+    /// ⌘-scroll zooms too: a trackpad smoothly (through the same magnification, committed when the scrolling
+    /// pauses), a notch of a mouse wheel a quarter. Plain scrolling goes to the scroll view.
     override func scrollWheel(with event: NSEvent) {
-        guard event.modifierFlags.contains(.command) else {
+        guard event.modifierFlags.contains(.command), let scroll = enclosingScrollView else {
             super.scrollWheel(with: event)
             return
         }
         let dy = event.scrollingDeltaY
         guard dy != 0 else { return }
+        setUpMagnification()
         let factor: CGFloat = event.hasPreciseScrollingDeltas ? exp(dy * 0.008) : (dy > 0 ? 1.25 : 0.8)
-        editor?.app?.scaleZoom(by: factor, anchor: point(event))
-        if event.phase == .ended || event.phase == .cancelled { editor?.app?.announceZoom() }
+        let p = convert(event.locationInWindow, from: nil)
+        scroll.setMagnification(min(max(scroll.magnification * factor, scroll.minMagnification), scroll.maxMagnification), centeredAt: p)
+        pixelsStayCrisp()
+        wheelCommit?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.commitMagnification() }
+        wheelCommit = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: work)
     }
 
     override func mouseExited(with event: NSEvent) {

@@ -74,29 +74,6 @@ import Testing
         #expect(a.stepZoom(by: -1))
         #expect(a.zoom == .level(1))
     }
-
-    @Test("R3: the readout shows the level and clears")
-    func testR3TheReadoutClears() async throws {
-        let a = app(zoom: .level(1))
-        a.readoutSeconds = 0.05
-        a.stepZoom(by: 1)
-        #expect(a.zoomReadout?.text == "2×")
-        try await Task.sleep(for: .milliseconds(300))
-        #expect(a.zoomReadout == nil)
-    }
-
-    @Test("R3: a newer readout isn't cleared by the older one's timer")
-    func testR3ANewerReadoutStays() async throws {
-        let a = app(zoom: .level(1))
-        a.readoutSeconds = 0.15
-        a.stepZoom(by: 1)
-        try await Task.sleep(for: .milliseconds(100))
-        a.stepZoom(by: 1)
-        try await Task.sleep(for: .milliseconds(100))
-        #expect(a.zoomReadout?.text == "3×", "the first step's timer ran out, the second's hasn't")
-        try await Task.sleep(for: .milliseconds(200))
-        #expect(a.zoomReadout == nil)
-    }
 }
 
 @MainActor @Suite struct ScrollerTests {
@@ -348,7 +325,6 @@ import Testing
         #expect(a.scaleZoom(by: 1.2))
         #expect(abs(a.zoomScale - 2.4) < 0.0001, "no whole-level steps: the art grows with the fingers")
         #expect(a.zoomText == "2.4")
-        #expect(a.zoomReadout?.text == "2.4×")
         #expect(a.scaleZoom(by: 0.5))
         #expect(abs(a.zoomScale - 1.2) < 0.0001)
         #expect(a.effectiveZoom == 1, "what needs a level gets the nearest")

@@ -13,11 +13,10 @@ expect inspector shown
 expect floatingbar select,pan,library
 expect library closed
 snapshot @OUT@/window-scene-dark.png
-# R1, R2, R3: a pinch-step (⌘= is the same) goes one whole level and keeps the pixel under the pointer; the readout names it
+# R1, R2: a pinch-step (⌘= is the same) goes one whole level and keeps the pixel under the pointer
 zoom 1
 pinch in 180 50
 expect zoom 2
-expect readout 2×
 expect anchor kept
 pinch in 60 -10
 expect zoom 3
@@ -33,7 +32,6 @@ expect zoom 1
 zoom 2
 pinchby 1.2 180 50
 expect zoom 2.4
-expect readout 2.4×
 expect anchor kept
 pinchby 0.5
 expect zoom 1.2
@@ -43,7 +41,6 @@ expect zoom 4
 zoom 1
 zoomkey in
 expect zoom 2
-expect readout 2×
 zoomkey out
 expect zoom 1
 zoom fit

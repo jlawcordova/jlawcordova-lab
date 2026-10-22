@@ -20,13 +20,6 @@ enum Zoom: Hashable, Sendable {
     static func levels(for kind: DocRef.Kind) -> [Int] { kind == .scene ? [1, 2, 3, 4] : [4, 8, 12, 16] }
 }
 
-/// What the zoom readout shows: the level, and a number that tells one showing from the next.
-struct ZoomReadoutValue: Equatable, Sendable {
-    var scale: Double
-    var id: Int
-    var text: String { "\(Zoom.format(scale))×" }
-}
-
 /// Why the app can't open the document yet; the setup screen shows it.
 struct SetupProblem: Equatable {
     var document: String?
@@ -1061,36 +1054,13 @@ final class AppModel {
     var zoom: Zoom {
         get { mode == .scene ? sceneZoom : objectZoom }
         set {
-            let before = zoomScale
             if mode == .scene { sceneZoom = newValue } else { objectZoom = newValue }
             ensureWorkspace()
-            let after = zoomScale
-            if after != before { showZoomReadout(Double(after), announce: announceZoomChanges) }
         }
     }
 
-    /// The readout over the stage's corner after a zoom change ("2×"): it clears itself
-    /// after `readoutSeconds` (docs/intents/2026-10-floating-library/spec.md, R3).
-    var zoomReadout: ZoomReadoutValue?
-    @ObservationIgnored var readoutSeconds = 1.1
-    @ObservationIgnored private var readoutCount = 0
-
-    /// A pinch changes the zoom many times a second: it says the zoom once, at its end (`announceZoom`).
-    @ObservationIgnored var announceZoomChanges = true
-
-    func announceZoom() { editor.announce("Zoom \(Zoom.format(Double(zoomScale)))×") }
-
-    private func showZoomReadout(_ scale: Double, announce: Bool) {
-        readoutCount += 1
-        let value = ZoomReadoutValue(scale: scale, id: readoutCount)
-        zoomReadout = value
-        if announce { announceZoom() }
-        Task { [weak self, seconds = readoutSeconds] in
-            try? await Task.sleep(for: .seconds(seconds))
-            guard let self, self.zoomReadout?.id == value.id else { return }
-            self.zoomReadout = nil
-        }
-    }
+    /// VoiceOver hears the zoom once a change is done (a pinch ends, a key steps).
+    func announceZoom() { editor.announce("Zoom \(zoomText)×") }
 
     /// One whole level in or out of the open doc's levels (a pinch, ⌘-scroll, ⌘= and ⌘−), starting
     /// from Fit's effective level and never past the kind's first and last (R1, R2). `anchor` is a
@@ -1108,24 +1078,33 @@ final class AppModel {
         guard let next else { return false }
         (editor.stageView as? StageInputView)?.anchorNextZoom(atView: anchor)
         zoom = .level(Int(next))
+        announceZoom()
         return true
     }
 
-    /// A pinch or ⌘-scroll: the zoom times `factor`, any scale between the kind's first and last level, so the
-    /// art grows with the fingers. The pixel under `anchor` stays where it is. Returns whether it changed.
+    /// The kind's first and last zoom: a pinch stays between them.
+    var zoomRange: ClosedRange<Double> {
+        let levels = Zoom.levels(for: document?.ref.kind ?? .scene)
+        return Double(levels.first ?? 1)...Double(levels.last ?? 4)
+    }
+
+    /// Sets the zoom to any scale between the kind's first and last level (where a pinch ends). Returns whether it changed.
+    @discardableResult
+    func setZoomScale(_ scale: Double) -> Bool {
+        let next = min(max(scale, zoomRange.lowerBound), zoomRange.upperBound)
+        guard abs(next - Double(zoomScale)) > 0.0005 else { return false }
+        zoom = abs(next - next.rounded()) < 0.001 ? .level(Int(next.rounded())) : .scale(next)
+        return true
+    }
+
+    /// The zoom times `factor` (the script hook's pinch), the pixel under `anchor` kept where it is.
     @discardableResult
     func scaleZoom(by factor: CGFloat, anchor: CGPoint? = nil) -> Bool {
-        guard factor.isFinite, factor > 0, let doc = document else { return false }
-        let levels = Zoom.levels(for: doc.ref.kind)
-        let lo = Double(levels.first ?? 1), hi = Double(levels.last ?? 4)
-        let next = min(max(Double(zoomScale * factor), lo), hi)
+        guard factor.isFinite, factor > 0, document != nil else { return false }
+        let next = min(max(Double(zoomScale * factor), zoomRange.lowerBound), zoomRange.upperBound)
         guard abs(next - Double(zoomScale)) > 0.0005 else { return false }
         (editor.stageView as? StageInputView)?.anchorNextZoom(atView: anchor)
-        let quiet = announceZoomChanges
-        announceZoomChanges = false
-        zoom = abs(next - next.rounded()) < 0.001 ? .level(Int(next.rounded())) : .scale(next)
-        announceZoomChanges = quiet
-        return true
+        return setZoomScale(next)
     }
 
     /// Stage padding around the art when it's bigger than the stage, in points.
