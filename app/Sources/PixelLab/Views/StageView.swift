@@ -43,7 +43,11 @@ struct StageView: View {
         }
         .overlay(alignment: .bottom) {
             if model.document != nil, !(model.agent.previewing && model.agent.ghostShown) {
-                FloatingBar().padding(.bottom, 16)
+                VStack(spacing: 8) {
+                    if model.libraryOpen, model.document?.ref.kind == .scene { LibraryPopover() }
+                    FloatingBar()
+                }
+                .padding(.bottom, 16)
             }
         }
         .accessibilityElement(children: .contain)
@@ -209,8 +213,6 @@ struct PlacePill: View {
             Group {
                 if let object = editor.placeObject {
                     Text("Placing ") + Text(object).bold() + Text(" into ") + Text(model.layers.placeTargetName).bold() + Text(": click a tile")
-                } else {
-                    Text("Choose an object in the Library to place into ") + Text(model.layers.placeTargetName).bold()
                 }
             }
             .font(.system(size: 12))

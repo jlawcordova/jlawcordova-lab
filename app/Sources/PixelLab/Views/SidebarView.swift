@@ -1,11 +1,9 @@
 import SwiftUI
 
-/// The left sidebar: a search field, the SCENES list, and below it, in scene
-/// mode, the open scene's LAYERS (first, and the default) or the LIBRARY grid
-/// of object thumbnails (docs/intents/2026-10-scene-layers/spec.md, D11). In
-/// scene mode a library click picks the object to place (drag it onto the
-/// stage, or double-click to open it in object mode); what's placed goes
-/// into the layer the chip names.
+/// The left sidebar: a search field, the SCENES list (with the objects a search
+/// finds), and below it, in a scene, the open scene's LAYERS, or in an object
+/// its PALETTE. The Library is a popover over the stage, not a tab here
+/// (docs/intents/2026-10-floating-library/spec.md, R10).
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -32,7 +30,17 @@ struct SidebarView: View {
                                 }
                                 .id(scene.name)
                             }
-                            if filteredScenes.isEmpty { emptyLine("No scenes match") }
+                            if filteredScenes.isEmpty && (query.isEmpty || filteredObjects.isEmpty) { emptyLine("No scenes match") }
+                            // A search also finds objects: a row opens one (R11).
+                            if !query.isEmpty, !filteredObjects.isEmpty {
+                                sectionHeader("Objects", count: filteredObjects.count)
+                                ForEach(filteredObjects) { object in
+                                    ObjectRow(object: object, selected: model.document?.ref == DocRef(.object, object.name)) {
+                                        Task { await model.editObject(object.name) }
+                                    }
+                                    .id("object:\(object.name)")
+                                }
+                            }
                         }
                         .padding(.horizontal, 10)
                     }
@@ -45,38 +53,27 @@ struct SidebarView: View {
                         proxy.scrollTo(ref.name, anchor: .center)
                     }
                 }
-                tabs
                 lowerHeader
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 6) {
-                            if showItemsTab, model.editor.sidebarTab == .layers, let doc = model.document {
+                            if showItemsTab, let doc = model.document {
                                 LayersPanel(doc: doc, query: query)
-                            } else if showPaletteTab, model.objectEditor.sidebarTab == .palette {
+                            } else if showPaletteTab {
                                 PalettePanel()
-                            } else {
-                                libraryGrid
                             }
                         }
                         .padding(.horizontal, 10)
                         .padding(.bottom, 16)
                     }
                     .scrollIndicators(.automatic)
-                    .onChange(of: model.editor.placeObject) { _, name in
-                        guard let name, model.editor.sidebarTab == .library || !showItemsTab else { return }
-                        scroll(proxy, to: name)
-                    }
-                    .onChange(of: model.editor.sidebarTab) { _, tab in
-                        guard tab == .layers, let t = model.document?.selection.last else { return }
-                        Task { @MainActor in proxy.scrollTo(t.description, anchor: .center) }
-                    }
                     .onChange(of: model.layers.scrollRequest) { _, t in
                         guard let t else { return }
                         proxy.scrollTo(t.description, anchor: .center)
                         model.layers.scrollRequest = nil
                     }
                     .onChange(of: model.document?.selection) { _, selection in
-                        guard let t = selection?.last, model.editor.sidebarTab == .layers else { return }
+                        guard let t = selection?.last, showItemsTab else { return }
                         Task { @MainActor in scroll(proxy, to: t.description) }
                     }
                 }
@@ -88,7 +85,8 @@ struct SidebarView: View {
     /// The scene list's height: its rows, but at most about a third of the
     /// sidebar (and at least three rows).
     private func scenesHeight(sidebar: CGFloat) -> CGFloat {
-        let rows = CGFloat(max(filteredScenes.count, 1)) * 29
+        let objectRows = query.isEmpty || filteredObjects.isEmpty ? 0 : filteredObjects.count + 1
+        let rows = CGFloat(max(filteredScenes.count, 1) + objectRows) * 29
         return min(rows, max(sidebar * 0.32, 3 * 29))
     }
 
@@ -98,86 +96,15 @@ struct SidebarView: View {
         }
     }
 
-    /// Layers | Library in scene mode, Palette | Library in object mode.
-    @ViewBuilder
-    private var tabs: some View {
-        if showItemsTab {
-            Picker("Show", selection: Binding(get: { model.editor.sidebarTab }, set: { model.editor.sidebarTab = $0 })) {
-                Text("Layers").tag(SceneEditor.SidebarTab.layers)
-                Text("Library").tag(SceneEditor.SidebarTab.library)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.top, 10)
-            .padding(.horizontal, 14)
-            .padding(.bottom, 4)
-        } else if showPaletteTab {
-            Picker("Show", selection: Binding(get: { model.objectEditor.sidebarTab }, set: { model.objectEditor.sidebarTab = $0 })) {
-                Text("Palette").tag(ObjectEditor.SidebarTab.palette)
-                Text("Library").tag(ObjectEditor.SidebarTab.library)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.top, 10)
-            .padding(.horizontal, 14)
-            .padding(.bottom, 4)
-        }
-    }
-
-    /// Above the lower scroll, so it stays put: LAYERS, or LIBRARY with the
-    /// "New items go into" chip in scene mode.
+    /// Above the lower scroll, so it stays put: LAYERS in a scene.
     @ViewBuilder
     private var lowerHeader: some View {
-        if showItemsTab, model.editor.sidebarTab == .layers, model.document != nil {
+        if showItemsTab, model.document != nil {
             SectionLabel(title: "Layers")
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 4)
-        } else if !(showPaletteTab && model.objectEditor.sidebarTab == .palette) {
-            VStack(alignment: .leading, spacing: 0) {
-                sectionHeader("Library", count: filteredObjects.count)
-                    .padding(.top, showItemsTab || showPaletteTab ? 4 : 12)
-                if showItemsTab { PlaceIntoChip() }
-            }
-            .padding(.horizontal, 10)
-        }
-    }
-
-    @ViewBuilder
-    private var libraryGrid: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
-            ForEach(filteredObjects) { object in
-                LibraryCell(
-                    object: object,
-                    image: model.thumbnails.images[object.name],
-                    selected: showItemsTab
-                        ? model.editor.placeObject == object.name
-                        : model.document?.ref == DocRef(.object, object.name),
-                    placing: showItemsTab
-                ) {
-                    if showItemsTab {
-                        model.editor.choosePlaceObject(object.name)
-                    } else {
-                        Task { await model.open(DocRef(.object, object.name)) }
-                    }
-                } open: {
-                    Task { await model.open(DocRef(.object, object.name)) }
-                }
-                .id(object.name)
-                .onAppear { model.thumbnails.appeared(object.name) }
-                .onDisappear { model.thumbnails.disappeared(object.name) }
-            }
-        }
-        .padding(.top, 4)
-        if filteredObjects.isEmpty { emptyLine("No objects match") }
-        if showItemsTab {
-            Text("Select a layer, or go inside one, and what you place joins it. With neither, it goes in at the top level.")
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.inkMuted)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 2)
                 .padding(.top, 10)
+                .padding(.bottom, 4)
         }
     }
 
@@ -206,33 +133,6 @@ struct SidebarView: View {
 
     private func emptyLine(_ text: String) -> some View {
         Text(text).font(.callout).foregroundStyle(Theme.inkMuted).padding(.horizontal, 6).padding(.vertical, 4)
-    }
-}
-
-/// "New items go into" and the layer they'll join, or the top level
-/// (docs/intents/2026-10-scene-layers/spec.md, D13).
-struct PlaceIntoChip: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        let layers = model.layers
-        let target = layers.placeTarget
-        HStack(spacing: 6) {
-            Text("New items go into").font(.system(size: 11)).foregroundStyle(Theme.inkMuted)
-            HStack(spacing: 5) {
-                Image(systemName: target == nil ? "square.stack.3d.up" : "square.dashed").font(.system(size: 10.5, weight: .semibold))
-                Text(layers.placeTargetName).font(Theme.nameFont(11)).lineLimit(1)
-            }
-            .foregroundStyle(Theme.accent)
-            .padding(.horizontal, 8)
-            .frame(height: 22)
-            .background(Theme.selection, in: Capsule())
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 6)
-        .padding(.bottom, 6)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("New items go into \(target == nil ? "the top level" : layers.placeTargetName)")
     }
 }
 
@@ -302,61 +202,94 @@ struct SceneRow: View {
     }
 }
 
+/// An object a search found, in the scenes list: a row that opens it.
+struct ObjectRow: View {
+    var object: ObjectSummary
+    var selected: Bool
+    var action: () -> Void
+    @Environment(AppModel.self) private var model
+    private var hovering: Bool { model.hovered == "object:\(object.name)" }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: "cube")
+                    .font(.system(size: 13))
+                    .foregroundStyle(selected ? Theme.accent : Theme.inkMuted)
+                    .frame(width: 18)
+                Text(object.name)
+                    .font(Theme.nameFont(13, weight: selected ? .semibold : .medium))
+                    .foregroundStyle(Theme.ink)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 4)
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 28)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(selected ? Theme.selection : (hovering ? Theme.border.opacity(0.5) : .clear))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { model.setHovered("object:\(object.name)", $0) }
+        .help("Edit \(object.name)")
+        .accessibilityLabel("Object \(object.name), edit")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// A Library thumbnail, small and without a name: its name is its help tag and its VoiceOver label
+/// (docs/intents/2026-10-floating-library/spec.md, R8, D5). Click to place, drag onto the stage to place one
+/// where it lands, double-click or the menu to edit the object.
 struct LibraryCell: View {
     var object: ObjectSummary
     var image: PixelImage?
+    /// This is the object being placed.
     var selected: Bool
-    /// Scene mode: a click picks the object to place, and it drags onto the stage.
-    var placing = false
+    /// The keyboard is on this cell.
+    var focused = false
     var action: () -> Void
     var open: () -> Void = {}
     @Environment(AppModel.self) private var model
     private var hovering: Bool { model.hovered == "object:\(object.name)" }
     @Environment(\.displayScale) private var displayScale
 
-    static let side: CGFloat = 66
+    static let width: CGFloat = 44
+    static let height: CGFloat = 42
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 3) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(Theme.card)
-                    if let image {
-                        let f = Self.factor(for: image.size, in: Self.side - 12)
-                        image.view(pointsPerPixel: f, displayScale: displayScale)
-                    } else {
-                        ProgressView().controlSize(.mini).opacity(0.5)
-                    }
+            ZStack {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Theme.card)
+                if let image {
+                    let f = Self.factor(for: image.size, in: Self.height - 8)
+                    image.view(pointsPerPixel: f, displayScale: displayScale)
+                } else {
+                    ProgressView().controlSize(.mini).opacity(0.5)
                 }
-                .frame(height: Self.side)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .strokeBorder(selected ? Theme.accent : (hovering ? Theme.border.opacity(2) : Theme.border), lineWidth: selected ? 1.5 : 1)
-                )
-                Text(object.name)
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(selected ? Theme.ink : Theme.inkMuted)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
             }
+            .frame(minWidth: Self.width, maxWidth: .infinity)
+            .frame(height: Self.height)
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(selected || focused ? Theme.accent : (hovering ? Theme.border.opacity(2) : Theme.border), lineWidth: selected || focused ? 1.5 : 1)
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .simultaneousGesture(TapGesture(count: 2).onEnded { if placing { open() } })
-        .onDrag {
-            if placing { model.editor.placeObject = object.name }
-            return NSItemProvider(object: (LibraryDrag.prefix + object.name) as NSString)
-        }
+        .simultaneousGesture(TapGesture(count: 2).onEnded { open() })
+        .onDrag { NSItemProvider(object: (LibraryDrag.prefix + object.name) as NSString) }
         .contextMenu {
-            if placing {
-                Button("Place \(object.name)") { action() }
-            }
-            Button("Open in Object Mode") { open() }
+            Button("Place \(object.name)") { action() }
+            Button("Edit Object") { open() }
         }
         .onHover { model.setHovered("object:\(object.name)", $0) }
-        .help(placing ? "\(object.name): click to place it, drag it onto the stage, double-click to open it" : (object.description ?? object.name))
-        .accessibilityLabel(placing ? "Place \(object.name)" : "Object \(object.name)")
+        .help(object.name)
+        .accessibilityLabel("Place \(object.name)")
+        .accessibilityHint("Double-click to edit the object")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 

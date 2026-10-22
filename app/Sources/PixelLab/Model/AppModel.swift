@@ -63,9 +63,32 @@ final class AppModel {
     /// The Library popover over the stage is open (docs/intents/2026-10-floating-library/spec.md, R8).
     var libraryOpen = false
 
+    /// The popover's search text, and the cell the arrow keys are on.
+    var libraryQuery = ""
+    var libraryCursor = 0
+    /// Where Back goes from an object opened with Edit Object (R11).
+    var returnScene: DocRef?
+
+    /// L, and the bar's Library button. Only a scene has one.
     func toggleLibrary() {
+        guard document?.ref.kind == .scene else { return }
         libraryOpen.toggle()
-        editor.sidebarTab = libraryOpen ? .library : .layers
+        editor.announce(libraryOpen ? "Library open" : "Library closed")
+    }
+
+    func closeLibrary() {
+        guard libraryOpen else { return }
+        libraryOpen = false
+        editor.announce("Library closed")
+        editor.focusStage()
+    }
+
+    /// Opens an object to edit it (the Library's menu and double-click, the stage's menu, ⌘↩),
+    /// remembering the scene to go back to (docs/intents/2026-10-floating-library/spec.md, R11, D7).
+    func editObject(_ name: String) async {
+        if document?.ref.kind == .scene { returnScene = document?.ref }
+        libraryOpen = false
+        await open(DocRef(.object, name))
     }
     var searchText = ""
     /// The stage's visible size, for Fit.
@@ -383,6 +406,7 @@ final class AppModel {
         mode = ref.kind
         if ref.kind == .scene { lastScene = ref.name } else { lastObject = ref.name }
         if document?.ref == ref { return }
+        if ref.kind == .object { libraryOpen = false }
         let doc = DocumentModel(ref: ref)
         if ref.kind == .scene, let scene = scenes.first(where: { $0.name == ref.name }) {
             doc.origin = CGPoint(x: scene.origin[0], y: scene.origin[1])

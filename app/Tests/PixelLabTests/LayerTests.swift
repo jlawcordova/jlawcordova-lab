@@ -150,4 +150,25 @@ import Testing
         #expect(t.rows(expanded: ["a", "b"]).allSatisfy { $0.depth <= 1 })
         #expect(t.byID["c"]?.parent == nil)
     }
+
+    /// docs/intents/2026-10-floating-library/spec.md, R9: the placing preview names the target the sidebar's chip used to.
+    @MainActor @Test("R9: the ghost tag names the layer placing goes into")
+    func testR9TheGhostTagNamesTheLayerPlacingGoesInto() {
+        let app = AppModel()
+        let doc = DocumentModel(ref: DocRef(.scene, "a"))
+        doc.layerTree = tree
+        app.document = doc
+        func tag() -> String { StageOverlay.placeTagText(object: "pine", target: app.layers.placeTargetName) }
+        #expect(tag() == "pine → Top level")
+        doc.selection = [.layer("mine")]
+        #expect(tag() == "pine → Mine", "a selected layer")
+        doc.selection = [.item("3")]
+        #expect(tag() == "pine → Train", "the selected item's layer")
+        doc.selection = []
+        app.layers.inside = "railway"
+        #expect(tag() == "pine → Railway", "the layer you're inside")
+        doc.selection = [.layer("train"), .item("0")]
+        app.layers.inside = nil
+        #expect(tag() == "pine → Top level", "several things: the top level")
+    }
 }

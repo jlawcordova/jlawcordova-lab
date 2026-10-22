@@ -541,7 +541,6 @@ final class LayersModel {
         let sel = selection
         guard !sel.isEmpty, let r = await call("scene.layer.new", members(sel)), let made = r.layer else { return nil }
         await app?.reloadItems()
-        app?.editor.sidebarTab = .layers
         select([.layer(made.id)], announce: false)
         let n = tree.byID[made.id]?.items ?? 0
         let said = "Grouped \(n) item\(n == 1 ? "" : "s") as \(made.name). Rename it in the inspector."
@@ -645,7 +644,7 @@ final class LayersModel {
     /// Place into it: the Library and the Place tool, with this layer as the target.
     func placeInto() {
         guard let app else { return }
-        app.editor.sidebarTab = .library
+        app.libraryOpen = true
         app.editor.tool = .select
         announce("Placing into \(placeTargetName): choose an object in the Library, then click a tile")
     }

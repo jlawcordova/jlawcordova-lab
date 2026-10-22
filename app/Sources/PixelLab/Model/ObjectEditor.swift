@@ -53,8 +53,6 @@ struct OverlayStamp: Sendable {
 final class ObjectEditor {
     @ObservationIgnored weak var app: AppModel?
 
-    enum SidebarTab: String, Hashable { case palette, library }
-
     var tool: PaintTool = .pencil
     var color = "ink"
     /// The layer painting goes to, and the frame every loop shows.
@@ -68,7 +66,6 @@ final class ObjectEditor {
     var pixelGrid = UserDefaults.standard.object(forKey: "objectPixelGrid") as? Bool ?? true {
         didSet { UserDefaults.standard.set(pixelGrid, forKey: "objectPixelGrid") }
     }
-    var sidebarTab: SidebarTab = .palette
     /// `object.show` for the open object.
     var info: ObjectShowResult?
     /// The pixel under the pointer, and the keyboard cursor.

@@ -187,3 +187,64 @@ import Testing
         #expect(!objects.handHeld)
     }
 }
+
+@MainActor @Suite struct LibraryTests {
+    func scene() -> AppModel {
+        let app = AppModel()
+        app.document = DocumentModel(ref: DocRef(.scene, "a"))
+        return app
+    }
+
+    @Test("R8: L opens and Esc closes, placing first")
+    func testR8LOpensAndEscClosesPlacingFirst() {
+        let app = scene()
+        let editor = app.editor
+        #expect(editor.handleKey(KeyInput(key: .char("l"))))
+        #expect(app.libraryOpen)
+        editor.choosePlaceObject("pine")
+        #expect(editor.handleKey(KeyInput(key: .escape)))
+        #expect(!editor.isPlacing, "the first Esc stops placing")
+        #expect(app.libraryOpen, "and the popover stays")
+        #expect(editor.handleKey(KeyInput(key: .escape)))
+        #expect(!app.libraryOpen, "the second closes it")
+        _ = editor.handleKey(KeyInput(key: .char("l")))
+        _ = editor.handleKey(KeyInput(key: .char("l")))
+        #expect(!app.libraryOpen, "L toggles")
+    }
+
+    @Test("R8: the popover stays open while placing, and an object has no Library")
+    func testR8StaysOpenWhilePlacingAndObjectsHaveNone() {
+        let app = scene()
+        app.toggleLibrary()
+        app.editor.choosePlaceObject("pine")
+        #expect(app.libraryOpen)
+        let object = AppModel()
+        object.document = DocumentModel(ref: DocRef(.object, "house"))
+        object.toggleLibrary()
+        #expect(!object.libraryOpen)
+    }
+
+    @Test("R8: a cell is small and its name is its label")
+    func testR8ACellIsSmall() {
+        #expect(LibraryCell.width == 44 && LibraryCell.height == 42)
+        #expect(LibraryPopover.width == 452 && LibraryPopover.gridHeight == 236 && LibraryPopover.columns == 8)
+    }
+
+    @Test("R10: the sidebar has no Library")
+    func testR10TheSidebarHasNoLibrary() {
+        // The sidebar's lower section is the scene's Layers or the object's Palette: nothing in the models picks a tab.
+        let app = scene()
+        app.toggleLibrary()
+        #expect(app.libraryOpen, "the Library is the popover's state, not a sidebar tab")
+        app.closeLibrary()
+        #expect(!app.libraryOpen)
+    }
+
+    @Test("R11: placing from the Library into a layer opens the popover")
+    func testR11PlaceIntoOpensTheLibrary() {
+        let app = scene()
+        app.layers.placeInto()
+        #expect(app.libraryOpen)
+        #expect(app.editor.tool == .select)
+    }
+}

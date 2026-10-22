@@ -24,7 +24,7 @@ import Foundation
 ///     playend   (releases a held `playat` frame: the stage draws the playhead's frame again)
 ///     reducemotion on|off|system   (overrides the system's Reduce Motion for Play and the timeline)
 ///     undo redo save [force] revert publish [<dir>] done   saveas <path.pixellab>
-///     time <ms>  play  pause  tracks on|off   zoom fit|1-4   sidebar library|items
+///     time <ms>  play  pause  tracks on|off   zoom fit|1-4   sidebar library|layers
 ///     pinch in|out [<x> <y>]   (one zoom step, kept under that scene pixel or the middle)   zoomkey in|out   (⌘= and ⌘−)
 ///     expect readout <2×|none>   expect anchor kept   (the last pinch left its scene point where it was)
 ///     search <text>   wait <ms>   snapshot <file.png>   log <text>
@@ -53,7 +53,7 @@ import Foundation
 ///     menu group|ungroup|inside|hide|lock|close   group   ungroup   (also key cmd+g, key shift+cmd+g)
 ///     inside <id>|done|top   crumb <n>   hide|show|lock|unlock|expand|collapse <id>   rename <name…>
 ///     movedby <col> <row>   layernudge upleft|upright|downleft|downright   placeinto
-///     layerskey <spec> (up, down, shift+down, right, left, return, esc)   sidebar layers|library
+///     layerskey <spec> (up, down, shift+down, right, left, return, esc)   library open|close  (sidebar library|layers: the same)
 ///     (move, drag and the arrow keys act on the whole selection)
 ///     expect selection <targets,…|none>   expect inside|layername|itemlayer|hover <id|none>   expect scenelayers|rows <n>
 ///     expect hiddenlayers|lockedlayers <ids,…|none>   expect into <name>   expect crumbs <a›b>   expect movedby <c,r|none>
@@ -248,8 +248,14 @@ final class ScriptRunner {
              "new", "newdialog", "newcancel", "newsubmit":
             return try await performObject(words, model: model)
         case "library":
-            editor.choosePlaceObject(try arg(words, 1))
-            _ = await model.thumbnails.art(try arg(words, 1))
+            // library open|close: the popover. library <name>: pick that object, which starts placing it.
+            switch try arg(words, 1) {
+            case "open": if !model.libraryOpen { model.toggleLibrary() }
+            case "close": model.closeLibrary()
+            default:
+                editor.choosePlaceObject(try arg(words, 1))
+                _ = await model.thumbnails.art(try arg(words, 1))
+            }
             return nil
         case "level":
             editor.setPlaceLevel(try int(words, 1))
@@ -524,12 +530,10 @@ final class ScriptRunner {
             model.stepZoom(by: try arg(words, 1) == "in" ? 1 : -1)
             return "zoom \(model.effectiveZoom)"
         case "sidebar":
+            // The sidebar has no Library any more: `sidebar library` opens the popover, the others close it.
             switch try arg(words, 1) {
-            case "palette": model.objectEditor.sidebarTab = .palette
-            case "layers", "items": editor.sidebarTab = .layers
-            default:
-                editor.sidebarTab = .library
-                model.objectEditor.sidebarTab = .library
+            case "library": if !model.libraryOpen { model.toggleLibrary() }
+            default: model.closeLibrary()
             }
             return nil
         case "search":
@@ -814,7 +818,6 @@ final class ScriptRunner {
                 // pointer's would be, through the window's hit-testing onto the row's catcher.
                 guard let t = LayerTarget(spec: try arg(words, 2)) else { throw Failure("rightclick row layer:<id>|<path>") }
                 layers.reveal(t)
-                model.editor.sidebarTab = .layers
                 layers.scrollRequest = t
                 try? await Task.sleep(for: .milliseconds(300))
                 var frame = layers.rowFrames[t.description]
@@ -940,7 +943,8 @@ final class ScriptRunner {
         case "rows": return String(layers.visibleRows(query: model.searchText.trimmingCharacters(in: .whitespaces).lowercased()).count)
         case "movedby": return layers.movedBy.map { "\($0.col),\($0.row)" } ?? "none"
         case "menu": return layers.menu == nil ? "closed" : list(layers.menuItems.filter(\.enabled).map(\.title))
-        case "tab": return model.editor.sidebarTab.rawValue
+        case "tab": return model.libraryOpen ? "library" : "layers"
+        case "library": return model.libraryOpen ? "open" : "closed"
         case "inspector":
             guard let doc else { return "none" }
             if doc.selectedLayer != nil { return "layer" }

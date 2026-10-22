@@ -141,16 +141,11 @@ final class SceneEditor {
     /// An object dragged from the library over the stage.
     var dropObject: String?
     var stageFocused = false
-    /// The sidebar's lower section: the open scene's Layers (first, and the
-    /// default) or the Library (docs/intents/2026-10-scene-layers/spec.md, D11).
-    var sidebarTab: SidebarTab = .layers
     /// Drafts of the inspector's Class and ID fields.
     var classDraft = ""
     var idDraft = ""
     /// Edits sent and not answered yet (the script hook waits on them).
     @ObservationIgnored var pendingEdits = 0
-
-    enum SidebarTab: String, Hashable { case layers, library }
 
     var effectiveTool: StageTool { spaceHeld || panning ? .pan : tool }
 
@@ -620,6 +615,7 @@ final class SceneEditor {
             if drag != nil { drag = nil } else if layers.drag != nil { layers.drag = nil } else if layers.menu != nil { layers.closeMenu() }
             else if !(doc?.selection.isEmpty ?? true) { layers.select([]) } else if layers.inside != nil { layers.done() }
             else if tool != .select || placeObject != nil { setTool(.select) }
+            else if app.libraryOpen { app.closeLibrary() }
             return true
         case .space:
             return true
@@ -652,6 +648,10 @@ final class SceneEditor {
             if k.option || k.shift { return false }
             if let t = StageTool.allCases.first(where: { $0.key == c }) {
                 setTool(t)
+                return true
+            }
+            if c == "l" {
+                app.toggleLibrary()
                 return true
             }
             if let n = c.wholeNumberValue {
