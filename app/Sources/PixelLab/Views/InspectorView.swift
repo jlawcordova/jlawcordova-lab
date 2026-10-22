@@ -28,7 +28,7 @@ struct InspectorView: View {
                     }
                     .layoutPriority(1)
                     if !doc.selection.isEmpty { AskClaudeButton(count: doc.selection.count) }
-                    if model.editor.tool == .place || model.editor.placeObject != nil {
+                    if model.editor.placeObject != nil {
                         PlaceInspector()
                     }
                     PublishedSizeSection(doc: doc)

@@ -15,9 +15,9 @@ struct StageOverlay: View {
     var body: some View {
         let editor = model.editor
         ZStack(alignment: .topLeading) {
-            if let object = editor.dropObject ?? (editor.effectiveTool == .place ? editor.placeObject : nil) {
+            if let object = editor.dropObject ?? (editor.isPlacing ? editor.placeObject : nil) {
                 placeGhost(object: object, editor: editor)
-            } else if editor.effectiveTool == .place, let tile = editor.hoverTile ?? editor.cursorTile {
+            } else if editor.isPlacing, let tile = editor.hoverTile ?? editor.cursorTile {
                 TileMark(geometry: geometry, tile: tile)
             }
             let layers = model.layers
@@ -111,7 +111,7 @@ struct StageOverlay: View {
             parts.append("Selected \(model.layers.selectionLabel ?? "")")
         }
         if let inside = model.layers.inside { parts.append("Inside \(doc.layerTree.name(of: inside))") }
-        if let object = editor.dropObject ?? (editor.effectiveTool == .place ? editor.placeObject : nil),
+        if let object = editor.dropObject ?? (editor.isPlacing ? editor.placeObject : nil),
            let tile = editor.hoverTile ?? editor.cursorTile {
             parts.append("Place \(object) at column \(tile.col), row \(tile.row), level \(tile.level)")
         }

@@ -34,12 +34,17 @@ struct StageView: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            if model.document?.ref.kind == .scene, model.mode == .scene, model.editor.tool == .place, !(model.agent.previewing && model.agent.ghostShown) {
+            if model.document?.ref.kind == .scene, model.mode == .scene, model.editor.isPlacing, !(model.agent.previewing && model.agent.ghostShown) {
                 PlacePill().padding(12)
             }
         }
         .overlay(alignment: .bottomTrailing) {
             ZoomReadout().padding(12)
+        }
+        .overlay(alignment: .bottom) {
+            if model.document != nil, !(model.agent.previewing && model.agent.ghostShown) {
+                FloatingBar().padding(.bottom, 16)
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(stageLabel)
@@ -66,7 +71,7 @@ struct StageView: View {
                     // lets the pointer through, and AppKit-hosted views drawn
                     // under SwiftUI layers keep the art and overlays in order
                     // (on screen and in cacheDisplay snapshots).
-                    StageInput(geometry: geometry, editor: model.editor, objects: model.objectEditor, tool: model.editor.effectiveTool,
+                    StageInput(geometry: geometry, editor: model.editor, objects: model.objectEditor, tool: model.editor.effectiveTool, placing: model.editor.isPlacing,
                                paintTool: model.objectEditor.tool, isScene: doc.ref.kind == .scene)
                         .frame(width: geometry.contentSize.width, height: geometry.contentSize.height)
                     if doc.ref.kind == .scene {
@@ -212,7 +217,7 @@ struct PlacePill: View {
             .foregroundStyle(Theme.ink)
             .lineLimit(1)
             .padding(.leading, 6)
-            Button("Done") { editor.setTool(.select) }
+            Button("Done") { editor.stopPlacing() }
                 .controlSize(.small)
                 .help("Back to the Select tool (V)")
         }

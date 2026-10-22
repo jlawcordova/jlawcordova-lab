@@ -60,6 +60,13 @@ final class AppModel {
         didSet { if script == nil, snapshot == nil { UserDefaults.standard.set(showFrame, forKey: SettingsKey.showFrame) } }
     }
     var showInspector = true
+    /// The Library popover over the stage is open (docs/intents/2026-10-floating-library/spec.md, R8).
+    var libraryOpen = false
+
+    func toggleLibrary() {
+        libraryOpen.toggle()
+        editor.sidebarTab = libraryOpen ? .library : .layers
+    }
     var searchText = ""
     /// The stage's visible size, for Fit.
     var stageViewport: CGSize = .zero {

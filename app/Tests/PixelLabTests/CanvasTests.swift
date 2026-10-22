@@ -114,3 +114,76 @@ import Testing
         QuietScrollers.configure(nil)
     }
 }
+
+@MainActor @Suite struct ToolTests {
+    func scene() -> AppModel {
+        let app = AppModel()
+        app.document = DocumentModel(ref: DocRef(.scene, "a"))
+        return app
+    }
+
+    @Test("R7: picking a Library object starts placing; Esc and V stop it")
+    func testR7PickingAnObjectStartsPlacingAndEscAndVStopIt() {
+        let app = scene()
+        let editor = app.editor
+        #expect(!editor.isPlacing)
+        editor.choosePlaceObject("pine")
+        #expect(editor.isPlacing)
+        #expect(editor.tool == .select, "placing is not a tool")
+        #expect(editor.handleKey(KeyInput(key: .escape)))
+        #expect(!editor.isPlacing)
+        #expect(editor.placeObject == nil)
+        editor.choosePlaceObject("pine")
+        #expect(editor.handleKey(KeyInput(key: .char("v"))))
+        #expect(editor.placeObject == nil, "V is Select, which puts the object away")
+    }
+
+    @Test("R7: Hand pauses placing; Space is a temporary hand; the A key is gone")
+    func testR7HandPausesPlacing() {
+        let editor = scene().editor
+        editor.choosePlaceObject("pine")
+        editor.setTool(.pan)
+        #expect(!editor.isPlacing, "the hand drags the view, it doesn't place")
+        #expect(editor.placeObject == "pine")
+        editor.setTool(.select)
+        editor.choosePlaceObject("pine")
+        editor.spaceHeld = true
+        #expect(!editor.isPlacing)
+        editor.spaceHeld = false
+        #expect(editor.isPlacing)
+        #expect(StageTool.allCases == [.select, .pan])
+        #expect(!editor.handleKey(KeyInput(key: .char("a"))), "A no longer chooses a tool")
+        #expect(StageTool.pan.title == "Hand")
+    }
+
+    @Test("R7: a drop places one without starting to place")
+    func testR7ADropDoesNotStartPlacing() {
+        let editor = scene().editor
+        #expect(editor.placeObject == nil)
+        editor.drop("pine", at: .zero, geometry: StageGeometry(window: CGRect(x: 0, y: 0, width: 100, height: 100), zoom: 1,
+                                                               viewport: CGSize(width: 100, height: 100), tileOrigin: .zero), option: false)
+        #expect(editor.placeObject == nil)
+        #expect(!editor.isPlacing)
+    }
+
+    @Test("R6: the bar's tools per doc kind")
+    func testR6TheBarsToolsPerDocKind() {
+        #expect(FloatingBarItems.ids(for: .scene) == ["select", "pan", "library"])
+        #expect(FloatingBarItems.ids(for: .object) == ["pencil", "eraser", "fill", "picker", "pan"])
+    }
+
+    @Test("R6: the object Hand is a held pan that ends when another tool is picked")
+    func testR6TheObjectHandEndsWhenAnotherToolIsPicked() {
+        let app = AppModel()
+        let objects = app.objectEditor
+        objects.setHand(true)
+        #expect(objects.handHeld)
+        #expect(objects.tool == .pencil, "the tool underneath stays")
+        objects.setTool(.eraser)
+        #expect(!objects.handHeld)
+        #expect(objects.handleKey(KeyInput(key: .char("h"))))
+        #expect(objects.handHeld, "H toggles the hand on")
+        #expect(objects.handleKey(KeyInput(key: .char("h"))))
+        #expect(!objects.handHeld)
+    }
+}

@@ -646,7 +646,7 @@ final class LayersModel {
     func placeInto() {
         guard let app else { return }
         app.editor.sidebarTab = .library
-        app.editor.setTool(.place)
+        app.editor.tool = .select
         announce("Placing into \(placeTargetName): choose an object in the Library, then click a tile")
     }
 

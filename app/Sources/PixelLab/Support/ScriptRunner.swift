@@ -8,7 +8,7 @@ import Foundation
 /// it, since scripts save and publish). One action per line, `#` comments:
 ///
 ///     open scene:hero-island      appearance dark|light   size 1440x900
-///     tool select|place|pan       library <object>        level <n>
+///     tool select|pan|hand        library <object>  (starts placing it)   level <n>
 ///     select <path>|#<id>|none    click <x> <y>           clicktile <col> <row> <level>
 ///     hover <col> <row> <level>   place [<col> <row> <level>]
 ///     drag <dc> <dr> [hold]       dragpx <dx> <dy> [hold] release | cancel
@@ -239,7 +239,9 @@ final class ScriptRunner {
                 model.objectEditor.setTool(t)
                 return nil
             }
-            guard let t = StageTool(rawValue: try arg(words, 1)) else { throw Failure("tool select|place|pan|pencil|eraser|fill|picker") }
+            if try arg(words, 1) == "place" { throw Failure("tool place is gone: choose an object with library <name> to start placing") }
+            if try arg(words, 1) == "hand" { editor.setTool(.pan); return nil }
+            guard let t = StageTool(rawValue: try arg(words, 1)) else { throw Failure("tool select|pan|hand|pencil|eraser|fill|picker") }
             editor.setTool(t)
             return nil
         case "mode", "color", "stroke", "erase", "px", "fill", "pick", "grid", "onion", "resize", "layer", "animate", "still",
@@ -306,7 +308,6 @@ final class ScriptRunner {
             return "pixel \(x),\(y) → \(sel.isEmpty ? "nothing" : sel)"
         case "hover":
             let t = Tile(col: try int(words, 1), row: try int(words, 2), level: try int(words, 3))
-            if editor.tool != .place { editor.setTool(.place) }
             editor.placeLevel = t.level
             editor.hoverTile = t
             editor.cursorTile = t
@@ -1340,7 +1341,9 @@ final class ScriptRunner {
         case "items": got = String(doc?.items.count ?? 0)
         case "problems": got = String(doc?.problems?.count ?? -1)
         case "build": got = model.build?.result.map { $0.ok ? "ok" : "failed" } ?? "none"
-        case "tool": got = doc?.ref.kind == .object ? model.objectEditor.tool.rawValue : model.editor.tool.rawValue
+        case "tool":
+            got = doc?.ref.kind == .object ? (model.objectEditor.handHeld ? "hand" : model.objectEditor.tool.rawValue)
+                : (model.editor.isPlacing ? "place" : model.editor.tool.rawValue)
         case "time": got = String(model.timeline.renderTime)
         case "ambient": got = model.timeline.ambientDuration.map { String(Int($0)) } ?? "none"
         case "timeline": got = model.timeline.duration.map { String(Int($0)) } ?? "none"

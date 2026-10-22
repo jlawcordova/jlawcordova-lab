@@ -269,10 +269,20 @@ final class ObjectEditor {
         say("\(name) chosen")
     }
 
+    /// The bar's Hand button (H): a held pan, like Space held, until another tool is picked.
+    var handHeld = false
+
     func setTool(_ t: PaintTool) {
         tool = t
+        handHeld = false
         if let v = app?.editor.stageView { v.window?.invalidateCursorRects(for: v) }
         say("\(t.title) tool")
+    }
+
+    func setHand(_ on: Bool) {
+        handHeld = on
+        if let v = app?.editor.stageView { v.window?.invalidateCursorRects(for: v) }
+        say(on ? "Hand tool" : "\(tool.title) tool")
     }
 
     /// Why painting is off on the selected layer, or nil (ObjectMode.paintBlocked).
@@ -820,6 +830,7 @@ final class ObjectEditor {
                 setTool(t)
                 return true
             }
+            if c == StageTool.pan.key { setHand(!handHeld); return true }
             if let n = c.wholeNumberValue {
                 if n == 0 { app.zoom = .fit; return true }
                 if n <= 4 { app.setZoomLevel(index: n - 1); return true }

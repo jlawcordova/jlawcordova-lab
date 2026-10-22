@@ -10,6 +10,7 @@ struct StageInput: NSViewRepresentable {
     var editor: SceneEditor
     var objects: ObjectEditor
     var tool: StageTool
+    var placing: Bool
     /// Object mode's tool (the cursor follows it).
     var paintTool: PaintTool
     var isScene: Bool
@@ -32,8 +33,10 @@ struct StageInput: NSViewRepresentable {
             v.window?.invalidateCursorRects(for: v)
         }
         if editor.stageView !== v { editor.stageView = v }
-        if v.tool != tool {
+        if v.tool != tool || v.placing != placing || v.handHeld != objects.handHeld {
+            v.handHeld = objects.handHeld
             v.tool = tool
+            v.placing = placing
             v.window?.invalidateCursorRects(for: v)
         }
     }
@@ -46,6 +49,8 @@ final class StageInputView: NSView {
     weak var editor: SceneEditor?
     weak var objects: ObjectEditor?
     var tool: StageTool = .select
+    var placing = false
+    var handHeld = false
     var paintTool: PaintTool = .pencil
     var isScene = true
     private var panStart: (window: CGPoint, origin: CGPoint)?
@@ -163,11 +168,10 @@ final class StageInputView: NSView {
     private var cursor: NSCursor {
         guard let editor else { return .arrow }
         if editor.panning { return .closedHand }
-        if !isScene { return editor.spaceHeld ? .openHand : .crosshair }
+        if !isScene { return editor.spaceHeld || objects?.handHeld == true ? .openHand : .crosshair }
         switch editor.effectiveTool {
         case .pan: return .openHand
-        case .place: return .crosshair
-        case .select: return .arrow
+        case .select: return editor.isPlacing ? .crosshair : .arrow
         }
     }
 
@@ -240,7 +244,7 @@ final class StageInputView: NSView {
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         if !isScene, let geometry, let editor, let objects {
-            if editor.spaceHeld, let clip = enclosingScrollView?.contentView {
+            if editor.spaceHeld || objects.handHeld, let clip = enclosingScrollView?.contentView {
                 editor.panning = true
                 panStart = (event.locationInWindow, clip.bounds.origin)
                 NSCursor.closedHand.set()
@@ -287,7 +291,7 @@ final class StageInputView: NSView {
     /// while placing (as in the prototype).
     override func rightMouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
-        guard isScene, let geometry, let editor, editor.effectiveTool == .select, let app = editor.app else { return }
+        guard isScene, let geometry, let editor, editor.effectiveTool == .select, !editor.isPlacing, let app = editor.app else { return }
         app.layers.stageRightClick(point(event), geometry: geometry, windowPoint: event.locationInWindow)
     }
 
