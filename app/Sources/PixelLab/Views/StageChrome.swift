@@ -50,3 +50,58 @@ struct QuietScrollers: NSViewRepresentable {
         }
     }
 }
+
+/// Over an object, at the stage's top left: **‹ Back · hero-island › house**. Back, or the scene's name,
+/// returns to the scene the owner came from; the object's name is where they are. It has the capsule
+/// of the layers breadcrumb, so the two read as one way in and out (docs/intents/2026-10-floating-library/spec.md, R11, D7).
+struct BackPill: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let scene = model.backTarget
+        HStack(spacing: 4) {
+            Button { Task { await model.backToScene() } } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
+                    Text("Back").font(Theme.nameFont(12, weight: .medium))
+                }
+                .foregroundStyle(Theme.ink)
+                .padding(.horizontal, 6)
+                .frame(height: 24)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(scene == nil)
+            .help("Back to the scene (⌘[)")
+            .accessibilityLabel(scene.map { "Back to \($0)" } ?? "Back")
+            if let scene {
+                Rectangle().fill(Theme.border).frame(width: 1, height: 16).accessibilityHidden(true)
+                Button { Task { await model.backToScene() } } label: {
+                    Text(scene)
+                        .font(Theme.nameFont(12))
+                        .foregroundStyle(Theme.inkMuted)
+                        .lineLimit(1)
+                        .padding(.horizontal, 6)
+                        .frame(height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Go to \(scene)")
+                .accessibilityLabel("Scene \(scene)")
+                Text("›").foregroundStyle(Theme.inkMuted).accessibilityHidden(true)
+            }
+            Text(model.document?.ref.name ?? "")
+                .font(Theme.nameFont(12, weight: .semibold))
+                .foregroundStyle(Theme.ink)
+                .lineLimit(1)
+                .padding(.trailing, 8)
+                .accessibilityLabel("Editing \(model.document?.ref.name ?? "")")
+        }
+        .padding(.horizontal, 3)
+        .frame(height: 30)
+        .background(Theme.halo, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Where you are")
+    }
+}

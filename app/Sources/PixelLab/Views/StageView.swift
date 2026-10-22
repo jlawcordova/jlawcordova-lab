@@ -31,6 +31,8 @@ struct StageView: View {
         .overlay(alignment: .topLeading) {
             if model.document?.ref.kind == .scene, model.mode == .scene, !(model.agent.previewing && model.agent.ghostShown) {
                 BreadcrumbPill().padding(12)
+            } else if model.document?.ref.kind == .object {
+                BackPill().padding(12)
             }
         }
         .overlay(alignment: .topTrailing) {

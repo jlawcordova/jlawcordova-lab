@@ -83,6 +83,39 @@ final class AppModel {
         editor.focusStage()
     }
 
+    /// The main window is the key window (Edit Object's ⌘↩ is the Agent window's Approve when that one is).
+    var mainIsKey = false
+
+    @ObservationIgnored private var keyObservers: [NSObjectProtocol] = []
+
+    /// Follows whether the main window is the key window.
+    func watchKey(of window: NSWindow) {
+        guard keyObservers.isEmpty else { return }
+        mainIsKey = window.isKeyWindow
+        let center = NotificationCenter.default
+        keyObservers = [
+            center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.mainIsKey = true }
+            },
+            center.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.mainIsKey = false }
+            },
+        ]
+    }
+
+    /// The scene Back goes to from an object: the one Edit Object came from, else the last scene, hero-island or the first.
+    var backTarget: String? {
+        if let r = returnScene, scenes.contains(where: { $0.name == r.name }) { return r.name }
+        if let last = lastScene, scenes.contains(where: { $0.name == last }) { return last }
+        return scenes.first { $0.name == "hero-island" }?.name ?? scenes.first?.name
+    }
+
+    /// Back, from an object (the pill, View › Back to <scene>, ⌘[).
+    func backToScene() async {
+        guard let name = backTarget else { return }
+        await open(DocRef(.scene, name))
+    }
+
     /// Opens an object to edit it (the Library's menu and double-click, the stage's menu, ⌘↩),
     /// remembering the scene to go back to (docs/intents/2026-10-floating-library/spec.md, R11, D7).
     func editObject(_ name: String) async {
@@ -160,7 +193,7 @@ final class AppModel {
     @ObservationIgnored private(set) var connection: ServerConnection?
     @ObservationIgnored private var eventsTask: Task<Void, Never>?
     @ObservationIgnored let snapshot = SnapshotRequest.fromEnvironment()
-    @ObservationIgnored private var lastScene: String?
+    @ObservationIgnored var lastScene: String?
     @ObservationIgnored private var lastObject: String?
 
     // MARK: Settings
@@ -404,7 +437,12 @@ final class AppModel {
     func open(_ ref: DocRef) async {
         guard let connection else { return }
         mode = ref.kind
-        if ref.kind == .scene { lastScene = ref.name } else { lastObject = ref.name }
+        if ref.kind == .scene {
+            lastScene = ref.name
+            returnScene = nil
+        } else {
+            lastObject = ref.name
+        }
         if document?.ref == ref { return }
         if ref.kind == .object { libraryOpen = false }
         let doc = DocumentModel(ref: ref)
@@ -434,19 +472,21 @@ final class AppModel {
         requestItems()
     }
 
-    /// The Scene/Object segmented control: show the last doc of that kind;
-    /// Object with a scene item selected opens that item's object.
+    /// The script hook's `mode`: Object is Edit Object on the selected item or the last object, Scene is Back.
     func switchMode(to kind: DocRef.Kind) {
         mode = kind
         guard document?.ref.kind != kind else { return }
         if kind == .object, let object = document?.selectedItem?.object, objects.contains(where: { $0.name == object }) {
-            Task { await open(DocRef(.object, object)) }
+            Task { await editObject(object) }
             return
         }
-        let name: String? = kind == .scene
-            ? (lastScene ?? scenes.first { $0.name == "hero-island" }?.name ?? scenes.first?.name)
-            : (lastObject ?? objects.first { $0.name == "house" }?.name ?? objects.first?.name)
-        if let name { Task { await open(DocRef(kind, name)) } }
+        if kind == .scene {
+            Task { await backToScene() }
+            return
+        }
+        if let name = lastObject ?? objects.first(where: { $0.name == "house" })?.name ?? objects.first?.name {
+            Task { await editObject(name) }
+        }
     }
 
     /// Renders the open doc; coalesces requests that arrive mid-render.

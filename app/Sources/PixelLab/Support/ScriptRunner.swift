@@ -26,6 +26,7 @@ import Foundation
 ///     undo redo save [force] revert publish [<dir>] done   saveas <path.pixellab>
 ///     time <ms>  play  pause  tracks on|off   zoom fit|1-4   sidebar library|layers
 ///     pinch in|out [<x> <y>]   (one zoom step, kept under that scene pixel or the middle)   zoomkey in|out   (⌘= and ⌘−)
+///     editobject [<name>]   back   expect returnscene <name|none>   (Edit Object on the selected item or a named object; Back)
 ///     expect readout <2×|none>   expect anchor kept   (the last pinch left its scene point where it was)
 ///     search <text>   wait <ms>   snapshot <file.png>   log <text>
 ///     settings open|close   snapshot settings <file.png>   (the Settings window)
@@ -287,6 +288,14 @@ final class ScriptRunner {
         case "focus":
             editor.focusStage()
             return nil
+        case "editobject":
+            // Edit Object: the named object, or the selected item's.
+            guard let name = words.count > 1 ? words[1] : doc?.selectedItem?.object else { throw Failure("editobject <name>, or select an item first") }
+            await model.editObject(name)
+            return "editing \(name)"
+        case "back":
+            await model.backToScene()
+            return "back to \(model.document?.ref.name ?? "none")"
         case "select":
             let what = try arg(words, 1)
             if what == "add" {
@@ -1440,6 +1449,7 @@ final class ScriptRunner {
         case "scenes": got = String(model.scenes.count)
         case "objects": got = String(model.objects.count)
         case "zoom": got = String(model.effectiveZoom)
+        case "returnscene": got = model.returnScene?.name ?? "none"
         case "readout": got = model.zoomReadout?.text ?? "none"
         case "anchor":
             // The last anchored zoom left its scene point where it was on screen (within a point).

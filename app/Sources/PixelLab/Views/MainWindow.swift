@@ -71,6 +71,7 @@ struct DocumentWindow: View {
         .background(Theme.page)
         .background(WindowAccessor { window in
             model.mainWindow = window
+            model.watchKey(of: window)
             WindowCloseGuard.install(on: window)
             window.isDocumentEdited = !model.dirtyDocs.isEmpty
         })

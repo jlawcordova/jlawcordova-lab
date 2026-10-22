@@ -248,3 +248,67 @@ import Testing
         #expect(app.editor.tool == .select)
     }
 }
+
+@MainActor @Suite struct BackTests {
+    func summary(_ name: String) -> SceneSummary {
+        SceneSummary(name: name, file: "scenes/\(name).json", viewBox: [0, 0, 32, 16], origin: [0, 0], items: 0, motion: false)
+    }
+
+    func app(on ref: DocRef, scenes: [String]) -> AppModel {
+        let app = AppModel()
+        app.scenes = scenes.map(summary)
+        app.document = DocumentModel(ref: ref)
+        return app
+    }
+
+    @Test("R11: Edit Object from a scene, then Back, returns to it")
+    func testR11EditObjectThenBackReturnsToTheScene() async {
+        let app = app(on: DocRef(.scene, "harbor"), scenes: ["hero-island", "harbor"])
+        await app.editObject("house")
+        #expect(app.returnScene == DocRef(.scene, "harbor"), "the scene it came from is remembered")
+        #expect(app.backTarget == "harbor")
+        app.document = DocumentModel(ref: DocRef(.object, "house"))
+        await app.editObject("pine")
+        #expect(app.returnScene == DocRef(.scene, "harbor"), "from an object to another, Back still goes to the scene")
+    }
+
+    @Test("R11: Back with no scene to return to opens the last scene")
+    func testR11BackWithNoSceneToReturnToOpensTheLastScene() {
+        let a = app(on: DocRef(.object, "house"), scenes: ["hero-island", "harbor", "meadow"])
+        a.lastScene = "meadow"
+        #expect(a.returnScene == nil)
+        #expect(a.backTarget == "meadow")
+        a.lastScene = nil
+        #expect(a.backTarget == "hero-island")
+        let b = app(on: DocRef(.object, "house"), scenes: ["harbor", "meadow"])
+        #expect(b.backTarget == "harbor", "else the first scene")
+        let c = app(on: DocRef(.object, "house"), scenes: [])
+        #expect(c.backTarget == nil)
+        // A scene that is gone isn't the target.
+        let d = app(on: DocRef(.object, "house"), scenes: ["harbor"])
+        d.returnScene = DocRef(.scene, "deleted")
+        #expect(d.backTarget == "harbor")
+    }
+
+    @Test("R11: ⌘[ goes back and [ still steps the layer")
+    func testR11CommandBracketIsLeftToBackAndBracketStillStepsTheLayer() {
+        let app = AppModel()
+        let objects = app.objectEditor
+        #expect(!objects.handleKey(KeyInput(key: .char("["), command: true)), "⌘[ is the menu's Back, not the object editor's")
+        #expect(!objects.handleKey(KeyInput(key: .char("]"), command: true)))
+        #expect(objects.handleKey(KeyInput(key: .char("["))), "plain [ still steps the layer")
+        #expect(objects.handleKey(KeyInput(key: .char("]"))))
+    }
+
+    @Test("R11: the stage's menu has Edit Object for the item under the pointer")
+    func testR11TheStageMenuHasEditObject() {
+        let a = app(on: DocRef(.scene, "harbor"), scenes: ["harbor"])
+        a.document?.setItems(SceneItemsResult(scene: "harbor", items: [SceneItemInfo(path: "0", object: "pine", at: ItemAt(tile: [0, 0, 0]))], groups: [], layers: []))
+        func edit() -> LayerMenuItem? { a.layers.menuItems.first { $0.action == .editObject } }
+        #expect(edit()?.enabled == false)
+        a.layers.select([.item("0")], announce: false)
+        #expect(edit()?.enabled == true)
+        #expect(edit()?.title == "Edit Object “pine”")
+        #expect(edit()?.shortcut == "⌘↩")
+    }
+}

@@ -3,7 +3,7 @@ import Observation
 
 /// An action of the right-click menu (docs/intents/2026-10-scene-layers/spec.md, D9).
 enum LayerMenuAction: String, CaseIterable, Sendable {
-    case group, ungroup, inside, hide, lock
+    case group, ungroup, inside, hide, lock, editObject
 }
 
 /// One line of the right-click menu.
@@ -537,12 +537,15 @@ final class LayersModel {
 
     var menuItems: [LayerMenuItem] {
         let layer = doc?.selectedLayer
+        let item = doc?.selectedItem?.object
         return [
             LayerMenuItem(action: .group, title: "Group", shortcut: "⌘G", enabled: !selection.isEmpty),
             LayerMenuItem(action: .ungroup, title: "Ungroup", shortcut: "⇧⌘G", enabled: layer != nil),
             LayerMenuItem(action: .inside, title: "Go Inside", shortcut: "", enabled: layer != nil, separatorBefore: true),
             LayerMenuItem(action: .hide, title: layer.map { hidden.contains($0) } == true ? "Show" : "Hide", shortcut: "", enabled: layer != nil),
             LayerMenuItem(action: .lock, title: layer.map { locked.contains($0) } == true ? "Unlock" : "Lock", shortcut: "", enabled: layer != nil),
+            // The item under the pointer (R11): its object opens in the object view.
+            LayerMenuItem(action: .editObject, title: item.map { "Edit Object “\($0)”" } ?? "Edit Object", shortcut: "⌘↩", enabled: item != nil, separatorBefore: true),
         ]
     }
 
@@ -562,7 +565,7 @@ final class LayersModel {
         announce("Menu: \(menuItems.filter(\.enabled).map(\.title).joined(separator: ", "))")
     }
 
-    static let menuSize = CGSize(width: 210, height: 160)
+    static let menuSize = CGSize(width: 210, height: 192)
 
     func closeMenu() { menu = nil }
 
@@ -589,6 +592,7 @@ final class LayersModel {
         case .inside: if let layer { goInside(layer) }
         case .hide: if let layer { toggleHidden(layer) }
         case .lock: if let layer { toggleLocked(layer) }
+        case .editObject: if let object = doc?.selectedItem?.object { await app?.editObject(object) }
         }
     }
 
