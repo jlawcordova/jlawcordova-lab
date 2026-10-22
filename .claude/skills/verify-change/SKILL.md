@@ -31,7 +31,7 @@ This is the step after "Code and tests" in `CLAUDE.md`'s "How changes flow", for
    - `cargo fmt --check` and `cargo test` (every test passes), if the PR touches `crates/`;
    - `npm test` (`# fail 0`);
    - `swift build --package-path app` (no errors) and `scripts/test-app.sh` (every test passes), if the PR touches `app/`;
-   - `scripts/build-app.sh`, then `scripts/acceptance.sh "$TMPDIR/verify-<n>-acceptance"` (exits 0), if the PR touches `app/`, `crates/` or `scripts/acceptance/`;
+   - `scripts/build-app.sh`, then `scripts/acceptance.sh --only <stages> "$TMPDIR/verify-<n>-acceptance"` (exits 0) for the stages the PR names, plus any that cover what it touches, if the PR touches `app/`, `crates/` or `scripts/acceptance/`;
    - `npm run docs:cli`, then `git status`: a clean tree means `docs/cli.md` matches the registry;
    - `git diff origin/<base>...HEAD -- package.json app/Package.swift app/Package.resolved`: no new dependencies.
 4. **Traceability.** For each requirement in scope, find its tests (named `R<n>: …`, so `grep -rn "r<n>_\|R<n>:" crates app/Tests scripts/test scripts/acceptance` finds them) or the named check the spec gives it, such as a script-hook run's `expect` lines. Missing evidence is a **blocking** finding.

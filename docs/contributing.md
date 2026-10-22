@@ -40,7 +40,7 @@ Run what applies, from [Testing](testing.md), and paste the output in the PR:
 - [ ] `npm test` shows `# fail 0`
 - [ ] after a command change: `npm run docs:cli`, and `git status` shows only your edits
 - [ ] after an `app/` change: `swift build --package-path app` with no errors, `scripts/test-app.sh` passes
-- [ ] after an `app/`, `crates/` or `scripts/acceptance/` change: `scripts/build-app.sh`, then `scripts/acceptance.sh` exits 0
+- [ ] after an `app/`, `crates/` or `scripts/acceptance/` change: `scripts/build-app.sh`, then `scripts/acceptance.sh --only <stages>` exits 0 for the stages that cover it, named in the PR (the full pass is optional)
 - [ ] UI: a script-hook run with `expect` lines, and snapshots of each changed view in dark and light, looked at
 - [ ] docs: `npm run docs:site` builds (no broken links)
 
