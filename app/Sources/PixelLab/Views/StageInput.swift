@@ -105,13 +105,17 @@ final class StageInputView: NSView {
             anchor = (old.scenePoint(fromView: mid), CGPoint(x: size.width / 2, y: size.height / 2))
         }
         zoomAnchor = nil
-        DispatchQueue.main.async { [weak self] in
-            guard let scroll = self?.enclosingScrollView else { return }
-            let clip = scroll.contentView
-            clip.scroll(to: new.clipOrigin(keeping: anchor.scene, at: anchor.inClip))
-            scroll.reflectScrolledClipView(clip)
-            if zoomed { self?.keptAnchor = anchor }
-            self?.applyReveal()
+        // Once the new layout is in, and again a moment later: SwiftUI settles a resized scroll view's offset
+        // on its own schedule, and the view has to end where the owner was looking.
+        for delay in [0.0, 0.05, 0.2] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let scroll = self?.enclosingScrollView else { return }
+                let clip = scroll.contentView
+                clip.scroll(to: new.clipOrigin(keeping: anchor.scene, at: anchor.inClip))
+                scroll.reflectScrolledClipView(clip)
+                if zoomed { self?.keptAnchor = anchor }
+                self?.applyReveal()
+            }
         }
     }
 

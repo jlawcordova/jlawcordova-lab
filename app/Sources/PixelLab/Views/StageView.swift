@@ -135,7 +135,10 @@ struct StageView: View {
                 .background(QuietScrollers())
             }
             .scrollIndicators(.automatic)
-            .defaultScrollAnchor(.center)
+            // Centered when a doc opens, and never again: a size change (a zoom, a bigger workspace) keeps the
+            // view where it is (`StageInputView.keepScroll` puts the point the owner was looking at back).
+            .defaultScrollAnchor(.center, for: .initialOffset)
+            .defaultScrollAnchor(nil, for: .sizeChanges)
             .id(doc.ref)
         } else if let doc = model.document, let error = doc.error {
             ContentUnavailableView {
