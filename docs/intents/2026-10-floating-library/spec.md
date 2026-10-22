@@ -9,7 +9,7 @@ The design is the prototype canvas named in the intent:
 
 This spec settles what the prototype leaves open: input handling, the window's chrome on macOS, the keyboard path for every control that leaves the screen, the test hook and the docs. Where the app departs from the prototype, the spec says so in place.
 
-This is a change to the Mac app only. No command, CLI flag or MCP tool changes, and nothing an agent can do is lost. Every requirement here is about the owner's window. The three doors (CLI, `serve --stdio`, `serve --mcp`) are untouched.
+This is a change to the Mac app, apart from one widened parameter: `scene.render`'s `hide` list also takes item paths, so a single item can be hidden (R19, D12). That reaches all three doors (CLI, `serve --stdio`, `serve --mcp`) through the one registry. Nothing an agent can do is lost, and the document, the engine and the published art don't change.
 
 ## Requirements
 
@@ -106,9 +106,26 @@ This is a change to the Mac app only. No command, CLI flag or MCP tool changes, 
   - The waiting-proposals badge that was on the toolbar's Agent button sits on the Agent tab.
 - **R15. Nothing else changes.**
   - Saving stays explicit (autosave is `../2026-10-autosave/intent.md`).
-  - The document, the engine, the CLI and MCP don't change, and neither does the published art.
+  - The document, the engine and the published art don't change. The CLI and MCP change only by `scene.render`'s `hide` taking item paths (R19).
   - The Agent window, the chat and proposals behave as they do today, apart from where the badge sits.
   - There's no command to hide every panel; the owner doesn't need one for now.
+
+**Layers**
+
+- **R19. Hide and lock single items.** Added on 2026-10-22, from the owner's comment on the prototype.
+  - In Layers, an item's row has the same lock and eye buttons as a group's row, in place of the position label it shows today (`col,row,level`, or `px x,y`).
+  - The item's position stays in the inspector, and VoiceOver still reads the row as the item and its position.
+  - **Hidden:**
+    - The eye crosses out, the name turns muted, and the item isn't drawn on the stage, so it can't be picked.
+    - Hiding a selected item deselects it.
+    - Its row still selects from the tree.
+  - **Locked:**
+    - The lock shows filled, and the item can't be picked on the stage.
+    - The tree, the inspector and the keys still select and move it.
+  - As with layers, this is a view setting:
+    - It's kept per document and scene.
+    - It never changes the document, saving, publishing or what agents see.
+    - It follows the item when an edit or a depth sort moves its path.
 
 **Accessibility, tests and docs**
 
@@ -241,8 +258,26 @@ The acceptance scripts that use `mode`, `sidebar` or `tool place` are updated to
     - Drops A and ⌥⌘I.
     - Adds L, ⌘=, ⌘−, ⌘↩ and ⌘[.
     - Notes pinch and ⌘-scroll for zoom.
-- `docs/cli.md` doesn't change, since no command changes.
+- `docs/cli.md` is regenerated for `scene.render`'s widened `hide` (D12). No other command changes.
 - The docs site is rebuilt to check links.
+
+### D12. Hiding and locking single items (R19)
+- **Storage:** `layer-view.json` gains `hiddenItems` and `lockedItems` per scene, next to `hidden` and `locked`. Each entry is an item path plus its object name: `{ "path": "145.0", "object": "pine" }`.
+  - When an edit result's `reordered` moves a path, the entry follows it, as the selection already does (`LayerTarget.following`).
+  - When a scene opens or reloads, entries whose path no longer holds that object are dropped. This covers a file changed on disk, a merge or a revert.
+  - Only the app reads the file. The CLI, the servers, Publish and agents never do, as with layers (`../2026-10-scene-layers/spec.md`, D8).
+- **Rendering:**
+  - `scene.render`'s `hide` parameter takes item paths as well as layer ids and names. A string that names a layer hides the layer; otherwise a string that is an item's path hides that item.
+  - `crates/pixellab/src/render.rs` applies it, the command's schema and description say so, and `docs/cli.md` is regenerated.
+  - The app sends hidden items with the hidden layers (`LayersModel.renderParams`).
+- **Picking:**
+  - `LayerTree`'s pickability check skips hidden and locked items, the way it skips the items of hidden and locked layers.
+  - Hover and ⌥-click (Select Every Use) skip them too.
+- **The row:**
+  - `LayersPanel`'s item row drops its position text and shows the same lock and eye buttons as a group row: the lock only on hover, selection or when locked, and the eye always.
+  - The buttons have the same labels, with the item's object name ("Hide pine", "Lock pine").
+  - The row's VoiceOver label keeps the position: "pine at 4,-1,1, hidden".
+- **The test hook:** `hide|show|lock|unlock` take an item path as well as a layer id. `expect hiddenitems|lockeditems <paths,…|none>` checks them.
 
 ## Areas of concern
 The owner settled the concerns raised in review on 2026-10-22:
@@ -257,6 +292,8 @@ The owner settled the concerns raised in review on 2026-10-22:
 - **Publish:** it stays beside Save in the right panel, as prototyped.
 
 These remain as notes for the plan:
+- **Item hide and lock widen the CLI and MCP surface** (R19, D12). The intent was amended on 2026-10-22 to allow this one change. Agents can now pass item paths in `scene.render`'s `hide`, which is read-only and changes nothing on disk.
+- **Hidden items are keyed by path,** because most items have no id. The path follows edits made in the app (through `reordered`). After an outside change the entry is dropped when the path's object differs. That's safe, but in a rare case where an outside edit swaps two items of the same object, the hide can land on the other one.
 - **Losing the toolbar's discoverability.** Apple's guidelines say a toolbar item can't be the only place for a command, and that hidden controls need a reliable way back. Every removed control keeps a menu item (D9), and the bar's help tags name their keys.
 - **The Command Line Tools build has no SwiftUI macros.** All new view state (`libraryOpen`, `zoomReadout`, `returnScene`) lives in `AppModel`, as `CLAUDE.md` requires.
 
