@@ -546,30 +546,39 @@ struct ArtBuildResult: Codable, Sendable, Equatable {
 
     /// The report as the CLI prints it: one line per output, one per preview-only scene, then the problems.
     var report: [String] {
-        outputs.map { "\($0.file ?? $0.scene): \($0.line)" }
-            + previewOnly.map { "\($0.scene) (preview only, not written): \($0.line)" }
+        outputs.map { "\($0.file ?? $0.scene): \($0.report)" }
+            + previewOnly.map { "\($0.scene) (preview only, not written): \($0.report)" }
             + problems
     }
     /// The lines the sheet marks: problems, and outputs over their budget.
     var marked: Set<String> {
-        Set(problems + outputs.filter(\.isOver).map { "\($0.file ?? $0.scene): \($0.line)" })
+        Set(problems + outputs.filter(\.over).map { "\($0.file ?? $0.scene): \($0.report)" })
     }
-    var overBudget: [ArtOutput] { outputs.filter(\.isOver) }
+    var overBudget: [ArtOutput] { outputs.filter(\.over) }
 }
 
 /// One compiled scene: its output file (nil for a preview-only scene), sizes and report line.
+/// `kind` is `svg` or `png`: a scene's image (`publish.images` in the manifest) has no gzip, budget
+/// or report, so those decode as nil, false and a line made from its size.
 struct ArtOutput: Codable, Sendable, Equatable {
     var file: String?
     var scene: String
-    /// `svg`, or `png` for a scene's preview card image.
-    var kind: String?
+    var kind: String
     var raw: Int
-    /// A PNG has no gzip, over or report.
     var gzip: Int?
-    var over: Bool?
-    var report: String?
+    var over: Bool
+    var report: String
 
-    var isOver: Bool { over ?? false }
-    /// The report line: an SVG's, or "PNG, 4210 bytes".
-    var line: String { report ?? "\(kind?.uppercased() ?? "file"), \(raw) bytes" }
+    enum CodingKeys: String, CodingKey { case file, scene, kind, raw, gzip, over, report }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        file = try c.decodeIfPresent(String.self, forKey: .file)
+        scene = try c.decode(String.self, forKey: .scene)
+        kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? "svg"
+        raw = try c.decode(Int.self, forKey: .raw)
+        gzip = try c.decodeIfPresent(Int.self, forKey: .gzip)
+        over = try c.decodeIfPresent(Bool.self, forKey: .over) ?? false
+        report = try c.decodeIfPresent(String.self, forKey: .report) ?? "\(String(format: "%.1f", Double(raw) / 1024)) KB \(kind.uppercased()) image"
+    }
 }

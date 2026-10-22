@@ -117,6 +117,8 @@ final class AppModel {
         timeline.app = self
         agent.app = self
         chat.app = self
+        // The script hook and a snapshot start on the default tab, not the one the owner left open.
+        if script != nil || snapshot != nil { rightTab = .inspector }
     }
     @ObservationIgnored private(set) var connection: ServerConnection?
     @ObservationIgnored private var eventsTask: Task<Void, Never>?

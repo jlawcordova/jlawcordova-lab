@@ -95,6 +95,7 @@ save
 expect dirty false
 appearance dark
 build
+# Six SVGs and, since 2026-10-21, the 13 blog thumbnails (the manifest's publish.images).
 expect build ok
 expect outputs 19
 snapshot @OUT@/publish-sheet-dark.png
