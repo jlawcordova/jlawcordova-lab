@@ -124,6 +124,7 @@ struct StageView: View {
                     }
                 }
                 .frame(width: geometry.contentSize.width, height: geometry.contentSize.height, alignment: .topLeading)
+                .background(QuietScrollers())
             }
             .scrollIndicators(.automatic)
             .defaultScrollAnchor(.center)

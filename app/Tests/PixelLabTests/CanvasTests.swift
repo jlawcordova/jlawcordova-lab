@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import Testing
@@ -95,5 +96,21 @@ import Testing
         #expect(a.zoomReadout?.text == "3×", "the first step's timer ran out, the second's hasn't")
         try await Task.sleep(for: .milliseconds(200))
         #expect(a.zoomReadout == nil)
+    }
+}
+
+@MainActor @Suite struct ScrollerTests {
+    @Test("R5: the stage keeps the system's scroller style")
+    func testR5TheStageKeepsTheSystemsScrollerStyle() {
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = true
+        let style = scroll.scrollerStyle
+        QuietScrollers.configure(scroll)
+        #expect(scroll.scrollerStyle == style, "AppKit follows \"Show scroll bars\": the style is never forced")
+        #expect(scroll.autohidesScrollers)
+        #expect(scroll.verticalScroller?.controlSize == .small)
+        #expect(scroll.horizontalScroller?.controlSize == .small)
+        QuietScrollers.configure(nil)
     }
 }

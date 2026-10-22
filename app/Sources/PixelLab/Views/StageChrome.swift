@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The zoom readout over the stage's bottom-right corner ("2×") for about a second after the
@@ -23,5 +24,29 @@ struct ZoomReadout: View {
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: model.zoomReadout)
         .allowsHitTesting(false)
+    }
+}
+
+/// Quiet scroll bars (R5, D3): the scroll view this sits inside gets small, autohiding scrollers and
+/// otherwise keeps the system's style, so AppKit follows "Show scroll bars": overlay scrollers
+/// that fade and take no room, or legacy ones whose room is reserved from the start. It never
+/// sets `scrollerStyle`.
+struct QuietScrollers: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { Probe() }
+    func updateNSView(_ view: NSView, context: Context) { Self.configure(view.enclosingScrollView) }
+
+    static func configure(_ scroll: NSScrollView?) {
+        guard let scroll else { return }
+        scroll.autohidesScrollers = true
+        scroll.horizontalScroller?.controlSize = .small
+        scroll.verticalScroller?.controlSize = .small
+    }
+
+    /// Finds its scroll view once it is in the window (the hosting view adds it a moment later).
+    private final class Probe: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            DispatchQueue.main.async { [weak self] in QuietScrollers.configure(self?.enclosingScrollView) }
+        }
     }
 }
