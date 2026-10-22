@@ -70,11 +70,16 @@ final class StageInputView: NSView {
         zoomAnchor = (g.scenePoint(fromView: view), CGPoint(x: view.x - b.minX, y: view.y - b.minY))
     }
 
-    /// How far, in points, the last anchored zoom left its scene point from where it was on screen.
+    /// How far, in points, the last anchored zoom left the view from where it should be: the scroll origin that
+    /// puts the anchor's scene point back where it was on screen, limited to what the content can scroll to
+    /// (near an edge the point can't stay put, and the view ends at the edge).
     var anchorDrift: CGFloat? {
-        guard let g = geometry, let kept = keptAnchor, let clip = enclosingScrollView?.contentView else { return nil }
-        let p = g.viewPoint(fromScene: kept.scene)
-        return hypot(p.x - clip.bounds.minX - kept.inClip.x, p.y - clip.bounds.minY - kept.inClip.y)
+        guard let g = geometry, let kept = keptAnchor, let scroll = enclosingScrollView, let content = scroll.documentView else { return nil }
+        let clip = scroll.contentView
+        let ideal = g.clipOrigin(keeping: kept.scene, at: kept.inClip)
+        let want = CGPoint(x: min(ideal.x, max(content.frame.width - clip.bounds.width, 0)),
+                           y: min(ideal.y, max(content.frame.height - clip.bounds.height, 0)))
+        return hypot(want.x - clip.bounds.minX, want.y - clip.bounds.minY)
     }
 
     /// A zoom step by `steps` levels anchored at a view point (nil: the middle of the stage).
