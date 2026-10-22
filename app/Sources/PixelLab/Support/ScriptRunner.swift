@@ -25,6 +25,8 @@ import Foundation
 ///     reducemotion on|off|system   (overrides the system's Reduce Motion for Play and the timeline)
 ///     undo redo save [force] revert publish [<dir>] done   saveas <path.pixellab>
 ///     time <ms>  play  pause  tracks on|off   zoom fit|1-4   sidebar library|items
+///     pinch in|out [<x> <y>]   (one zoom step, kept under that scene pixel or the middle)   zoomkey in|out   (⌘= and ⌘−)
+///     expect readout <2×|none>   expect anchor kept   (the last pinch left its scene point where it was)
 ///     search <text>   wait <ms>   snapshot <file.png>   log <text>
 ///     settings open|close   snapshot settings <file.png>   (the Settings window)
 ///     cli <args…>  (the bundled program on the script's document: an outside edit to the files)
@@ -509,6 +511,17 @@ final class ScriptRunner {
             let z = try arg(words, 1)
             if z == "fit" { model.zoom = .fit } else { model.zoom = .level(try int(words, 1)) }
             return nil
+        case "pinch":
+            // One pinch step (a magnify event's effect) anchored at a scene pixel, else the middle of the stage.
+            guard let view = editor.stageView as? StageInputView, let geometry = view.geometry else { throw Failure("no stage") }
+            let steps = try arg(words, 1) == "in" ? 1 : -1
+            let at: CGPoint? = words.count >= 4 ? geometry.viewPoint(fromScene: CGPoint(x: try int(words, 2), y: try int(words, 3))) : nil
+            view.zoomStep(steps, atView: at)
+            return "zoom \(model.effectiveZoom)"
+        case "zoomkey":
+            // ⌘= / ⌘−, centered on the stage.
+            model.stepZoom(by: try arg(words, 1) == "in" ? 1 : -1)
+            return "zoom \(model.effectiveZoom)"
         case "sidebar":
             switch try arg(words, 1) {
             case "palette": model.objectEditor.sidebarTab = .palette
@@ -1403,6 +1416,11 @@ final class ScriptRunner {
         case "scenes": got = String(model.scenes.count)
         case "objects": got = String(model.objects.count)
         case "zoom": got = String(model.effectiveZoom)
+        case "readout": got = model.zoomReadout?.text ?? "none"
+        case "anchor":
+            // The last anchored zoom left its scene point where it was on screen (within a point).
+            guard let drift = (model.editor.stageView as? StageInputView)?.anchorDrift else { throw Failure("no anchored zoom yet") }
+            got = drift <= 1 ? "kept" : "moved \(drift) points"
         case "badge": got = NSApp.dockTile.badgeLabel ?? "none"
         case "theme": got = model.stageDark ? "dark" : "light"
         case "outputs": got = model.build?.result.map { String($0.outputs.count) } ?? "none"

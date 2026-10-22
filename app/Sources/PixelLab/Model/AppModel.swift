@@ -11,6 +11,13 @@ enum Zoom: Hashable, Sendable {
     static func levels(for kind: DocRef.Kind) -> [Int] { kind == .scene ? [1, 2, 3, 4] : [4, 8, 12, 16] }
 }
 
+/// What the zoom readout shows: the level, and a number that tells one showing from the next.
+struct ZoomReadoutValue: Equatable, Sendable {
+    var level: Int
+    var id: Int
+    var text: String { "\(level)×" }
+}
+
 /// Why the app can't open the document yet; the setup screen shows it.
 struct SetupProblem: Equatable {
     var document: String?
@@ -973,9 +980,47 @@ final class AppModel {
     var zoom: Zoom {
         get { mode == .scene ? sceneZoom : objectZoom }
         set {
+            let before = effectiveZoom
             if mode == .scene { sceneZoom = newValue } else { objectZoom = newValue }
             ensureWorkspace()
+            let after = effectiveZoom
+            if after != before { showZoomReadout(after) }
         }
+    }
+
+    /// The readout over the stage's corner after a zoom change ("2×"): it clears itself
+    /// after `readoutSeconds` (docs/intents/2026-10-floating-library/spec.md, R3).
+    var zoomReadout: ZoomReadoutValue?
+    @ObservationIgnored var readoutSeconds = 1.1
+    @ObservationIgnored private var readoutCount = 0
+
+    private func showZoomReadout(_ level: Int) {
+        readoutCount += 1
+        let value = ZoomReadoutValue(level: level, id: readoutCount)
+        zoomReadout = value
+        editor.announce("Zoom \(level)×")
+        Task { [weak self, seconds = readoutSeconds] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard let self, self.zoomReadout?.id == value.id else { return }
+            self.zoomReadout = nil
+        }
+    }
+
+    /// One whole level in or out of the open doc's levels (a pinch, ⌘-scroll, ⌘= and ⌘−), starting
+    /// from Fit's effective level and never past the kind's first and last (R1, R2). `anchor` is a
+    /// point of the stage's content to keep where it is on screen; without one the middle of the
+    /// stage stays put. Returns whether the zoom changed.
+    @discardableResult
+    func stepZoom(by steps: Int, anchor: CGPoint? = nil) -> Bool {
+        guard steps != 0, let doc = document else { return false }
+        let levels = Zoom.levels(for: doc.ref.kind)
+        let current = effectiveZoom
+        let at = levels.lastIndex { $0 <= current } ?? 0
+        let next = min(max(at + steps, 0), levels.count - 1)
+        guard levels[next] != current else { return false }
+        (editor.stageView as? StageInputView)?.anchorNextZoom(atView: anchor)
+        zoom = .level(levels[next])
+        return true
     }
 
     /// Stage padding around the art when it's bigger than the stage, in points.

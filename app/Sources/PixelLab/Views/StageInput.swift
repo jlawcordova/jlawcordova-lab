@@ -51,22 +51,55 @@ final class StageInputView: NSView {
     private var panStart: (window: CGPoint, origin: CGPoint)?
     private var tracking: NSTrackingArea?
 
-    /// The workspace changed size or place (it grew, or the viewport did): scroll
-    /// so the scene pixel at the middle of the view stays there, and what the
-    /// owner is looking at stays put.
+    /// A zoom step's anchor: a scene point, and where it sits in the visible area (relative to the clip's origin).
+    private var zoomAnchor: (scene: CGPoint, inClip: CGPoint)?
+    /// The last anchor a zoom kept, for the script hook to check it stayed put.
+    private var keptAnchor: (scene: CGPoint, inClip: CGPoint)?
+
+    /// The next zoom keeps the scene point under a view point (the pointer), or the middle of the
+    /// visible area, where it is on screen (docs/intents/2026-10-floating-library/spec.md, D2).
+    func anchorNextZoom(atView p: CGPoint?) {
+        guard let g = geometry, let clip = enclosingScrollView?.contentView else { return }
+        let b = clip.bounds
+        let view = p ?? CGPoint(x: b.midX, y: b.midY)
+        zoomAnchor = (g.scenePoint(fromView: view), CGPoint(x: view.x - b.minX, y: view.y - b.minY))
+    }
+
+    /// How far, in points, the last anchored zoom left its scene point from where it was on screen.
+    var anchorDrift: CGFloat? {
+        guard let g = geometry, let kept = keptAnchor, let clip = enclosingScrollView?.contentView else { return nil }
+        let p = g.viewPoint(fromScene: kept.scene)
+        return hypot(p.x - clip.bounds.minX - kept.inClip.x, p.y - clip.bounds.minY - kept.inClip.y)
+    }
+
+    /// A zoom step by `steps` levels anchored at a view point (nil: the middle of the stage).
+    func zoomStep(_ steps: Int, atView p: CGPoint?) {
+        editor?.app?.stepZoom(by: steps, anchor: p)
+    }
+
+    /// The workspace changed size or place (it grew, or the viewport did), or the zoom did: scroll
+    /// so the scene point at the middle of the view (or the one a zoom step anchored) stays where it
+    /// is on screen, and what the owner is looking at stays put.
     private func keepScroll(from old: StageGeometry?) {
-        guard isScene, let old, let new = geometry, old.zoom == new.zoom,
-              old.viewBox != new.viewBox || old.contentSize != new.contentSize,
-              let scroll = enclosingScrollView else { return }
+        guard let old, let new = geometry, let scroll = enclosingScrollView else { return }
+        let zoomed = old.zoom != new.zoom
+        guard zoomed || (isScene && (old.viewBox != new.viewBox || old.contentSize != new.contentSize)) else { return }
         let clip = scroll.contentView
         let size = clip.bounds.size
-        let center = old.scenePoint(fromView: CGPoint(x: clip.bounds.origin.x + size.width / 2, y: clip.bounds.origin.y + size.height / 2))
+        let anchor: (scene: CGPoint, inClip: CGPoint)
+        if zoomed, let given = zoomAnchor {
+            anchor = given
+        } else {
+            let mid = CGPoint(x: clip.bounds.origin.x + size.width / 2, y: clip.bounds.origin.y + size.height / 2)
+            anchor = (old.scenePoint(fromView: mid), CGPoint(x: size.width / 2, y: size.height / 2))
+        }
+        zoomAnchor = nil
         DispatchQueue.main.async { [weak self] in
             guard let scroll = self?.enclosingScrollView else { return }
             let clip = scroll.contentView
-            let p = new.viewPoint(fromScene: center)
-            clip.scroll(to: CGPoint(x: max(p.x - size.width / 2, 0), y: max(p.y - size.height / 2, 0)))
+            clip.scroll(to: new.clipOrigin(keeping: anchor.scene, at: anchor.inClip))
             scroll.reflectScrolledClipView(clip)
+            if zoomed { self?.keptAnchor = anchor }
             self?.applyReveal()
         }
     }
@@ -153,6 +186,43 @@ final class StageInputView: NSView {
         }
         guard isScene, let geometry, let editor else { return }
         editor.pointerMoved(point(event), geometry: geometry, option: event.modifierFlags.contains(.option))
+    }
+
+    // MARK: Zoom
+
+    /// A pinch's running total; one level per `pinchStep`, reset when the gesture ends (R1).
+    private var pinch: CGFloat = 0
+    private var wheel: CGFloat = 0
+    static let pinchStep: CGFloat = 0.25
+    static let wheelStep: CGFloat = 24
+
+    override func magnify(with event: NSEvent) {
+        pinch += event.magnification
+        if abs(pinch) >= Self.pinchStep {
+            zoomStep(pinch > 0 ? 1 : -1, atView: point(event))
+            pinch = 0
+        }
+        if event.phase == .ended || event.phase == .cancelled { pinch = 0 }
+    }
+
+    /// ⌘-scroll zooms: a notch of a mouse wheel is a level, a trackpad's running total a level per
+    /// threshold. Plain scrolling goes to the scroll view.
+    override func scrollWheel(with event: NSEvent) {
+        guard event.modifierFlags.contains(.command) else {
+            super.scrollWheel(with: event)
+            return
+        }
+        let dy = event.scrollingDeltaY
+        if event.hasPreciseScrollingDeltas {
+            wheel += dy
+            if abs(wheel) >= Self.wheelStep {
+                zoomStep(wheel > 0 ? 1 : -1, atView: point(event))
+                wheel = 0
+            }
+            if event.phase == .ended || event.phase == .cancelled { wheel = 0 }
+        } else if dy != 0 {
+            zoomStep(dy > 0 ? 1 : -1, atView: point(event))
+        }
     }
 
     override func mouseExited(with event: NSEvent) {

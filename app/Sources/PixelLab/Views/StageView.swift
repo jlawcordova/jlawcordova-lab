@@ -38,6 +38,9 @@ struct StageView: View {
                 PlacePill().padding(12)
             }
         }
+        .overlay(alignment: .bottomTrailing) {
+            ZoomReadout().padding(12)
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(stageLabel)
     }

@@ -90,6 +90,13 @@ struct StageGeometry: Equatable {
         return viewRect(fromScene: CGRect(x: viewBox.minX + b[0] / s, y: viewBox.minY + b[1] / s, width: b[2] / s, height: b[3] / s))
     }
 
+    /// Where a scroll view's clip must start (never before the content's origin) so that the scene
+    /// point `scene` shows `inClip` points from the clip's corner: a zoom step's anchor.
+    func clipOrigin(keeping scene: CGPoint, at inClip: CGPoint) -> CGPoint {
+        let p = viewPoint(fromScene: scene)
+        return CGPoint(x: max(p.x - inClip.x, 0), y: max(p.y - inClip.y, 0))
+    }
+
     // MARK: tiles
 
     /// The top-face center of a tile, in scene pixels (iso.mjs tileToPx).

@@ -127,6 +127,12 @@ struct PixelLabCommands: Commands {
         }
         CommandGroup(after: .toolbar) {
             Divider()
+            Button("Zoom In") { model.stepZoom(by: 1) }
+                .keyboardShortcut("=")
+                .disabled(model.document == nil)
+            Button("Zoom Out") { model.stepZoom(by: -1) }
+                .keyboardShortcut("-")
+                .disabled(model.document == nil)
             Button("Zoom to Fit") { model.zoom = .fit }
                 .keyboardShortcut("0")
             ForEach(0..<4, id: \.self) { i in
