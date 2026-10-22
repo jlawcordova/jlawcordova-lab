@@ -39,6 +39,7 @@ struct DocumentWindow: View {
         NavigationSplitView {
             SidebarView()
                 .navigationSplitViewColumnWidth(min: 220, ideal: 256, max: 340)
+                .toolbar(removing: .sidebarToggle)
         } detail: {
             VStack(spacing: 0) {
                 if model.showsStaleBanner, let file = model.document?.ref.file {

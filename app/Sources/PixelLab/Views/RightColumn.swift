@@ -30,6 +30,7 @@ struct RightColumn: View {
             }
         }
         .background(Theme.sidebar)
+        .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { model.rightColumnWidth = $0 }
     }
 
     private func tab(_ t: RightTab, _ title: String, sparkle: Bool = false) -> some View {

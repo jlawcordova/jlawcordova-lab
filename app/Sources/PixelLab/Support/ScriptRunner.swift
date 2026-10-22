@@ -26,6 +26,8 @@ import Foundation
 ///     undo redo save [force] revert publish [<dir>] done   saveas <path.pixellab>
 ///     time <ms>  play  pause  tracks on|off   zoom fit|1-4   sidebar library|layers
 ///     pinch in|out [<x> <y>]   (one zoom step, kept under that scene pixel or the middle)   zoomkey in|out   (⌘= and ⌘−)
+///     librarydrop <name> <col> <row> <level>   (a drop from the Library onto a tile)   expect floatingbar <ids>   expect toolbar none
+///     expect inspector shown   (the right column is on screen)
 ///     editobject [<name>]   back   expect returnscene <name|none>   (Edit Object on the selected item or a named object; Back)
 ///     expect readout <2×|none>   expect anchor kept   (the last pinch left its scene point where it was)
 ///     search <text>   wait <ms>   snapshot <file.png>   log <text>
@@ -57,7 +59,8 @@ import Foundation
 ///     layerskey <spec> (up, down, shift+down, right, left, return, esc)   library open|close  (sidebar library|layers: the same)
 ///     (move, drag and the arrow keys act on the whole selection)
 ///     expect selection <targets,…|none>   expect inside|layername|itemlayer|hover <id|none>   expect scenelayers|rows <n>
-///     hide|show|lock|unlock <item path>   (a single item's eye and lock)   expect hiddenitems|lockeditems <paths,…|none>
+///     hide|show|lock|unlock <item path>|selected   (a single item's eye and lock)   expect hiddenitems|lockeditems <paths,…|none>
+///     expect hiddencount|lockedcount <n>
 ///     expect hiddenlayers|lockedlayers <ids,…|none>   expect into <name>   expect crumbs <a›b>   expect movedby <c,r|none>
 ///     expect menu <enabled items,…|none|closed>   expect tab layers|library   expect inspector layer|item|multi|none   expect faded true|false
 ///
@@ -202,7 +205,7 @@ final class ScriptRunner {
 
     /// Whether a word is an item path (digits and dots), as `hide`, `show`, `lock` and `unlock` take for a single item.
     static func isItemPath(_ words: [String], _ i: Int) -> Bool {
-        i < words.count && !words[i].isEmpty && words[i].allSatisfy { $0.isNumber || $0 == "." } && !words[i].hasPrefix(".") && !words[i].hasSuffix(".")
+        i < words.count && words[i] == "selected" || i < words.count && !words[i].isEmpty && words[i].allSatisfy { $0.isNumber || $0 == "." } && !words[i].hasPrefix(".") && !words[i].hasSuffix(".")
     }
 
     private func int(_ words: [String], _ i: Int) throws -> Int {
@@ -293,6 +296,16 @@ final class ScriptRunner {
             guard let name = words.count > 1 ? words[1] : doc?.selectedItem?.object else { throw Failure("editobject <name>, or select an item first") }
             await model.editObject(name)
             return "editing \(name)"
+        case "librarydrop":
+            // A drop from the Library popover onto a tile, at a level (R8): `librarydrop <name> <col> <row> <level>`.
+            guard let view = editor.stageView as? StageInputView, let geometry = view.geometry else { throw Failure("no stage") }
+            let name = try arg(words, 1)
+            let level = try int(words, 4)
+            editor.setPlaceLevel(level)
+            guard let p = geometry.viewPoint(ofTile: try int(words, 2), try int(words, 3), level) else { throw Failure("no tile origin") }
+            _ = await model.thumbnails.art(name)
+            editor.drop(name, at: p, geometry: geometry, option: false)
+            return "dropped \(name)"
         case "back":
             await model.backToScene()
             return "back to \(model.document?.ref.name ?? "none")"
@@ -896,17 +909,19 @@ final class ScriptRunner {
             return "inside \(layers.inside ?? "none")"
         case "hide", "show":
             if Self.isItemPath(words, 1) {
-                // An item path (like 3 or 5.2): a single item's eye (R19).
-                if (layers.hiddenItems[words[1]] != nil) != (words[0] == "hide") { layers.toggleItemHidden(words[1]) }
-                return nil
+                // An item path (like 3 or 5.2), or `selected`: a single item's eye (R19).
+                guard let path = words[1] == "selected" ? doc?.selectedPath : words[1] else { throw Failure("select one item first") }
+                if (layers.hiddenItems[path] != nil) != (words[0] == "hide") { layers.toggleItemHidden(path) }
+                return "item \(path)"
             }
             let id = try layer(1)
             if layers.hidden.contains(id) != (words[0] == "hide") { layers.toggleHidden(id) }
             return nil
         case "lock", "unlock":
             if Self.isItemPath(words, 1) {
-                if (layers.lockedItems[words[1]] != nil) != (words[0] == "lock") { layers.toggleItemLocked(words[1]) }
-                return nil
+                guard let path = words[1] == "selected" ? doc?.selectedPath : words[1] else { throw Failure("select one item first") }
+                if (layers.lockedItems[path] != nil) != (words[0] == "lock") { layers.toggleItemLocked(path) }
+                return "item \(path)"
             }
             let id = try layer(1)
             if layers.locked.contains(id) != (words[0] == "lock") { layers.toggleLocked(id) }
@@ -962,6 +977,8 @@ final class ScriptRunner {
         case "itemlayer": return doc?.selectedPath.flatMap { tree.layerOfItem[$0] } ?? "none"
         case "hiddenitems": return list(layers.hiddenItems.keys.sorted())
         case "lockeditems": return list(layers.lockedItems.keys.sorted())
+        case "hiddencount": return String(layers.hiddenItems.count)
+        case "lockedcount": return String(layers.lockedItems.count)
         case "hiddenlayers": return list(layers.hidden.sorted())
         case "lockedlayers": return list(layers.locked.sorted())
         case "into": return layers.placeTargetName
@@ -1450,6 +1467,19 @@ final class ScriptRunner {
         case "objects": got = String(model.objects.count)
         case "zoom": got = String(model.effectiveZoom)
         case "returnscene": got = model.returnScene?.name ?? "none"
+        case "floatingbar":
+            // The bar's buttons by id: select,pan,library in a scene; pencil,eraser,fill,picker,pan in an object (R6).
+            guard let kind = doc?.ref.kind else { got = "none"; break }
+            got = FloatingBarItems.ids(for: kind).joined(separator: ",")
+        case "toolbar":
+            // The window has no toolbar items (R12).
+            let items = Snapshotter.mainWindow()?.toolbar?.items.filter {
+                $0.itemIdentifier != .flexibleSpace && $0.itemIdentifier != .space && !$0.itemIdentifier.rawValue.contains("splitViewSeparator")
+            } ?? []
+            got = items.isEmpty ? "none" : items.map(\.itemIdentifier.rawValue).joined(separator: ",")
+        case "inspector" where want == "shown":
+            // The right column is on screen at its least width or more (R13).
+            got = model.rightColumnWidth >= 260 ? "shown" : "hidden (\(Int(model.rightColumnWidth)) pt)"
         case "readout": got = model.zoomReadout?.text ?? "none"
         case "anchor":
             // The last anchored zoom left its scene point where it was on screen (within a point).
