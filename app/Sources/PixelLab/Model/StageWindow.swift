@@ -13,7 +13,8 @@ enum StageWindow {
     /// Windows are whole multiples of this, so they don't change on every small move.
     static let grain: CGFloat = 32
 
-    /// The room to leave on a side: a viewport's worth at this zoom.
+    /// The room to leave on a side: a viewport's worth at this zoom (the app asks at the kind's lowest zoom,
+    /// so the window holds the stage at every zoom and a zoom never grows it).
     static func pad(viewport: CGSize, zoom: CGFloat) -> CGFloat {
         let z = max(zoom, 1)
         let want = max(viewport.width, viewport.height) / z

@@ -29,7 +29,7 @@ import Foundation
 ///     librarydrop <name> <col> <row> <level>   (a drop from the Library onto a tile)   expect floatingbar <ids>   expect toolbar none
 ///     expect inspector shown   (the right column is on screen)
 ///     editobject [<name>]   back   expect returnscene <name|none>   (Edit Object on the selected item or a named object; Back)
-///     expect anchor kept   (the last pinch left its scene point where it was)
+///     expect anchor kept   (the last pinch left its scene point where it was)   expect anchor steady   (and no frame on the way moved it; after wait 600)
 ///     search <text>   wait <ms>   snapshot <file.png>   log <text>
 ///     settings open|close   snapshot settings <file.png>   (the Settings window)
 ///     cli <args…>  (the bundled program on the script's document: an outside edit to the files)
@@ -1487,6 +1487,11 @@ final class ScriptRunner {
         case "inspector" where want == "shown":
             // The right column is on screen at its least width or more (R13).
             got = model.rightColumnWidth >= 260 ? "shown" : "hidden (\(Int(model.rightColumnWidth)) pt)"
+        case "anchor" where want == "steady":
+            // No frame drawn during the last zoom showed the anchor away from where it belongs (within a point).
+            // The zoom is watched for half a second: `wait 600` first.
+            guard let worst = (model.editor.stageView as? StageInputView)?.traceWorst else { throw Failure("no anchored zoom yet") }
+            got = worst <= 1 ? "steady" : "strayed \(Int(worst.rounded())) points"
         case "anchor":
             // The last anchored zoom left its scene point where it was on screen (within a point).
             guard let drift = (model.editor.stageView as? StageInputView)?.anchorDrift else { throw Failure("no anchored zoom yet") }

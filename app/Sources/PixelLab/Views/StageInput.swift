@@ -45,7 +45,10 @@ struct StageInput: NSViewRepresentable {
 
 final class StageInputView: NSView {
     var geometry: StageGeometry? {
-        didSet { keepScroll(from: oldValue) }
+        didSet {
+            if let geometry, geometry.contentSize == frame.size { laidOut = geometry }
+            keepScroll(from: oldValue)
+        }
     }
     weak var editor: SceneEditor?
     weak var objects: ObjectEditor?
@@ -69,6 +72,7 @@ final class StageInputView: NSView {
         let b = clip.bounds
         let view = p ?? CGPoint(x: b.midX, y: b.midY)
         zoomAnchor = (g.scenePoint(fromView: view), CGPoint(x: view.x - b.minX, y: view.y - b.minY))
+        if let a = zoomAnchor { traceZoom(scene: a.scene, inClip: a.inClip) }
     }
 
     /// How far, in points, the last anchored zoom left the view from where it should be: the scroll origin that
@@ -81,6 +85,48 @@ final class StageInputView: NSView {
         let want = CGPoint(x: min(ideal.x, max(content.frame.width - clip.bounds.width, 0)),
                            y: min(ideal.y, max(content.frame.height - clip.bounds.height, 0)))
         return hypot(want.x - clip.bounds.minX, want.y - clip.bounds.minY)
+    }
+
+    /// The script hook's watch on a zoom: how far, in screen points, the anchor strayed from where it belongs on any
+    /// frame drawn after the zoom began (sampled when the run loop goes idle, after Core Animation commits).
+    private var traceObserver: CFRunLoopObserver?
+    private var traceAnchor: (scene: CGPoint, inClip: CGPoint)?
+    private(set) var traceWorst: CGFloat?
+
+    /// Watches the next half second of frames against an anchor (a scene point, where it sits in the clip on screen).
+    func traceZoom(scene: CGPoint, inClip: CGPoint) {
+        traceAnchor = (scene, inClip)
+        traceWorst = 0
+        guard traceObserver == nil else { return }
+        let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, true, Int(Int32.max)) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.sampleTrace() }
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        traceObserver = observer
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self, let o = self.traceObserver else { return }
+            CFRunLoopRemoveObserver(CFRunLoopGetMain(), o, .commonModes)
+            self.traceObserver = nil
+        }
+    }
+
+    private func sampleTrace() {
+        guard let a = traceAnchor, let scroll = enclosingScrollView else { return }
+        // The geometry on screen is the one the view is laid out at.
+        guard let g = laidOut else { return }
+        let p = g.viewPoint(fromScene: a.scene)
+        let o = scroll.contentView.bounds.origin
+        let m = scroll.magnification
+        let off = hypot((p.x - o.x) * m - a.inClip.x, (p.y - o.y) * m - a.inClip.y)
+        traceWorst = max(traceWorst ?? 0, off)
+    }
+
+    /// The geometry whose content size the view has now (what is drawn), as opposed to the one SwiftUI just handed it.
+    private var laidOut: StageGeometry?
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        if let g = geometry, g.contentSize == newSize { laidOut = g }
     }
 
     /// A zoom step by `steps` levels anchored at a view point (nil: the middle of the stage).
@@ -261,6 +307,7 @@ final class StageInputView: NSView {
         guard abs(m - 1) > 0.0005 else { return }
         let origin = scroll.contentView.bounds.origin
         zoomAnchor = (g.scenePoint(fromView: origin), .zero)
+        traceZoom(scene: g.scenePoint(fromView: origin), inClip: .zero)
         let target = Double(g.zoom) * Double(m)
         scroll.magnification = 1
         app.setZoomScale(target)

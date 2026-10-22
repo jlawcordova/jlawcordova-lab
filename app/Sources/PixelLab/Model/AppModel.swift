@@ -651,21 +651,25 @@ final class AppModel {
         return r
     }
 
+    /// The room the workspace keeps around what's on stage: a viewport's worth at the kind's lowest zoom, not
+    /// the zoom the stage has now, so no zoom (a pinch, ⌘−) ever has to grow it. A workspace that grew after a
+    /// zoom out was laid out first at its old size, smaller than the stage, and centered, until the bigger
+    /// render landed: the view jumped to the middle and back.
+    var workspacePad: CGFloat { StageWindow.pad(viewport: stageViewport, zoom: CGFloat(zoomRange.lowerBound)) }
+
     /// The window the stage renders now, growing the doc's if the box, the
-    /// cursor, the zoom or the viewport need more room.
+    /// cursor or the viewport need more room.
     func workspace(for doc: DocumentModel) -> CGRect {
-        let pad = StageWindow.pad(viewport: stageViewport, zoom: zoomScale)
-        let window = StageWindow.grow(current: doc.window, needed: neededRect(for: doc), pad: pad)
+        let window = StageWindow.grow(current: doc.window, needed: neededRect(for: doc), pad: workspacePad)
         if doc.window != window { doc.window = window }
         return window
     }
 
-    /// The zoom, the viewport or the cursor changed: render again if the
+    /// The viewport or the cursor changed: render again if the
     /// workspace has to grow to hold what's on stage.
     func ensureWorkspace() {
         guard let doc = document, doc.ref.kind == .scene, let window = doc.window else { return }
-        let pad = StageWindow.pad(viewport: stageViewport, zoom: zoomScale)
-        if StageWindow.grow(current: window, needed: neededRect(for: doc), pad: pad) != window { requestRender() }
+        if StageWindow.grow(current: window, needed: neededRect(for: doc), pad: workspacePad) != window { requestRender() }
     }
 
     /// The stage cursor moved: the workspace holds its tile.
@@ -1055,7 +1059,6 @@ final class AppModel {
         get { mode == .scene ? sceneZoom : objectZoom }
         set {
             if mode == .scene { sceneZoom = newValue } else { objectZoom = newValue }
-            ensureWorkspace()
         }
     }
 

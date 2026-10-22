@@ -13,6 +13,14 @@ expect inspector shown
 expect floatingbar select,pan,library
 expect library closed
 snapshot @OUT@/window-scene-dark.png
+# a zoom never moves the view on the way: the workspace already holds the stage at 1x, so a big
+# zoom out isn't laid out small and centered first (it jumped to the middle and back)
+zoom 4
+wait 300
+pinchby 0.25 180 50
+expect zoom 1
+wait 600
+expect anchor steady
 # R1, R2: a pinch-step (⌘= is the same) goes one whole level and keeps the pixel under the pointer
 zoom 1
 pinch in 180 50
