@@ -523,7 +523,7 @@ final class SceneEditor {
     func selectNext(forward: Bool) -> Bool {
         guard let doc, let layers = app?.layers else { return false }
         let tree = doc.layerTree
-        let order = tree.order.filter { tree.pickable($0, inside: layers.inside, locked: layers.locked) && (layers.inside == nil || tree.chain(ofItem: $0).contains(layers.inside!)) && !tree.isHidden($0, hidden: layers.hidden) }
+        let order = tree.order.filter { layers.isPickable($0) && (layers.inside == nil || tree.chain(ofItem: $0).contains(layers.inside!)) }
         guard !order.isEmpty else { return false }
         let next: String
         if let current = doc.selectedPath, let i = order.firstIndex(of: current) {

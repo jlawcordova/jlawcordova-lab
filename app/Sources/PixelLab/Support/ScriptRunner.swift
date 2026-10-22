@@ -56,6 +56,7 @@ import Foundation
 ///     layerskey <spec> (up, down, shift+down, right, left, return, esc)   library open|close  (sidebar library|layers: the same)
 ///     (move, drag and the arrow keys act on the whole selection)
 ///     expect selection <targets,…|none>   expect inside|layername|itemlayer|hover <id|none>   expect scenelayers|rows <n>
+///     hide|show|lock|unlock <item path>   (a single item's eye and lock)   expect hiddenitems|lockeditems <paths,…|none>
 ///     expect hiddenlayers|lockedlayers <ids,…|none>   expect into <name>   expect crumbs <a›b>   expect movedby <c,r|none>
 ///     expect menu <enabled items,…|none|closed>   expect tab layers|library   expect inspector layer|item|multi|none   expect faded true|false
 ///
@@ -196,6 +197,11 @@ final class ScriptRunner {
     struct Failure: LocalizedError {
         var errorDescription: String?
         init(_ s: String) { errorDescription = s }
+    }
+
+    /// Whether a word is an item path (digits and dots), as `hide`, `show`, `lock` and `unlock` take for a single item.
+    static func isItemPath(_ words: [String], _ i: Int) -> Bool {
+        i < words.count && !words[i].isEmpty && words[i].allSatisfy { $0.isNumber || $0 == "." } && !words[i].hasPrefix(".") && !words[i].hasSuffix(".")
     }
 
     private func int(_ words: [String], _ i: Int) throws -> Int {
@@ -880,10 +886,19 @@ final class ScriptRunner {
             layers.goTo(level: layers.crumbs[n].level)
             return "inside \(layers.inside ?? "none")"
         case "hide", "show":
+            if Self.isItemPath(words, 1) {
+                // An item path (like 3 or 5.2): a single item's eye (R19).
+                if (layers.hiddenItems[words[1]] != nil) != (words[0] == "hide") { layers.toggleItemHidden(words[1]) }
+                return nil
+            }
             let id = try layer(1)
             if layers.hidden.contains(id) != (words[0] == "hide") { layers.toggleHidden(id) }
             return nil
         case "lock", "unlock":
+            if Self.isItemPath(words, 1) {
+                if (layers.lockedItems[words[1]] != nil) != (words[0] == "lock") { layers.toggleItemLocked(words[1]) }
+                return nil
+            }
             let id = try layer(1)
             if layers.locked.contains(id) != (words[0] == "lock") { layers.toggleLocked(id) }
             return nil
@@ -936,6 +951,8 @@ final class ScriptRunner {
         case "scenelayers": return String(tree.layers.count)
         case "layername": return doc?.selectedLayer.map { tree.name(of: $0) } ?? "none"
         case "itemlayer": return doc?.selectedPath.flatMap { tree.layerOfItem[$0] } ?? "none"
+        case "hiddenitems": return list(layers.hiddenItems.keys.sorted())
+        case "lockeditems": return list(layers.lockedItems.keys.sorted())
         case "hiddenlayers": return list(layers.hidden.sorted())
         case "lockedlayers": return list(layers.locked.sorted())
         case "into": return layers.placeTargetName

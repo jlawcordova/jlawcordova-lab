@@ -37,10 +37,37 @@ struct SelectionDrag: Equatable, Sendable {
     var isZero: Bool { dc == 0 && dr == 0 }
 }
 
-/// A scene's hidden and locked layers, as `layer-view.json` keeps them.
+/// A hidden or locked item: its path, and the object it held when it was marked (an entry whose
+/// path holds another object later is dropped; docs/intents/2026-10-floating-library/spec.md, D12).
+struct ItemMark: Codable, Hashable, Sendable {
+    var path: String
+    var object: String
+}
+
+/// A scene's hidden and locked layers and items, as `layer-view.json` keeps them.
 struct LayerViewState: Codable, Equatable, Sendable {
     var hidden: [String] = []
     var locked: [String] = []
+    var hiddenItems: [ItemMark] = []
+    var lockedItems: [ItemMark] = []
+
+    init(hidden: [String] = [], locked: [String] = [], hiddenItems: [ItemMark] = [], lockedItems: [ItemMark] = []) {
+        self.hidden = hidden
+        self.locked = locked
+        self.hiddenItems = hiddenItems
+        self.lockedItems = lockedItems
+    }
+
+    // A file from before items could be hidden has no item lists.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        hidden = try c.decodeIfPresent([String].self, forKey: .hidden) ?? []
+        locked = try c.decodeIfPresent([String].self, forKey: .locked) ?? []
+        hiddenItems = try c.decodeIfPresent([ItemMark].self, forKey: .hiddenItems) ?? []
+        lockedItems = try c.decodeIfPresent([ItemMark].self, forKey: .lockedItems) ?? []
+    }
+
+    var isEmpty: Bool { hidden.isEmpty && locked.isEmpty && hiddenItems.isEmpty && lockedItems.isEmpty }
 }
 
 /// Scene layers in the app (docs/intents/2026-10-scene-layers/spec.md, D5–D13):
@@ -60,6 +87,9 @@ final class LayersModel {
     var expanded: Set<String> = []
     var hidden: Set<String> = []
     var locked: Set<String> = []
+    /// Hidden and locked single items: path → the object it held when it was marked (R19).
+    var hiddenItems: [String: String] = [:]
+    var lockedItems: [String: String] = [:]
     /// The target under the pointer on the stage (Select tool).
     var hover: LayerTarget?
     var menu: LayerMenuState?
@@ -106,6 +136,7 @@ final class LayersModel {
     /// and render again if hidden layers or the layer you're in only now exist.
     func itemsChanged() {
         if let i = inside, tree.byID[i] == nil { inside = nil }
+        pruneItemMarks()
         if renderParams != renderedParams {
             // The timeline's cached frames were drawn without these layers hidden.
             app?.timeline.invalidate()
@@ -169,6 +200,11 @@ final class LayersModel {
         doc?.editReturned()
         app?.requestItems()
         guard let reordered, !reordered.isEmpty else { return }
+        // Hidden and locked items follow their items to their new paths.
+        let hiddenBefore = hiddenItems, lockedBefore = lockedItems
+        hiddenItems = Dictionary(hiddenItems.map { (reordered[$0.key] ?? $0.key, $0.value) }, uniquingKeysWith: { a, _ in a })
+        lockedItems = Dictionary(lockedItems.map { (reordered[$0.key] ?? $0.key, $0.value) }, uniquingKeysWith: { a, _ in a })
+        if hiddenItems != hiddenBefore || lockedItems != lockedBefore { saveViewState() }
         doc?.follow(reordered)
         baseline = baseline?.following(reordered)
         hover = hover?.following(reordered)
@@ -272,9 +308,55 @@ final class LayersModel {
 
     func toggleLocked(_ id: String) {
         if locked.contains(id) { locked.remove(id) } else { locked.insert(id) }
-        if let h = hover, !(h.itemPath.map { tree.pickable($0, inside: inside, locked: locked) } ?? true) { hover = nil }
+        if let h = hover, !(h.itemPath.map(isPickable) ?? true) { hover = nil }
         saveViewState()
         announce("\(tree.name(of: id)) \(locked.contains(id) ? "locked" : "unlocked")")
+    }
+
+    /// Whether a click on the stage can pick this item: its layers and the item itself are neither hidden nor locked.
+    func isPickable(_ path: String) -> Bool {
+        !tree.isHidden(path, hidden: hidden)
+            && tree.pickable(path, inside: inside, locked: locked, hiddenItems: Set(hiddenItems.keys), lockedItems: Set(lockedItems.keys))
+    }
+
+    private func objectName(of path: String) -> String { doc?.itemsByPath[path]?.object ?? path }
+
+    /// The eye on an item's row: hide it from the stage (it leaves the selection) or show it (R19).
+    func toggleItemHidden(_ path: String) {
+        let name = objectName(of: path)
+        if hiddenItems[path] != nil {
+            hiddenItems[path] = nil
+            announce("\(name) shown")
+        } else {
+            hiddenItems[path] = name
+            if selection.contains(.item(path)) { select(selection.filter { $0 != .item(path) }, announce: false) }
+            if hover == .item(path) { hover = nil }
+            announce("\(name) hidden")
+        }
+        saveViewState()
+        app?.timeline.invalidate()
+        app?.requestRender()
+    }
+
+    /// The lock on an item's row: the stage passes it by; the tree, the inspector and the keys still select it.
+    func toggleItemLocked(_ path: String) {
+        let name = objectName(of: path)
+        if lockedItems[path] != nil { lockedItems[path] = nil } else { lockedItems[path] = name }
+        if hover == .item(path) { hover = nil }
+        saveViewState()
+        announce("\(name) \(lockedItems[path] != nil ? "locked" : "unlocked")")
+    }
+
+    /// From a list as of the last edit's result: an entry whose path no longer holds its object is dropped
+    /// (a file changed on disk, a merge or a revert; D12).
+    func pruneItemMarks() {
+        guard let doc, itemsCurrent else { return }
+        let hiddenKept = hiddenItems.filter { doc.itemsByPath[$0.key]?.object == $0.value }
+        let lockedKept = lockedItems.filter { doc.itemsByPath[$0.key]?.object == $0.value }
+        guard hiddenKept != hiddenItems || lockedKept != lockedItems else { return }
+        hiddenItems = hiddenKept
+        lockedItems = lockedKept
+        saveViewState()
     }
 
     private var viewStateURL: URL? {
@@ -294,10 +376,14 @@ final class LayersModel {
         guard let root = documentKey, let scene = doc?.ref.name, let s = readViewStates()[root]?[scene] else {
             hidden = []
             locked = []
+            hiddenItems = [:]
+            lockedItems = [:]
             return
         }
         hidden = Set(s.hidden)
         locked = Set(s.locked)
+        hiddenItems = Dictionary(s.hiddenItems.map { ($0.path, $0.object) }, uniquingKeysWith: { a, _ in a })
+        lockedItems = Dictionary(s.lockedItems.map { ($0.path, $0.object) }, uniquingKeysWith: { a, _ in a })
     }
 
     /// Writes them back. Only the app reads this file; it's never in the document.
@@ -305,8 +391,11 @@ final class LayersModel {
         guard let url = viewStateURL, let root = documentKey, let scene = doc?.ref.name else { return }
         var all = readViewStates()
         var forDoc = all[root] ?? [:]
-        let s = LayerViewState(hidden: hidden.sorted(), locked: locked.sorted())
-        if s.hidden.isEmpty, s.locked.isEmpty { forDoc[scene] = nil } else { forDoc[scene] = s }
+        let s = LayerViewState(
+            hidden: hidden.sorted(), locked: locked.sorted(),
+            hiddenItems: hiddenItems.map { ItemMark(path: $0.key, object: $0.value) }.sorted { $0.path < $1.path },
+            lockedItems: lockedItems.map { ItemMark(path: $0.key, object: $0.value) }.sorted { $0.path < $1.path })
+        if s.isEmpty { forDoc[scene] = nil } else { forDoc[scene] = s }
         all[root] = forDoc.isEmpty ? nil : forDoc
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -318,8 +407,9 @@ final class LayersModel {
     /// The render's `hide` and `focus` params.
     var renderParams: [String: JSONValue] {
         var p: [String: JSONValue] = [:]
-        let shown = hidden.filter { tree.byID[$0] != nil }
-        if !shown.isEmpty { p["hide"] = .array(shown.sorted().map { .string($0) }) }
+        // Hidden layers, and hidden single items by path (`scene.render` takes both).
+        let shown = hidden.filter { tree.byID[$0] != nil }.sorted() + hiddenItems.keys.sorted()
+        if !shown.isEmpty { p["hide"] = .array(shown.map { .string($0) }) }
         if let inside, tree.byID[inside] != nil { p["focus"] = .string(inside) }
         return p
     }
@@ -329,9 +419,9 @@ final class LayersModel {
     /// The item under a scene pixel that a click can pick, and what it picks.
     func pick(scenePixel x: Int, _ y: Int, render: StageImage) -> (path: String, target: LayerTarget)? {
         guard let editor = app?.editor else { return nil }
-        let tree = self.tree, inside = self.inside, locked = self.locked, hidden = self.hidden
-        let path = editor.hitTest(scenePixel: x, y, render: render) { p in
-            !tree.isHidden(p, hidden: hidden) && tree.pickable(p, inside: inside, locked: locked) && tree.target(ofItem: p, inside: inside) != nil
+        let tree = self.tree, inside = self.inside
+        let path = editor.hitTest(scenePixel: x, y, render: render) { [self] p in
+            isPickable(p) && tree.target(ofItem: p, inside: inside) != nil
         }
         guard let path, let t = tree.target(ofItem: path, inside: inside) else { return nil }
         return (path, t)
@@ -427,7 +517,8 @@ final class LayersModel {
     /// Every use of an object (also Edit › Select Every Use, for the selected item).
     func selectEveryUse(of object: String, add: Bool) {
         guard let doc else { return }
-        let paths = tree.everyUse(of: object, items: doc.items, inside: inside, hidden: hidden, locked: locked)
+        let paths = tree.everyUse(of: object, items: doc.items, inside: inside, hidden: hidden, locked: locked,
+                                  hiddenItems: Set(hiddenItems.keys), lockedItems: Set(lockedItems.keys))
         guard !paths.isEmpty else { return }
         let targets = paths.map { LayerTarget.item($0) }
         select(add ? doc.selection + targets.filter { !doc.selection.contains($0) } : targets, reveal: false, announce: false)

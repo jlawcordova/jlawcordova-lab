@@ -172,3 +172,91 @@ import Testing
         #expect(tag() == "pine → Top level", "several things: the top level")
     }
 }
+
+/// docs/intents/2026-10-floating-library/spec.md, R19, D12: hide and lock single items.
+@MainActor @Suite struct ItemHideTests {
+    let app = AppModel()
+    let doc = DocumentModel(ref: DocRef(.scene, "harbor"))
+    var layers: LayersModel { app.layers }
+
+    init() {
+        app.document = doc
+        list([
+            SceneItemInfo(path: "0", object: "pine", at: ItemAt(tile: [0, 0, 1])),
+            SceneItemInfo(path: "1", object: "house", at: ItemAt(tile: [2, 0, 0])),
+            SceneItemInfo(path: "2.0", object: "rock", at: ItemAt(tile: [3, 1, 0]), group: "2"),
+        ])
+    }
+
+    func list(_ items: [SceneItemInfo]) {
+        doc.setItems(SceneItemsResult(scene: "harbor", items: items, groups: [], layers: []))
+        layers.itemsChanged()
+    }
+
+    @Test("R19: a hidden item isn't drawn or picked, and leaves the selection")
+    func testR19AHiddenItemIsNotDrawnOrPickedAndLeavesTheSelection() {
+        layers.select([.item("0"), .item("1")], announce: false)
+        layers.toggleItemHidden("0")
+        #expect(layers.hiddenItems == ["0": "pine"])
+        #expect(doc.selection == [.item("1")], "hiding a selected item deselects it")
+        #expect(layers.renderParams["hide"] == .array([.string("0")]), "the render leaves it out, by path")
+        #expect(!layers.isPickable("0"))
+        #expect(layers.isPickable("1"))
+        // Its row still selects from the tree.
+        layers.selectRow(.item("0"), shift: false)
+        #expect(doc.selection == [.item("0")])
+        layers.toggleItemHidden("0")
+        #expect(layers.hiddenItems.isEmpty)
+        #expect(layers.renderParams["hide"] == nil)
+        #expect(layers.isPickable("0"))
+    }
+
+    @Test("R19: a locked item can't be picked on the stage but selects from the tree")
+    func testR19ALockedItemCantBePickedButSelectsFromTheTree() {
+        layers.toggleItemLocked("1")
+        #expect(layers.lockedItems == ["1": "house"])
+        #expect(!layers.isPickable("1"), "the stage passes it by")
+        #expect(layers.renderParams["hide"] == nil, "locked items still draw")
+        layers.selectRow(.item("1"), shift: false)
+        #expect(doc.selection == [.item("1")], "the tree selects it")
+        #expect(app.editor.selected?.path == "1", "and the inspector and the keys have it")
+        let paths = doc.layerTree.everyUse(of: "house", items: doc.items, inside: nil, hidden: [], locked: [], hiddenItems: [], lockedItems: ["1"])
+        #expect(paths.isEmpty, "Select Every Use skips it too")
+    }
+
+    @Test("R19: a hide follows a depth sort's reordered path")
+    func testR19AHideFollowsADepthSortsReorderedPath() {
+        layers.toggleItemHidden("0")
+        layers.toggleItemLocked("1")
+        layers.followSort(["0": "1", "1": "0"])
+        #expect(layers.hiddenItems == ["1": "pine"], "the pine moved to path 1, and its eye with it")
+        #expect(layers.lockedItems == ["0": "house"])
+        layers.followSort(["1": "5"])
+        #expect(layers.hiddenItems == ["5": "pine"])
+    }
+
+    @Test("R19: a stale entry is dropped on reload")
+    func testR19AStaleEntryIsDroppedOnReload() {
+        layers.toggleItemHidden("0")
+        layers.toggleItemLocked("2.0")
+        #expect(layers.hiddenItems.count == 1 && layers.lockedItems.count == 1)
+        // A file changed on disk: path 0 now holds a house, and the rock is gone.
+        list([
+            SceneItemInfo(path: "0", object: "house", at: ItemAt(tile: [0, 0, 1])),
+            SceneItemInfo(path: "1", object: "pine", at: ItemAt(tile: [2, 0, 0])),
+        ])
+        #expect(layers.hiddenItems.isEmpty, "path 0 holds another object")
+        #expect(layers.lockedItems.isEmpty, "path 2.0 holds nothing")
+        #expect(layers.renderParams["hide"] == nil)
+    }
+
+    @Test("R19: the view state keeps hidden and locked items, and reads a file from before them")
+    func testR19ViewStateKeepsItems() throws {
+        let state = LayerViewState(hidden: ["a"], locked: [], hiddenItems: [ItemMark(path: "3", object: "pine")], lockedItems: [ItemMark(path: "4", object: "rock")])
+        let back = try JSONDecoder().decode(LayerViewState.self, from: try JSONEncoder().encode(state))
+        #expect(back == state)
+        let old = try JSONDecoder().decode(LayerViewState.self, from: Data(#"{"hidden":["a"],"locked":["b"]}"#.utf8))
+        #expect(old.hiddenItems.isEmpty && old.lockedItems.isEmpty)
+        #expect(old.hidden == ["a"] && old.locked == ["b"])
+    }
+}
