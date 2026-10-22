@@ -546,23 +546,30 @@ struct ArtBuildResult: Codable, Sendable, Equatable {
 
     /// The report as the CLI prints it: one line per output, one per preview-only scene, then the problems.
     var report: [String] {
-        outputs.map { "\($0.file ?? $0.scene): \($0.report)" }
-            + previewOnly.map { "\($0.scene) (preview only, not written): \($0.report)" }
+        outputs.map { "\($0.file ?? $0.scene): \($0.line)" }
+            + previewOnly.map { "\($0.scene) (preview only, not written): \($0.line)" }
             + problems
     }
     /// The lines the sheet marks: problems, and outputs over their budget.
     var marked: Set<String> {
-        Set(problems + outputs.filter(\.over).map { "\($0.file ?? $0.scene): \($0.report)" })
+        Set(problems + outputs.filter(\.isOver).map { "\($0.file ?? $0.scene): \($0.line)" })
     }
-    var overBudget: [ArtOutput] { outputs.filter(\.over) }
+    var overBudget: [ArtOutput] { outputs.filter(\.isOver) }
 }
 
 /// One compiled scene: its output file (nil for a preview-only scene), sizes and report line.
 struct ArtOutput: Codable, Sendable, Equatable {
     var file: String?
     var scene: String
+    /// `svg`, or `png` for a scene's preview card image.
+    var kind: String?
     var raw: Int
-    var gzip: Int
-    var over: Bool
-    var report: String
+    /// A PNG has no gzip, over or report.
+    var gzip: Int?
+    var over: Bool?
+    var report: String?
+
+    var isOver: Bool { over ?? false }
+    /// The report line: an SVG's, or "PNG, 4210 bytes".
+    var line: String { report ?? "\(kind?.uppercased() ?? "file"), \(raw) bytes" }
 }

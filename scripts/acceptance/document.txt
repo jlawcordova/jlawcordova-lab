@@ -19,7 +19,7 @@ expect at none
 # The copy's manifest publishes next to itself; the script publishes into its own folder instead.
 publish @OUT@/copy-out
 expect build ok
-expect outputs 6
+expect outputs 19
 snapshot @OUT@/document-publish-dark.png
 done
 appearance light

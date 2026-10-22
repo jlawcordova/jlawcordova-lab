@@ -96,7 +96,7 @@ expect dirty false
 appearance dark
 build
 expect build ok
-expect outputs 6
+expect outputs 19
 snapshot @OUT@/publish-sheet-dark.png
 done
 appearance light
