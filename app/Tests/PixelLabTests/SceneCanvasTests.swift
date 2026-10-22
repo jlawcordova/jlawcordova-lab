@@ -20,11 +20,23 @@ import Testing
     @Test func testR9WorkspaceCoversAViewportAtAnyZoom() {
         let viewport = CGSize(width: 1000, height: 700)
         for zoom in 1...4 {
-            let pad = StageWindow.pad(viewport: viewport, zoom: zoom)
+            let pad = StageWindow.pad(viewport: viewport, zoom: CGFloat(zoom))
             let w = StageWindow.grow(current: nil, needed: box, pad: pad)
             // The art at the center can be scrolled until the edge of the window reaches the viewport's far side.
             #expect(w.width * CGFloat(zoom) >= viewport.width, Comment(rawValue: "zoom \(zoom)"))
             #expect(w.height * CGFloat(zoom) >= viewport.height, Comment(rawValue: "zoom \(zoom)"))
+        }
+    }
+
+    @Test func testR9AWorkspaceForTheLowestZoomCoversTheStageAtEveryZoom() {
+        // A pinch ends at any scale between 1× and 4×: a window padded for 1× is never smaller than the
+        // stage, so a zoom never lays it out centered while a bigger render is on its way.
+        let viewport = CGSize(width: 1000, height: 700)
+        let pad = StageWindow.pad(viewport: viewport, zoom: 1)
+        let w = StageWindow.grow(current: nil, needed: box, pad: pad)
+        for zoom in stride(from: CGFloat(1), through: 4, by: 0.1) {
+            let g = StageGeometry(window: w, zoom: zoom, viewport: viewport, tileOrigin: .zero)
+            #expect(g.artRect.width >= viewport.width && g.artRect.height >= viewport.height, Comment(rawValue: "zoom \(zoom)"))
         }
     }
 

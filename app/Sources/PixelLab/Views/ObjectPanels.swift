@@ -575,7 +575,7 @@ struct ObjectStatusBar: View {
             divider
             Text(layerText(objects)).font(Theme.monoFont(11)).foregroundStyle(Theme.inkMuted).lineLimit(1)
             divider
-            Text("\(model.effectiveZoom)×").font(Theme.monoFont(11)).foregroundStyle(Theme.inkMuted)
+            Text("\(model.zoomText)×").font(Theme.monoFont(11)).foregroundStyle(Theme.inkMuted)
             Spacer(minLength: 8)
             if let edit = model.lastEdit {
                 Text(edit).font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(1).truncationMode(.middle)

@@ -15,7 +15,7 @@ struct PixelLabApp: App {
                 .frame(minWidth: 960, minHeight: 600)
         }
         .defaultSize(width: 1440, height: 900)
-        .windowToolbarStyle(.unified)
+        .windowToolbarStyle(.unifiedCompact)
         .commands { PixelLabCommands(model: model) }
 
         // A single window SwiftUI remembers the frame of. Its automatic Window
@@ -105,6 +105,9 @@ struct PixelLabCommands: Commands {
                 Button("Place at the Cursor, on Top of a Block (Return)") { stageKey(.returnKey) }
             }
             .disabled(!(model.mode == .scene && model.document != nil))
+            Button("Edit Object") { if let o = model.document?.selectedItem?.object { Task { await model.editObject(o) } } }
+                .keyboardShortcut(.return, modifiers: .command)
+                .disabled(!(hasSelection && model.mainIsKey))
             Button("Select None") { model.layers.select([]) }
                 .disabled(!(model.mode == .scene && !(model.document?.selection.isEmpty ?? true)))
             // ⌥-click's keyboard way (docs/intents/2026-10-agent-chat/spec.md, D6).
@@ -127,6 +130,16 @@ struct PixelLabCommands: Commands {
         }
         CommandGroup(after: .toolbar) {
             Divider()
+            Button(model.mode == .object && model.backTarget != nil ? "Back to \(model.backTarget ?? "")" : "Back to Scene") { Task { await model.backToScene() } }
+                .keyboardShortcut("[")
+                .disabled(model.mode != .object || model.backTarget == nil)
+            Divider()
+            Button("Zoom In") { model.stepZoom(by: 1) }
+                .keyboardShortcut("=")
+                .disabled(model.document == nil)
+            Button("Zoom Out") { model.stepZoom(by: -1) }
+                .keyboardShortcut("-")
+                .disabled(model.document == nil)
             Button("Zoom to Fit") { model.zoom = .fit }
                 .keyboardShortcut("0")
             ForEach(0..<4, id: \.self) { i in
@@ -139,8 +152,6 @@ struct PixelLabCommands: Commands {
                 .keyboardShortcut("'")
             Button(model.showFrame ? "Hide Published Frame" : "Show Published Frame") { model.showFrame.toggle() }
                 .disabled(model.mode != .scene)
-            Button(model.showInspector ? "Hide Inspector" : "Show Inspector") { model.showInspector.toggle() }
-                .keyboardShortcut("i", modifiers: [.command, .option])
             Divider()
         }
         // The chat in the main window, and the review window (spec D13).

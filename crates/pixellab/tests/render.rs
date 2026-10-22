@@ -726,3 +726,53 @@ fn parity_every_scene_of_the_fixture() {
         }
     }
 }
+
+/// A scene of two pebbles, the first in a layer named "1" (an id of "l1").
+fn hide_doc() -> common::TempDocument {
+    let doc = common::make_document();
+    let zz = scene(
+        json!([
+            { "object": "pebble", "layer": "l1", "at": { "px": [-20, 0] } },
+            { "object": "pebble", "at": { "px": [20, 0] } }
+        ]),
+        view80(),
+        json!({ "layers": [{ "id": "l1", "name": "1" }] }),
+    );
+    doc.write("scenes/zz-two.json", &engine::format::stringify_pretty(&zz));
+    doc
+}
+
+fn shown_paths(doc: &common::TempDocument, hide: &[&str]) -> Vec<String> {
+    let mut args = vec!["scene", "render", "zz-two", "--json"];
+    for h in hide {
+        args.push("--hide");
+        args.push(h);
+    }
+    let (code, stdout, stderr) = cli(doc, &args);
+    assert_eq!(code, 0, "{stderr}");
+    let r: Value = serde_json::from_str(&stdout).unwrap();
+    r["items"].as_array().unwrap().iter().map(|i| i["path"].as_str().unwrap().to_string()).collect()
+}
+
+#[test]
+fn r19_hide_takes_an_item_path() {
+    let doc = hide_doc();
+    assert_eq!(shown_paths(&doc, &[]), ["0", "1"]);
+    // No layer is called "0", so it is the item at path 0: it leaves the list, and several can go at once.
+    assert_eq!(shown_paths(&doc, &["0"]), ["1"]);
+    assert!(shown_paths(&doc, &["0", "1"]).len() == 1, "\"1\" is the layer here, which holds item 0 only");
+    // A layer's id still hides its items.
+    assert_eq!(shown_paths(&doc, &["l1"]), ["1"]);
+    // A path that holds nothing hides nothing; a word that is neither a layer nor a path is still an error.
+    assert_eq!(shown_paths(&doc, &["9"]), ["0", "1"]);
+    let (code, _, stderr) = cli(&doc, &["scene", "render", "zz-two", "--hide", "nosuch"]);
+    assert_ne!(code, 0);
+    assert!(stderr.contains("no layer"), "{stderr}");
+}
+
+#[test]
+fn r19_a_layer_name_wins_over_a_path() {
+    let doc = hide_doc();
+    // The layer is named "1": --hide 1 hides the layer's item (path 0), not the item at path 1.
+    assert_eq!(shown_paths(&doc, &["1"]), ["1"]);
+}

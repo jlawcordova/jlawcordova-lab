@@ -6,6 +6,15 @@ import SwiftUI
 enum Zoom: Hashable, Sendable {
     case fit
     case level(Int)
+    /// Any scale between the kind's first and last level: where a pinch leaves it
+    /// (docs/intents/2026-10-floating-library/plan.md, Departures: a seamless zoom).
+    case scale(Double)
+
+    /// "2" for a whole zoom, "2.4" between levels.
+    static func format(_ scale: Double) -> String {
+        let r = (scale * 10).rounded() / 10
+        return r == r.rounded() ? String(Int(r)) : String(format: "%.1f", r)
+    }
 
     /// Scenes: 1×–4×. Objects: 4×–16×.
     static func levels(for kind: DocRef.Kind) -> [Int] { kind == .scene ? [1, 2, 3, 4] : [4, 8, 12, 16] }
@@ -52,7 +61,71 @@ final class AppModel {
         // Remembered, except under the script hook or a snapshot run, which must leave the owner's settings alone.
         didSet { if script == nil, snapshot == nil { UserDefaults.standard.set(showFrame, forKey: SettingsKey.showFrame) } }
     }
-    var showInspector = true
+    /// The right column's width as laid out (0: not on screen), for the script hook.
+    var rightColumnWidth: CGFloat = 0
+    /// The Library popover over the stage is open (docs/intents/2026-10-floating-library/spec.md, R8).
+    var libraryOpen = false
+
+    /// The popover's search text, and the cell the arrow keys are on.
+    var libraryQuery = ""
+    var libraryCursor = 0
+    /// Where Back goes from an object opened with Edit Object (R11).
+    var returnScene: DocRef?
+
+    /// L, and the bar's Library button. Only a scene has one.
+    func toggleLibrary() {
+        guard document?.ref.kind == .scene else { return }
+        libraryOpen.toggle()
+        editor.announce(libraryOpen ? "Library open" : "Library closed")
+    }
+
+    func closeLibrary() {
+        guard libraryOpen else { return }
+        libraryOpen = false
+        editor.announce("Library closed")
+        editor.focusStage()
+    }
+
+    /// The main window is the key window (Edit Object's ⌘↩ is the Agent window's Approve when that one is).
+    var mainIsKey = false
+
+    @ObservationIgnored private var keyObservers: [NSObjectProtocol] = []
+
+    /// Follows whether the main window is the key window.
+    func watchKey(of window: NSWindow) {
+        guard keyObservers.isEmpty else { return }
+        mainIsKey = window.isKeyWindow
+        let center = NotificationCenter.default
+        keyObservers = [
+            center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.mainIsKey = true }
+            },
+            center.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.mainIsKey = false }
+            },
+        ]
+    }
+
+    /// The scene Back goes to from an object: the one Edit Object came from, else the last scene, hero-island or the first.
+    var backTarget: String? {
+        if let r = returnScene, scenes.contains(where: { $0.name == r.name }) { return r.name }
+        if let last = lastScene, scenes.contains(where: { $0.name == last }) { return last }
+        return scenes.first { $0.name == "hero-island" }?.name ?? scenes.first?.name
+    }
+
+    /// Back, from an object (the pill, View › Back to <scene>, ⌘[).
+    func backToScene() async {
+        guard let name = backTarget else { return }
+        await open(DocRef(.scene, name))
+    }
+
+    /// Opens an object to edit it (the Library's menu and double-click, the stage's menu, ⌘↩),
+    /// remembering the scene to go back to (docs/intents/2026-10-floating-library/spec.md, R11, D7).
+    func editObject(_ name: String) async {
+        if document?.ref.kind == .scene { returnScene = document?.ref }
+        libraryOpen = false
+        await open(DocRef(.object, name))
+    }
     var searchText = ""
     /// The stage's visible size, for Fit.
     var stageViewport: CGSize = .zero {
@@ -123,7 +196,7 @@ final class AppModel {
     @ObservationIgnored private(set) var connection: ServerConnection?
     @ObservationIgnored private var eventsTask: Task<Void, Never>?
     @ObservationIgnored let snapshot = SnapshotRequest.fromEnvironment()
-    @ObservationIgnored private var lastScene: String?
+    @ObservationIgnored var lastScene: String?
     @ObservationIgnored private var lastObject: String?
 
     // MARK: Settings
@@ -367,8 +440,14 @@ final class AppModel {
     func open(_ ref: DocRef) async {
         guard let connection else { return }
         mode = ref.kind
-        if ref.kind == .scene { lastScene = ref.name } else { lastObject = ref.name }
+        if ref.kind == .scene {
+            lastScene = ref.name
+            returnScene = nil
+        } else {
+            lastObject = ref.name
+        }
         if document?.ref == ref { return }
+        if ref.kind == .object { libraryOpen = false }
         let doc = DocumentModel(ref: ref)
         if ref.kind == .scene, let scene = scenes.first(where: { $0.name == ref.name }) {
             doc.origin = CGPoint(x: scene.origin[0], y: scene.origin[1])
@@ -396,19 +475,21 @@ final class AppModel {
         requestItems()
     }
 
-    /// The Scene/Object segmented control: show the last doc of that kind;
-    /// Object with a scene item selected opens that item's object.
+    /// The script hook's `mode`: Object is Edit Object on the selected item or the last object, Scene is Back.
     func switchMode(to kind: DocRef.Kind) {
         mode = kind
         guard document?.ref.kind != kind else { return }
         if kind == .object, let object = document?.selectedItem?.object, objects.contains(where: { $0.name == object }) {
-            Task { await open(DocRef(.object, object)) }
+            Task { await editObject(object) }
             return
         }
-        let name: String? = kind == .scene
-            ? (lastScene ?? scenes.first { $0.name == "hero-island" }?.name ?? scenes.first?.name)
-            : (lastObject ?? objects.first { $0.name == "house" }?.name ?? objects.first?.name)
-        if let name { Task { await open(DocRef(kind, name)) } }
+        if kind == .scene {
+            Task { await backToScene() }
+            return
+        }
+        if let name = lastObject ?? objects.first(where: { $0.name == "house" })?.name ?? objects.first?.name {
+            Task { await editObject(name) }
+        }
     }
 
     /// Renders the open doc; coalesces requests that arrive mid-render.
@@ -570,21 +651,25 @@ final class AppModel {
         return r
     }
 
+    /// The room the workspace keeps around what's on stage: a viewport's worth at the kind's lowest zoom, not
+    /// the zoom the stage has now, so no zoom (a pinch, ⌘−) ever has to grow it. A workspace that grew after a
+    /// zoom out was laid out first at its old size, smaller than the stage, and centered, until the bigger
+    /// render landed: the view jumped to the middle and back.
+    var workspacePad: CGFloat { StageWindow.pad(viewport: stageViewport, zoom: CGFloat(zoomRange.lowerBound)) }
+
     /// The window the stage renders now, growing the doc's if the box, the
-    /// cursor, the zoom or the viewport need more room.
+    /// cursor or the viewport need more room.
     func workspace(for doc: DocumentModel) -> CGRect {
-        let pad = StageWindow.pad(viewport: stageViewport, zoom: effectiveZoom)
-        let window = StageWindow.grow(current: doc.window, needed: neededRect(for: doc), pad: pad)
+        let window = StageWindow.grow(current: doc.window, needed: neededRect(for: doc), pad: workspacePad)
         if doc.window != window { doc.window = window }
         return window
     }
 
-    /// The zoom, the viewport or the cursor changed: render again if the
+    /// The viewport or the cursor changed: render again if the
     /// workspace has to grow to hold what's on stage.
     func ensureWorkspace() {
         guard let doc = document, doc.ref.kind == .scene, let window = doc.window else { return }
-        let pad = StageWindow.pad(viewport: stageViewport, zoom: effectiveZoom)
-        if StageWindow.grow(current: window, needed: neededRect(for: doc), pad: pad) != window { requestRender() }
+        if StageWindow.grow(current: window, needed: neededRect(for: doc), pad: workspacePad) != window { requestRender() }
     }
 
     /// The stage cursor moved: the workspace holds its tile.
@@ -974,8 +1059,55 @@ final class AppModel {
         get { mode == .scene ? sceneZoom : objectZoom }
         set {
             if mode == .scene { sceneZoom = newValue } else { objectZoom = newValue }
-            ensureWorkspace()
         }
+    }
+
+    /// VoiceOver hears the zoom once a change is done (a pinch ends, a key steps).
+    func announceZoom() { editor.announce("Zoom \(zoomText)×") }
+
+    /// One whole level in or out of the open doc's levels (a pinch, ⌘-scroll, ⌘= and ⌘−), starting
+    /// from Fit's effective level and never past the kind's first and last (R1, R2). `anchor` is a
+    /// point of the stage's content to keep where it is on screen; without one the middle of the
+    /// stage stays put. Returns whether the zoom changed.
+    @discardableResult
+    func stepZoom(by steps: Int, anchor: CGPoint? = nil) -> Bool {
+        guard steps != 0, let doc = document else { return false }
+        let levels = Zoom.levels(for: doc.ref.kind).map(Double.init)
+        let current = Double(zoomScale)
+        // From between levels, a step goes to the next level in that direction.
+        let next: Double?
+        if steps > 0 { next = levels.filter { $0 > current + 0.001 }.prefix(steps).last ?? (current < levels.last! - 0.001 ? levels.last : nil) }
+        else { next = levels.filter { $0 < current - 0.001 }.suffix(-steps).first ?? (current > levels.first! + 0.001 ? levels.first : nil) }
+        guard let next else { return false }
+        (editor.stageView as? StageInputView)?.anchorNextZoom(atView: anchor)
+        zoom = .level(Int(next))
+        announceZoom()
+        return true
+    }
+
+    /// The kind's first and last zoom: a pinch stays between them.
+    var zoomRange: ClosedRange<Double> {
+        let levels = Zoom.levels(for: document?.ref.kind ?? .scene)
+        return Double(levels.first ?? 1)...Double(levels.last ?? 4)
+    }
+
+    /// Sets the zoom to any scale between the kind's first and last level (where a pinch ends). Returns whether it changed.
+    @discardableResult
+    func setZoomScale(_ scale: Double) -> Bool {
+        let next = min(max(scale, zoomRange.lowerBound), zoomRange.upperBound)
+        guard abs(next - Double(zoomScale)) > 0.0005 else { return false }
+        zoom = abs(next - next.rounded()) < 0.001 ? .level(Int(next.rounded())) : .scale(next)
+        return true
+    }
+
+    /// The zoom times `factor` (the script hook's pinch), the pixel under `anchor` kept where it is.
+    @discardableResult
+    func scaleZoom(by factor: CGFloat, anchor: CGPoint? = nil) -> Bool {
+        guard factor.isFinite, factor > 0, document != nil else { return false }
+        let next = min(max(Double(zoomScale * factor), zoomRange.lowerBound), zoomRange.upperBound)
+        guard abs(next - Double(zoomScale)) > 0.0005 else { return false }
+        (editor.stageView as? StageInputView)?.anchorNextZoom(atView: anchor)
+        return setZoomScale(next)
     }
 
     /// Stage padding around the art when it's bigger than the stage, in points.
@@ -994,20 +1126,29 @@ final class AppModel {
         return min(max(fit, levels.lowerBound), levels.upperBound)
     }
 
-    /// The zoom the stage draws at now.
-    var effectiveZoom: Int {
+    /// The zoom the stage draws at now, in points per art pixel: a whole number except after a pinch.
+    var zoomScale: CGFloat {
         guard let doc = document else { return 1 }
         switch zoom {
-        case .level(let n): return n
-        case .fit:
-            if let forced = snapshot?.zoom { return forced }
-            return fitZoom(art: doc.ref.kind == .scene ? doc.publishSize : (doc.render?.artSize ?? .zero), viewport: stageViewport, kind: doc.ref.kind)
+        case .level(let n): return CGFloat(n)
+        case .scale(let s): return CGFloat(s)
+        case .fit: return CGFloat(fitValue(doc))
         }
     }
 
-    /// The toolbar's sparkle, Window › Agent (⌥⌘A), Ask Claude about this: the Agent tab, shown.
+    /// "3" or "2.4": the zoom as shown.
+    var zoomText: String { Zoom.format(Double(zoomScale)) }
+
+    /// The whole zoom, for what only needs a level (the nearest).
+    var effectiveZoom: Int { Int(zoomScale.rounded()) }
+
+    private func fitValue(_ doc: DocumentModel) -> Int {
+        if let forced = snapshot?.zoom { return forced }
+        return fitZoom(art: doc.ref.kind == .scene ? doc.publishSize : (doc.render?.artSize ?? .zero), viewport: stageViewport, kind: doc.ref.kind)
+    }
+
+    /// The Agent tab's sparkle, Window › Agent (⌥⌘A), Ask Claude about this: the Agent tab, shown.
     func showAgentTab(focusInput: Bool = false) {
-        showInspector = true
         rightTab = .agent
         chat.start()
         if focusInput { chat.focusRequest += 1 }

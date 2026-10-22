@@ -31,11 +31,22 @@ struct StageView: View {
         .overlay(alignment: .topLeading) {
             if model.document?.ref.kind == .scene, model.mode == .scene, !(model.agent.previewing && model.agent.ghostShown) {
                 BreadcrumbPill().padding(12)
+            } else if model.document?.ref.kind == .object {
+                BackPill().padding(12)
             }
         }
         .overlay(alignment: .topTrailing) {
-            if model.document?.ref.kind == .scene, model.mode == .scene, model.editor.tool == .place, !(model.agent.previewing && model.agent.ghostShown) {
+            if model.document?.ref.kind == .scene, model.mode == .scene, model.editor.isPlacing, !(model.agent.previewing && model.agent.ghostShown) {
                 PlacePill().padding(12)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if model.document != nil, !(model.agent.previewing && model.agent.ghostShown) {
+                VStack(spacing: 8) {
+                    if model.libraryOpen, model.document?.ref.kind == .scene { LibraryPopover() }
+                    FloatingBar()
+                }
+                .padding(.bottom, 16)
             }
         }
         .accessibilityElement(children: .contain)
@@ -52,7 +63,7 @@ struct StageView: View {
     @ViewBuilder
     private func content(viewport: CGSize) -> some View {
         if let doc = model.document, let render = doc.render {
-            let zoom = model.effectiveZoom
+            let zoom = model.zoomScale
             // A scene's stage has no edge: it shows a workspace around the art (R9). An object's is its card.
             let geometry = doc.ref.kind == .scene
                 ? StageGeometry(window: render.viewBox, zoom: zoom, viewport: viewport, tileOrigin: doc.origin)
@@ -63,7 +74,7 @@ struct StageView: View {
                     // lets the pointer through, and AppKit-hosted views drawn
                     // under SwiftUI layers keep the art and overlays in order
                     // (on screen and in cacheDisplay snapshots).
-                    StageInput(geometry: geometry, editor: model.editor, objects: model.objectEditor, tool: model.editor.effectiveTool,
+                    StageInput(geometry: geometry, editor: model.editor, objects: model.objectEditor, tool: model.editor.effectiveTool, placing: model.editor.isPlacing,
                                paintTool: model.objectEditor.tool, isScene: doc.ref.kind == .scene)
                         .frame(width: geometry.contentSize.width, height: geometry.contentSize.height)
                     if doc.ref.kind == .scene {
@@ -91,7 +102,7 @@ struct StageView: View {
                         .opacity(played != nil ? 0 : (focus == nil ? 1 : 0.22))
                         .offset(x: geometry.artOrigin.x, y: geometry.artOrigin.y)
                         .allowsHitTesting(false)
-                        .accessibilityLabel("\(doc.ref.name), \(doc.ref.kind.rawValue) at \(zoom)×")
+                        .accessibilityLabel("\(doc.ref.name), \(doc.ref.kind.rawValue) at \(model.zoomText)×")
                         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: focus == nil)
                     if let played {
                         let o = geometry.viewPoint(fromScene: played.viewBox.origin)
@@ -121,9 +132,13 @@ struct StageView: View {
                     }
                 }
                 .frame(width: geometry.contentSize.width, height: geometry.contentSize.height, alignment: .topLeading)
+                .background(QuietScrollers())
             }
             .scrollIndicators(.automatic)
-            .defaultScrollAnchor(.center)
+            // Centered when a doc opens, and never again: a size change (a zoom, a bigger workspace) keeps the
+            // view where it is (`StageInputView.keepScroll` puts the point the owner was looking at back).
+            .defaultScrollAnchor(.center, for: .initialOffset)
+            .defaultScrollAnchor(nil, for: .sizeChanges)
             .id(doc.ref)
         } else if let doc = model.document, let error = doc.error {
             ContentUnavailableView {
@@ -200,15 +215,13 @@ struct PlacePill: View {
             Group {
                 if let object = editor.placeObject {
                     Text("Placing ") + Text(object).bold() + Text(" into ") + Text(model.layers.placeTargetName).bold() + Text(": click a tile")
-                } else {
-                    Text("Choose an object in the Library to place into ") + Text(model.layers.placeTargetName).bold()
                 }
             }
             .font(.system(size: 12))
             .foregroundStyle(Theme.ink)
             .lineLimit(1)
             .padding(.leading, 6)
-            Button("Done") { editor.setTool(.select) }
+            Button("Done") { editor.stopPlacing() }
                 .controlSize(.small)
                 .help("Back to the Select tool (V)")
         }

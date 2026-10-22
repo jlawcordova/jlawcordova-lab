@@ -184,11 +184,10 @@ inside done
 tool select
 select layer:group-1
 placeinto
-expect tab library
-expect tool place
+expect library open
 expect into Train
 tool select
-sidebar layers
+library close
 # R13: Ungroup moves Train's contents up into Railway, where they stay
 select layer:group-1
 ungroup

@@ -2,28 +2,27 @@ import AppKit
 import Observation
 import SwiftUI
 
-/// The stage's tools (V, A, H). Space held pans with any tool.
+/// The scene stage's two tools, Select and Hand (V, H). Space held is a temporary hand. Placing
+/// is not a tool: it is the state of having a Library object chosen (`SceneEditor.isPlacing`;
+/// docs/intents/2026-10-floating-library/spec.md, R7).
 enum StageTool: String, CaseIterable, Identifiable, Sendable {
-    case select, place, pan
+    case select, pan
     var id: String { rawValue }
     var title: String {
         switch self {
         case .select: "Select"
-        case .place: "Place"
-        case .pan: "Pan"
+        case .pan: "Hand"
         }
     }
     var symbol: String {
         switch self {
         case .select: "cursorarrow"
-        case .place: "plus.square.on.square"
         case .pan: "hand.raised"
         }
     }
     var key: Character {
         switch self {
         case .select: "v"
-        case .place: "a"
         case .pan: "h"
         }
     }
@@ -122,15 +121,15 @@ final class SceneEditor {
     /// Space held: pan with any tool.
     var spaceHeld = false
     var panning = false
-    /// The library object the Place tool places.
+    /// The Library object being placed: choosing one starts placing, and Esc or Select (V) stops it.
     var placeObject: String?
-    /// The level the Place tool places at (follows the selected item's).
+    /// The level placing puts the object at (follows the selected item's).
     var placeLevel = 0
     /// The owner set the level on purpose (the stepper, ⇧↑ / Page Up on the cursor): a place uses it
     /// as given. Otherwise a place puts the item on top of what is on the tile
     /// (docs/intents/2026-10-scene-canvas/spec.md, R17).
     var levelOnPurpose = false
-    /// The tile under the pointer (Place tool).
+    /// The tile under the pointer (while placing).
     var hoverTile: Tile?
     /// The scene pixel under the pointer.
     var hoverPixel: CGPoint?
@@ -142,18 +141,16 @@ final class SceneEditor {
     /// An object dragged from the library over the stage.
     var dropObject: String?
     var stageFocused = false
-    /// The sidebar's lower section: the open scene's Layers (first, and the
-    /// default) or the Library (docs/intents/2026-10-scene-layers/spec.md, D11).
-    var sidebarTab: SidebarTab = .layers
     /// Drafts of the inspector's Class and ID fields.
     var classDraft = ""
     var idDraft = ""
     /// Edits sent and not answered yet (the script hook waits on them).
     @ObservationIgnored var pendingEdits = 0
 
-    enum SidebarTab: String, Hashable { case layers, library }
-
     var effectiveTool: StageTool { spaceHeld || panning ? .pan : tool }
+
+    /// A Library object is chosen and the Select tool is up: a click places it.
+    var isPlacing: Bool { placeObject != nil && effectiveTool == .select }
 
     private var doc: DocumentModel? {
         guard let d = app?.document, d.ref.kind == .scene else { return nil }
@@ -215,15 +212,27 @@ final class SceneEditor {
         w.makeFirstResponder(v)
     }
 
+    /// Select (V) puts the placing object away; Hand (H) leaves it chosen for when Select is back.
     func setTool(_ t: StageTool) {
         tool = t
-        if t != .place { hoverTile = nil }
+        if t == .select { placeObject = nil }
+        if !isPlacing { hoverTile = nil }
         announce("\(t.title) tool")
     }
 
+    /// Picking a Library object starts placing it, with the Select tool up (R7).
     func choosePlaceObject(_ name: String) {
         placeObject = name
-        setTool(.place)
+        tool = .select
+        announce("Placing \(name)")
+    }
+
+    /// Esc, or Select: stop placing.
+    func stopPlacing() {
+        guard placeObject != nil else { return }
+        placeObject = nil
+        hoverTile = nil
+        announce("Stopped placing")
     }
 
     // MARK: Hit-testing
@@ -254,7 +263,7 @@ final class SceneEditor {
         hoverPixel = geometry.scenePoint(fromView: p)
         placeByPixel = option
         if effectiveTool == .select, dropObject == nil { app?.layers.stageHover(p, geometry: geometry) }
-        guard effectiveTool == .place || dropObject != nil else { return }
+        guard isPlacing || dropObject != nil else { return }
         if let t = geometry.tile(atView: p, level: placeLevel) {
             let tile = Tile(col: t.col, row: t.row, level: t.level)
             if hoverTile != tile { hoverTile = tile }
@@ -273,7 +282,7 @@ final class SceneEditor {
         switch effectiveTool {
         case .pan:
             panning = true
-        case .place:
+        case .select where isPlacing:
             pointerMoved(p, geometry: geometry, option: option)
             Task { await placeHere(geometry: geometry, at: p, byPixel: option) }
         case .select:
@@ -334,8 +343,8 @@ final class SceneEditor {
         return Tile(col: t.col, row: t.row, level: t.level)
     }
 
-    private func placeHere(geometry: StageGeometry, at p: CGPoint, byPixel: Bool) async {
-        guard let object = placeObject else {
+    private func placeHere(geometry: StageGeometry, at p: CGPoint, byPixel: Bool, object given: String? = nil) async {
+        guard let object = given ?? placeObject else {
             app?.notice = "Choose an object in the Library to place."
             return
         }
@@ -381,11 +390,10 @@ final class SceneEditor {
         return await edit("scene.place", ["object": .string(object), "px": [JSONValue(px.0), JSONValue(px.1)]].merging(into) { a, _ in a })
     }
 
-    /// A library thumbnail dropped on the stage.
+    /// A library thumbnail dropped on the stage: one is placed where it lands. It doesn't start placing.
     func drop(_ object: String, at p: CGPoint, geometry: StageGeometry, option: Bool) {
         dropObject = nil
-        placeObject = object
-        Task { await placeHere(geometry: geometry, at: p, byPixel: option) }
+        Task { await placeHere(geometry: geometry, at: p, byPixel: option, object: object) }
     }
 
     // MARK: Item edits
@@ -426,7 +434,7 @@ final class SceneEditor {
         cursorTile = t
         placeLevel = t.level
         if dl != 0 { levelOnPurpose = true }
-        if tool == .place { hoverTile = t }
+        if isPlacing { hoverTile = t }
         app?.reachTile(t)
         revealOnStage(t)
         announce("Cursor at column \(t.col), row \(t.row), level \(t.level)")
@@ -515,7 +523,7 @@ final class SceneEditor {
     func selectNext(forward: Bool) -> Bool {
         guard let doc, let layers = app?.layers else { return false }
         let tree = doc.layerTree
-        let order = tree.order.filter { tree.pickable($0, inside: layers.inside, locked: layers.locked) && (layers.inside == nil || tree.chain(ofItem: $0).contains(layers.inside!)) && !tree.isHidden($0, hidden: layers.hidden) }
+        let order = tree.order.filter { layers.isPickable($0) && (layers.inside == nil || tree.chain(ofItem: $0).contains(layers.inside!)) }
         guard !order.isEmpty else { return false }
         let next: String
         if let current = doc.selectedPath, let i = order.firstIndex(of: current) {
@@ -606,7 +614,8 @@ final class SceneEditor {
             let layers = app.layers
             if drag != nil { drag = nil } else if layers.drag != nil { layers.drag = nil } else if layers.menu != nil { layers.closeMenu() }
             else if !(doc?.selection.isEmpty ?? true) { layers.select([]) } else if layers.inside != nil { layers.done() }
-            else if tool != .select { setTool(.select) }
+            else if tool != .select || placeObject != nil { setTool(.select) }
+            else if app.libraryOpen { app.closeLibrary() }
             return true
         case .space:
             return true
@@ -639,6 +648,10 @@ final class SceneEditor {
             if k.option || k.shift { return false }
             if let t = StageTool.allCases.first(where: { $0.key == c }) {
                 setTool(t)
+                return true
+            }
+            if c == "l" {
+                app.toggleLibrary()
                 return true
             }
             if let n = c.wholeNumberValue {

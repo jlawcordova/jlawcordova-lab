@@ -65,9 +65,9 @@ The change is to the Mac app (`app/`), its test hook and acceptance scripts, and
   - `hide|show|lock|unlock` take item paths, and `expect hiddenitems|lockeditems` checks them (D12).
 - `app/Tests/PixelLabTests/CanvasTests.swift` (new): Swift Testing suites named by requirement (`R1: …`).
 - `app/Tests/PixelLabTests/StageTests.swift`: tests that used the Place tool or `sidebarTab` updated.
-- `scripts/acceptance/canvas.txt` (new): the end-to-end run of the new window on the temp site copy.
+- `scripts/acceptance/window.txt` (new; `canvas.txt` is the scene-canvas stage): the end-to-end run of the new window on the temp site copy.
 - `scripts/acceptance/layers.txt`: `expect tab library` and `sidebar layers` become `expect library open` and `library close`.
-- `scripts/acceptance.sh`: runs `canvas.txt` after `layers.txt`, and its header comment mentions it.
+- `scripts/acceptance.sh`: runs the `window` stage before `layers`, on the same temp site, and its header comment mentions it.
 
 **Docs**
 - `README.md`: the scene, object, publish and Agent paragraphs of the tour, and the shortcuts table (D11).
@@ -134,7 +134,7 @@ main ── PR #38 (intent, spec, plan; owner merges)
 9. **The test hook (R17).**
    - The D10 steps and expects, and the `mode`, `sidebar` and `tool place` aliases.
    - `layers.txt` updated.
-   - `canvas.txt` written and added to `acceptance.sh`, which runs on the temp site copy:
+   - `window.txt` written and added to `acceptance.sh`, which runs on the temp site copy:
      - pinch in, out and keys, with `expect zoom` and `expect readout`;
      - `expect toolbar none`, `expect inspector shown` and `expect floatingbar select,pan,library`;
      - `library open`, `librarydrop pine 4 -1 1`, `expect at 4,-1,1`;
@@ -193,6 +193,24 @@ main ── PR #38 (intent, spec, plan; owner merges)
 Run from the `feat/floating-library` worktree, with the output pasted into the PR:
 - `swift build --package-path app` with no errors, and `scripts/test-app.sh` with every test passing, including the new `R1`–`R14` tests in `CanvasTests.swift` and the `R19` tests in `LayerTests.swift`.
 - `cargo fmt --check`, `cargo test` with no failures (including the R19 render tests), and `npm test` with `# fail 0`.
-- `scripts/build-app.sh`, then `scripts/acceptance.sh` exits 0, with `canvas.txt` in the log ending "all steps passed" and the hero island's SVG byte-identical.
+- `scripts/build-app.sh`, then `scripts/acceptance.sh --only window,scene-object,canvas,layers,document,agent,mcp-agent,stale,stale-agent,chat,chat-harbor,examples-harbor,examples-town` exits 0 (the stages this change touches, and the ones whose script changed), with `window.txt` in the log ending "all steps passed" and the hero island's SVG byte-identical.
 - `npm run docs:site` builds with no broken links, and `npm run docs:cli` leaves `git status` clean apart from the committed `scene.render` change.
 - Snapshots in dark and light of the four views in step 9, compared with the prototype boards `Groups.dc.html`, `Object.dc.html` and `AgentChat.dc.html`, and attached to the PR.
+
+## Departures
+What was built differently from the plan above (the order of the steps held; one commit each, apart from the docs commit landing before the test hook's):
+- **The acceptance stage is `window`,** not `canvas`: `scripts/acceptance/canvas.txt` is the scene-canvas change's stage. Verification follows `CLAUDE.md` on `main`: `scripts/acceptance.sh --only` with the stages in Proof.
+- **Pinch and the scene workspace (step 1).** The anchor reuses the scene canvas's `keepScroll`: a zoom step records the scene point under the pointer (or the middle of the clip) before the zoom changes, and `keepScroll` puts it back after layout. A workspace that grows later keeps the visible middle, as it did. Nothing fell back to centering. `pinch`, `zoomkey` and `expect readout|anchor` landed in step 1, not 9, so the step could be checked.
+- **The zoom is seamless (owner, 2026-10-22, after trying the build).** R1 and R3 said a pinch steps through whole levels and art is always drawn at a whole zoom; the owner found that off and asked for a seamless zoom. `Zoom` gains `.scale(Double)`, and a pinch (and a trackpad's ⌘-scroll) multiplies the zoom by each event's magnification, within the kind's first and last level (1×–4× scenes, 4×–16× objects: the range is unchanged). Between levels the art is nearest-neighbor at a fractional scale, so pixels are uneven widths; ⌘= and ⌘− go to the next whole level, ⌘0–⌘4 are as they were. VoiceOver hears the zoom once, when the gesture ends. The spec's R1, R2 and D2 are superseded by this.
+- **The pinch is the scroll view's own, and there's no readout (owner, same day).** The first seamless version re-laid the stage out on every magnify event and shook. The pinch is now `NSScrollView`'s native magnification (`allowsMagnification`, limited to the kind's range): the stage scales on the GPU about the fingers, with nearest-neighbor layers, and when they lift `commitMagnification` turns the magnification into the zoom, lays the stage out crisply and keeps the top-left of what was visible. ⌘-scroll on a trackpad uses the same magnification, committed when the scrolling pauses. The zoom readout (R3) is removed. `pinchby <factor>` drives the native path in the script hook.
+- **`tool place` fails** with a pointer to `library <name>` (spec D10), rather than being an alias; `scripts/acceptance/layers.txt` changed in step 4, where `sidebarTab` went (`expect tab library` → `expect library open`, `sidebar layers` → `library close`, and the `expect tool place` line was dropped).
+- **A drop does not start placing.** Placing is `placeObject != nil`, and a drop used to leave its object chosen; it now places one and leaves the state alone.
+- **Esc order:** a drag, the layer menu, the selection, the layer you're inside, then placing, then the Library.
+- **Search finds objects.** With the Library gone from the sidebar, a sidebar search lists matching objects under Scenes, and a row opens one, so "opening an object from Search" (R11) still works.
+- **`editObject` and `returnScene` came in step 4** (the popover's double-click needed them); step 7 added Back, its pill and the menus. `returnScene` is cleared when any scene opens.
+- **Edit › Edit Object (⌘↩)** is enabled only while the main window is key, so the Agent window's Approve (⌘↩) keeps its key; the `agent` stage's `agentkey cmd+return` checks it. The Show/Hide Inspector menu item went with step 7's menu edits, not step 8's.
+- **⌘] and ⌘[ never stepped layers in code** (the object editor ignores ⌘ keys); only the README said so. Back takes ⌘[ as a menu shortcut and the README row is corrected.
+- **The sidebar toggle** is removed with `.toolbar(removing: .sidebarToggle)` on the sidebar column; on the split view it left the button in place.
+- **Snapshots** are in `snapshots/` beside this plan, made by `snapshots/snapshots.txt` on a temp copy of the harbor example. The Agent tab isn't among them: showing it starts the chat, and the fake Claude Code is for the acceptance stages.
+- **A zoom keeps the view where it was.** The stage's scroll view centered itself again whenever its content changed size (`defaultScrollAnchor(.center)` also applies to size changes). It now centers only when a doc opens (`for: .initialOffset`), and the scroll is put back three times after a zoom (at once, 50 ms and 200 ms later), since SwiftUI settles a resized scroll view on its own schedule.
+- **A zoom never grows the workspace.** A zoom out could still flash the stage to the middle: the scene's workspace was padded by a viewport's worth *at the current zoom*, so zooming out far (4× to 1× in one pinch) needed a bigger window, and until that render landed the stage was laid out with the old one, smaller than the viewport and so centered. The pad is now a viewport's worth at the kind's lowest zoom (`AppModel.workspacePad`), so the workspace holds the stage at every zoom a pinch can reach (it is capped at 1024 scene pixels a side, as before) and only the box, the cursor and the viewport grow it. The script hook's `expect anchor steady` watches every frame drawn for half a second after a zoom and fails if the anchor strayed more than a point on the way (`window.txt` pinches 4× to 1×); before the fix that pinch strayed 803 points.

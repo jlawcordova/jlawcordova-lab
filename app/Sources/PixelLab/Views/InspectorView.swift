@@ -28,7 +28,7 @@ struct InspectorView: View {
                     }
                     .layoutPriority(1)
                     if !doc.selection.isEmpty { AskClaudeButton(count: doc.selection.count) }
-                    if model.editor.tool == .place || model.editor.placeObject != nil {
+                    if model.editor.placeObject != nil {
                         PlaceInspector()
                     }
                     PublishedSizeSection(doc: doc)
@@ -83,11 +83,11 @@ struct InspectorView: View {
                 Text(summary).font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(2)
             }
             if doc.ref.kind == .scene {
-                Text("\(Int(doc.publishSize.width))×\(Int(doc.publishSize.height)) px · \(doc.isFixedFrame ? "fixed" : "fits") · \(model.effectiveZoom)×")
+                Text("\(Int(doc.publishSize.width))×\(Int(doc.publishSize.height)) px · \(doc.isFixedFrame ? "fixed" : "fits") · \(model.zoomText)×")
                     .font(Theme.monoFont(10.5))
                     .foregroundStyle(Theme.inkMuted)
             } else if let render = doc.render {
-                Text("\(Int(render.viewBox.width))×\(Int(render.viewBox.height)) px · \(model.effectiveZoom)×")
+                Text("\(Int(render.viewBox.width))×\(Int(render.viewBox.height)) px · \(model.zoomText)×")
                     .font(Theme.monoFont(10.5))
                     .foregroundStyle(Theme.inkMuted)
             }

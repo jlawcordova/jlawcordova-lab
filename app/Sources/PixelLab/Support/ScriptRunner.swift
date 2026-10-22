@@ -8,7 +8,7 @@ import Foundation
 /// it, since scripts save and publish). One action per line, `#` comments:
 ///
 ///     open scene:hero-island      appearance dark|light   size 1440x900
-///     tool select|place|pan       library <object>        level <n>
+///     tool select|pan|hand        library <object>  (starts placing it)   level <n>
 ///     select <path>|#<id>|none    click <x> <y>           clicktile <col> <row> <level>
 ///     hover <col> <row> <level>   place [<col> <row> <level>]
 ///     drag <dc> <dr> [hold]       dragpx <dx> <dy> [hold] release | cancel
@@ -24,7 +24,12 @@ import Foundation
 ///     playend   (releases a held `playat` frame: the stage draws the playhead's frame again)
 ///     reducemotion on|off|system   (overrides the system's Reduce Motion for Play and the timeline)
 ///     undo redo save [force] revert publish [<dir>] done   saveas <path.pixellab>
-///     time <ms>  play  pause  tracks on|off   zoom fit|1-4   sidebar library|items
+///     time <ms>  play  pause  tracks on|off   zoom fit|1-4   sidebar library|layers
+///     pinch in|out [<x> <y>]   (one zoom step, kept under that scene pixel or the middle)   zoomkey in|out   (⌘= and ⌘−)
+///     librarydrop <name> <col> <row> <level>   (a drop from the Library onto a tile)   expect floatingbar <ids>   expect toolbar none
+///     expect inspector shown   (the right column is on screen)
+///     editobject [<name>]   back   expect returnscene <name|none>   (Edit Object on the selected item or a named object; Back)
+///     expect anchor kept   (the last pinch left its scene point where it was)   expect anchor steady   (and no frame on the way moved it; after wait 600)
 ///     search <text>   wait <ms>   snapshot <file.png>   log <text>
 ///     settings open|close   snapshot settings <file.png>   (the Settings window)
 ///     cli <args…>  (the bundled program on the script's document: an outside edit to the files)
@@ -51,9 +56,11 @@ import Foundation
 ///     menu group|ungroup|inside|hide|lock|close   group   ungroup   (also key cmd+g, key shift+cmd+g)
 ///     inside <id>|done|top   crumb <n>   hide|show|lock|unlock|expand|collapse <id>   rename <name…>
 ///     movedby <col> <row>   layernudge upleft|upright|downleft|downright   placeinto
-///     layerskey <spec> (up, down, shift+down, right, left, return, esc)   sidebar layers|library
+///     layerskey <spec> (up, down, shift+down, right, left, return, esc)   library open|close  (sidebar library|layers: the same)
 ///     (move, drag and the arrow keys act on the whole selection)
 ///     expect selection <targets,…|none>   expect inside|layername|itemlayer|hover <id|none>   expect scenelayers|rows <n>
+///     hide|show|lock|unlock <item path>|selected   (a single item's eye and lock)   expect hiddenitems|lockeditems <paths,…|none>
+///     expect hiddencount|lockedcount <n>
 ///     expect hiddenlayers|lockedlayers <ids,…|none>   expect into <name>   expect crumbs <a›b>   expect movedby <c,r|none>
 ///     expect menu <enabled items,…|none|closed>   expect tab layers|library   expect inspector layer|item|multi|none   expect faded true|false
 ///
@@ -196,6 +203,11 @@ final class ScriptRunner {
         init(_ s: String) { errorDescription = s }
     }
 
+    /// Whether a word is an item path (digits and dots), as `hide`, `show`, `lock` and `unlock` take for a single item.
+    static func isItemPath(_ words: [String], _ i: Int) -> Bool {
+        i < words.count && words[i] == "selected" || i < words.count && !words[i].isEmpty && words[i].allSatisfy { $0.isNumber || $0 == "." } && !words[i].hasPrefix(".") && !words[i].hasSuffix(".")
+    }
+
     private func int(_ words: [String], _ i: Int) throws -> Int {
         guard i < words.count, let n = Int(words[i]) else { throw Failure("\(words[0]) needs a whole number at argument \(i)") }
         return n
@@ -237,15 +249,23 @@ final class ScriptRunner {
                 model.objectEditor.setTool(t)
                 return nil
             }
-            guard let t = StageTool(rawValue: try arg(words, 1)) else { throw Failure("tool select|place|pan|pencil|eraser|fill|picker") }
+            if try arg(words, 1) == "place" { throw Failure("tool place is gone: choose an object with library <name> to start placing") }
+            if try arg(words, 1) == "hand" { editor.setTool(.pan); return nil }
+            guard let t = StageTool(rawValue: try arg(words, 1)) else { throw Failure("tool select|pan|hand|pencil|eraser|fill|picker") }
             editor.setTool(t)
             return nil
         case "mode", "color", "stroke", "erase", "px", "fill", "pick", "grid", "onion", "resize", "layer", "animate", "still",
              "new", "newdialog", "newcancel", "newsubmit":
             return try await performObject(words, model: model)
         case "library":
-            editor.choosePlaceObject(try arg(words, 1))
-            _ = await model.thumbnails.art(try arg(words, 1))
+            // library open|close: the popover. library <name>: pick that object, which starts placing it.
+            switch try arg(words, 1) {
+            case "open": if !model.libraryOpen { model.toggleLibrary() }
+            case "close": model.closeLibrary()
+            default:
+                editor.choosePlaceObject(try arg(words, 1))
+                _ = await model.thumbnails.art(try arg(words, 1))
+            }
             return nil
         case "level":
             editor.setPlaceLevel(try int(words, 1))
@@ -271,6 +291,24 @@ final class ScriptRunner {
         case "focus":
             editor.focusStage()
             return nil
+        case "editobject":
+            // Edit Object: the named object, or the selected item's.
+            guard let name = words.count > 1 ? words[1] : doc?.selectedItem?.object else { throw Failure("editobject <name>, or select an item first") }
+            await model.editObject(name)
+            return "editing \(name)"
+        case "librarydrop":
+            // A drop from the Library popover onto a tile, at a level (R8): `librarydrop <name> <col> <row> <level>`.
+            guard let view = editor.stageView as? StageInputView, let geometry = view.geometry else { throw Failure("no stage") }
+            let name = try arg(words, 1)
+            let level = try int(words, 4)
+            editor.setPlaceLevel(level)
+            guard let p = geometry.viewPoint(ofTile: try int(words, 2), try int(words, 3), level) else { throw Failure("no tile origin") }
+            _ = await model.thumbnails.art(name)
+            editor.drop(name, at: p, geometry: geometry, option: false)
+            return "dropped \(name)"
+        case "back":
+            await model.backToScene()
+            return "back to \(model.document?.ref.name ?? "none")"
         case "select":
             let what = try arg(words, 1)
             if what == "add" {
@@ -304,7 +342,6 @@ final class ScriptRunner {
             return "pixel \(x),\(y) → \(sel.isEmpty ? "nothing" : sel)"
         case "hover":
             let t = Tile(col: try int(words, 1), row: try int(words, 2), level: try int(words, 3))
-            if editor.tool != .place { editor.setTool(.place) }
             editor.placeLevel = t.level
             editor.hoverTile = t
             editor.cursorTile = t
@@ -509,13 +546,29 @@ final class ScriptRunner {
             let z = try arg(words, 1)
             if z == "fit" { model.zoom = .fit } else { model.zoom = .level(try int(words, 1)) }
             return nil
+        case "pinch":
+            // One pinch step (a magnify event's effect) anchored at a scene pixel, else the middle of the stage.
+            guard let view = editor.stageView as? StageInputView, let geometry = view.geometry else { throw Failure("no stage") }
+            let steps = try arg(words, 1) == "in" ? 1 : -1
+            let at: CGPoint? = words.count >= 4 ? geometry.viewPoint(fromScene: CGPoint(x: try int(words, 2), y: try int(words, 3))) : nil
+            view.zoomStep(steps, atView: at)
+            return "zoom \(model.zoomText)"
+        case "pinchby":
+            // A pinch by a factor (a magnify event's effect), anchored at a scene pixel or the middle: pinchby 1.1 [<x> <y>].
+            guard let view = editor.stageView as? StageInputView, let geometry = view.geometry, let factor = Double(try arg(words, 1)) else { throw Failure("pinchby <factor> [<x> <y>]") }
+            let at: CGPoint? = words.count >= 4 ? geometry.viewPoint(fromScene: CGPoint(x: try int(words, 2), y: try int(words, 3))) : nil
+            // The scroll view's own magnification and the end of the gesture, as a pinch makes them.
+            view.simulatePinch(factor: CGFloat(factor), atView: at)
+            return "zoom \(model.zoomText)"
+        case "zoomkey":
+            // ⌘= / ⌘−, centered on the stage.
+            model.stepZoom(by: try arg(words, 1) == "in" ? 1 : -1)
+            return "zoom \(model.zoomText)"
         case "sidebar":
+            // The sidebar has no Library any more: `sidebar library` opens the popover, the others close it.
             switch try arg(words, 1) {
-            case "palette": model.objectEditor.sidebarTab = .palette
-            case "layers", "items": editor.sidebarTab = .layers
-            default:
-                editor.sidebarTab = .library
-                model.objectEditor.sidebarTab = .library
+            case "library": if !model.libraryOpen { model.toggleLibrary() }
+            default: model.closeLibrary()
             }
             return nil
         case "search":
@@ -800,7 +853,6 @@ final class ScriptRunner {
                 // pointer's would be, through the window's hit-testing onto the row's catcher.
                 guard let t = LayerTarget(spec: try arg(words, 2)) else { throw Failure("rightclick row layer:<id>|<path>") }
                 layers.reveal(t)
-                model.editor.sidebarTab = .layers
                 layers.scrollRequest = t
                 try? await Task.sleep(for: .milliseconds(300))
                 var frame = layers.rowFrames[t.description]
@@ -863,10 +915,21 @@ final class ScriptRunner {
             layers.goTo(level: layers.crumbs[n].level)
             return "inside \(layers.inside ?? "none")"
         case "hide", "show":
+            if Self.isItemPath(words, 1) {
+                // An item path (like 3 or 5.2), or `selected`: a single item's eye (R19).
+                guard let path = words[1] == "selected" ? doc?.selectedPath : words[1] else { throw Failure("select one item first") }
+                if (layers.hiddenItems[path] != nil) != (words[0] == "hide") { layers.toggleItemHidden(path) }
+                return "item \(path)"
+            }
             let id = try layer(1)
             if layers.hidden.contains(id) != (words[0] == "hide") { layers.toggleHidden(id) }
             return nil
         case "lock", "unlock":
+            if Self.isItemPath(words, 1) {
+                guard let path = words[1] == "selected" ? doc?.selectedPath : words[1] else { throw Failure("select one item first") }
+                if (layers.lockedItems[path] != nil) != (words[0] == "lock") { layers.toggleItemLocked(path) }
+                return "item \(path)"
+            }
             let id = try layer(1)
             if layers.locked.contains(id) != (words[0] == "lock") { layers.toggleLocked(id) }
             return nil
@@ -919,6 +982,10 @@ final class ScriptRunner {
         case "scenelayers": return String(tree.layers.count)
         case "layername": return doc?.selectedLayer.map { tree.name(of: $0) } ?? "none"
         case "itemlayer": return doc?.selectedPath.flatMap { tree.layerOfItem[$0] } ?? "none"
+        case "hiddenitems": return list(layers.hiddenItems.keys.sorted())
+        case "lockeditems": return list(layers.lockedItems.keys.sorted())
+        case "hiddencount": return String(layers.hiddenItems.count)
+        case "lockedcount": return String(layers.lockedItems.count)
         case "hiddenlayers": return list(layers.hidden.sorted())
         case "lockedlayers": return list(layers.locked.sorted())
         case "into": return layers.placeTargetName
@@ -926,7 +993,8 @@ final class ScriptRunner {
         case "rows": return String(layers.visibleRows(query: model.searchText.trimmingCharacters(in: .whitespaces).lowercased()).count)
         case "movedby": return layers.movedBy.map { "\($0.col),\($0.row)" } ?? "none"
         case "menu": return layers.menu == nil ? "closed" : list(layers.menuItems.filter(\.enabled).map(\.title))
-        case "tab": return model.editor.sidebarTab.rawValue
+        case "tab": return model.libraryOpen ? "library" : "layers"
+        case "library": return model.libraryOpen ? "open" : "closed"
         case "inspector":
             guard let doc else { return "none" }
             if doc.selectedLayer != nil { return "layer" }
@@ -1327,7 +1395,9 @@ final class ScriptRunner {
         case "items": got = String(doc?.items.count ?? 0)
         case "problems": got = String(doc?.problems?.count ?? -1)
         case "build": got = model.build?.result.map { $0.ok ? "ok" : "failed" } ?? "none"
-        case "tool": got = doc?.ref.kind == .object ? model.objectEditor.tool.rawValue : model.editor.tool.rawValue
+        case "tool":
+            got = doc?.ref.kind == .object ? (model.objectEditor.handHeld ? "hand" : model.objectEditor.tool.rawValue)
+                : (model.editor.isPlacing ? "place" : model.editor.tool.rawValue)
         case "time": got = String(model.timeline.renderTime)
         case "ambient": got = model.timeline.ambientDuration.map { String(Int($0)) } ?? "none"
         case "timeline": got = model.timeline.duration.map { String(Int($0)) } ?? "none"
@@ -1402,7 +1472,30 @@ final class ScriptRunner {
         case "ghosttime": got = model.agent.visibleGhost?.image.time.map { String(Int($0)) } ?? "none"
         case "scenes": got = String(model.scenes.count)
         case "objects": got = String(model.objects.count)
-        case "zoom": got = String(model.effectiveZoom)
+        case "zoom": got = model.zoomText
+        case "returnscene": got = model.returnScene?.name ?? "none"
+        case "floatingbar":
+            // The bar's buttons by id: select,pan,library in a scene; pencil,eraser,fill,picker,pan in an object (R6).
+            guard let kind = doc?.ref.kind else { got = "none"; break }
+            got = FloatingBarItems.ids(for: kind).joined(separator: ",")
+        case "toolbar":
+            // The window has no toolbar items (R12).
+            let items = Snapshotter.mainWindow()?.toolbar?.items.filter {
+                $0.itemIdentifier != .flexibleSpace && $0.itemIdentifier != .space && !$0.itemIdentifier.rawValue.contains("splitViewSeparator")
+            } ?? []
+            got = items.isEmpty ? "none" : items.map(\.itemIdentifier.rawValue).joined(separator: ",")
+        case "inspector" where want == "shown":
+            // The right column is on screen at its least width or more (R13).
+            got = model.rightColumnWidth >= 260 ? "shown" : "hidden (\(Int(model.rightColumnWidth)) pt)"
+        case "anchor" where want == "steady":
+            // No frame drawn during the last zoom showed the anchor away from where it belongs (within a point).
+            // The zoom is watched for half a second: `wait 600` first.
+            guard let worst = (model.editor.stageView as? StageInputView)?.traceWorst else { throw Failure("no anchored zoom yet") }
+            got = worst <= 1 ? "steady" : "strayed \(Int(worst.rounded())) points"
+        case "anchor":
+            // The last anchored zoom left its scene point where it was on screen (within a point).
+            guard let drift = (model.editor.stageView as? StageInputView)?.anchorDrift else { throw Failure("no anchored zoom yet") }
+            got = drift <= 1 ? "kept" : "moved \(drift) points"
         case "badge": got = NSApp.dockTile.badgeLabel ?? "none"
         case "theme": got = model.stageDark ? "dark" : "light"
         case "outputs": got = model.build?.result.map { String($0.outputs.count) } ?? "none"

@@ -189,7 +189,9 @@ struct LayerTree: Sendable, Equatable {
     /// Whether a click can pick the item: it's within the layer you're in,
     /// and no layer holding it below that level is locked (so a locked
     /// layer's contents are picked from inside it).
-    func pickable(_ path: String, inside: String?, locked: Set<String>) -> Bool {
+    func pickable(_ path: String, inside: String?, locked: Set<String>, hiddenItems: Set<String> = [], lockedItems: Set<String> = []) -> Bool {
+        // A hidden or locked item itself (docs/intents/2026-10-floating-library/spec.md, R19).
+        if hiddenItems.contains(path) || lockedItems.contains(path) { return false }
         let chain = chain(ofItem: path)
         var from = 0
         if let inside {
@@ -203,8 +205,12 @@ struct LayerTree: Sendable, Equatable {
     /// (docs/intents/2026-10-agent-chat/spec.md, D6): within the layer you're
     /// in, drawn, and in no locked layer below it; even where a click would pick
     /// their layer, since "every use" is about items. In paint order.
-    func everyUse(of object: String, items: [SceneItemInfo], inside: String?, hidden: Set<String>, locked: Set<String>) -> [String] {
-        items.filter { $0.object == object && pickable($0.path, inside: inside, locked: locked) && !isHidden($0.path, hidden: hidden) }.map(\.path)
+    func everyUse(of object: String, items: [SceneItemInfo], inside: String?, hidden: Set<String>, locked: Set<String>,
+                  hiddenItems: Set<String> = [], lockedItems: Set<String> = []) -> [String] {
+        items.filter {
+            $0.object == object && pickable($0.path, inside: inside, locked: locked, hiddenItems: hiddenItems, lockedItems: lockedItems)
+                && !isHidden($0.path, hidden: hidden)
+        }.map(\.path)
     }
 
     /// Whether an item draws: no layer holding it is hidden.

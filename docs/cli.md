@@ -1623,7 +1623,7 @@ Render a scene to a transparent PNG, with item bounds.
 pixellab scene render <name> [--scale <n>] [--time <n>] [--theme <light|dark>] [--play <text>] [--view <n,…>] [--show <text>] [--hide <text,…>] [--focus <text>] [--out <file.png>]
 ```
 
-Returns { png (base64), scale, viewBox, frame, width, height, time, items: [{ path, object, at, id, bounds: [x, y, w, h] }] }. viewBox is the box the scene publishes at (its own, or the fit to what it paints; frame says which: "fixed" or "fit"), or the --view window when one is given. Bounds are in output pixels (scale included), for hit-testing. Of each run of data-class variant groups only the first shows, or the one holding --show. --hide leaves out the items in those layers (and the layers inside them), as hiding them in Pixel Lab does; --focus adds focusPng, the same render with only that layer's items. Ambient loops are placed at --time; --play <action>@<ms> places the elements that have that action where it has them <ms> into it. On the command line, --out <file.png> writes the PNG.
+Returns { png (base64), scale, viewBox, frame, width, height, time, items: [{ path, object, at, id, bounds: [x, y, w, h] }] }. viewBox is the box the scene publishes at (its own, or the fit to what it paints; frame says which: "fixed" or "fit"), or the --view window when one is given. Bounds are in output pixels (scale included), for hit-testing. Of each run of data-class variant groups only the first shows, or the one holding --show. --hide leaves out the items in those layers (and the layers inside them) and the items at those paths, as hiding them in Pixel Lab does (a name that is a layer wins over a path); --focus adds focusPng, the same render with only that layer's items. Ambient loops are placed at --time; --play <action>@<ms> places the elements that have that action where it has them <ms> into it. On the command line, --out <file.png> writes the PNG.
 
 read-only · MCP tool `scene_render`
 
@@ -1636,7 +1636,7 @@ read-only · MCP tool `scene_render`
 | `--play` | string |  | an action and the ms into it, like hop@120: the elements that have it are placed where it has them then, instead of on their ambient loop |
 | `--view` | list of integer |  | a window of the scene to render instead of its whole box: x,y,w,h in scene pixels (the result's viewBox is then the window) |
 | `--show` | string |  | an item path whose variant group to show, like 12.0 |
-| `--hide` | list of string |  | layers (ids or names) whose items are left out |
+| `--hide` | list of string |  | layers (ids or names) whose items are left out, or item paths like 12.0 to leave out single items |
 | `--focus` | string |  | a layer: the result adds focusPng, the render of only its items (and those of the layers inside it) |
 
 ```sh

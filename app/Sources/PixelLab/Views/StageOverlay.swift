@@ -15,9 +15,9 @@ struct StageOverlay: View {
     var body: some View {
         let editor = model.editor
         ZStack(alignment: .topLeading) {
-            if let object = editor.dropObject ?? (editor.effectiveTool == .place ? editor.placeObject : nil) {
+            if let object = editor.dropObject ?? (editor.isPlacing ? editor.placeObject : nil) {
                 placeGhost(object: object, editor: editor)
-            } else if editor.effectiveTool == .place, let tile = editor.hoverTile ?? editor.cursorTile {
+            } else if editor.isPlacing, let tile = editor.hoverTile ?? editor.cursorTile {
                 TileMark(geometry: geometry, tile: tile)
             }
             let layers = model.layers
@@ -111,7 +111,7 @@ struct StageOverlay: View {
             parts.append("Selected \(model.layers.selectionLabel ?? "")")
         }
         if let inside = model.layers.inside { parts.append("Inside \(doc.layerTree.name(of: inside))") }
-        if let object = editor.dropObject ?? (editor.effectiveTool == .place ? editor.placeObject : nil),
+        if let object = editor.dropObject ?? (editor.isPlacing ? editor.placeObject : nil),
            let tile = editor.hoverTile ?? editor.cursorTile {
             parts.append("Place \(object) at column \(tile.col), row \(tile.row), level \(tile.level)")
         }
@@ -124,10 +124,29 @@ struct StageOverlay: View {
         if editor.placeByPixel, let p = editor.hoverPixel {
             let point = CGPoint(x: floor(p.x), y: floor(p.y))
             ghost(object: object, placementPoint: point)
+            placeTag(object: object, below: geometry.viewPoint(fromScene: point), gap: 6)
         } else if let tile = editor.hoverTile ?? (editor.dropObject == nil ? editor.cursorTile : nil), let origin = geometry.tileOrigin {
             TileMark(geometry: geometry, tile: tile)
-            ghost(object: object, placementPoint: StageGeometry.tileToScene(col: tile.col, row: tile.row, level: tile.level, origin: origin))
+            let at = StageGeometry.tileToScene(col: tile.col, row: tile.row, level: tile.level, origin: origin)
+            ghost(object: object, placementPoint: at)
+            placeTag(object: object, below: geometry.viewPoint(fromScene: at), gap: StageGeometry.tileH / 2 * geometry.zoom + 6)
         }
+    }
+
+    static func placeTagText(object: String, target: String) -> String { "\(object) → \(target)" }
+
+    /// "pine → Trees": what is placed, and the layer it joins (R9, as the prototype shows it).
+    private func placeTag(object: String, below point: CGPoint, gap: CGFloat) -> some View {
+        return Text(Self.placeTagText(object: object, target: model.layers.placeTargetName))
+            .font(Theme.nameFont(10.5, weight: .semibold))
+            .foregroundStyle(Theme.onAccent)
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 6)
+            .frame(height: 18)
+            .background(Theme.accent, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .position(x: point.x, y: point.y + gap + 9)
+            .accessibilityHidden(true)
     }
 
     @ViewBuilder

@@ -90,7 +90,7 @@ struct LayerRow: View {
             if !flat { Color.clear.frame(width: CGFloat(row.depth) * 14, height: 1) }
             switch row.target {
             case .layer(let id): layerRow(id, tree: tree, selected: selected, hovering: hovering)
-            case .item(let path): itemRow(path, tree: tree, selected: selected)
+            case .item(let path): itemRow(path, tree: tree, selected: selected, hovering: hovering)
             }
         }
         .padding(.trailing, 2)
@@ -179,9 +179,12 @@ struct LayerRow: View {
     }
 
     @ViewBuilder
-    private func itemRow(_ path: String, tree: LayerTree, selected: Bool) -> some View {
+    private func itemRow(_ path: String, tree: LayerTree, selected: Bool, hovering: Bool) -> some View {
+        let layers = model.layers
         let item = doc.itemsByPath[path]
         let object = item?.object ?? path
+        let hidden = layers.hiddenItems[path] != nil
+        let locked = layers.lockedItems[path] != nil
         Color.clear.frame(width: 18, height: 1)
         Button(action: choose) {
             HStack(spacing: 6) {
@@ -191,23 +194,25 @@ struct LayerRow: View {
                     .frame(width: 15)
                 Text(object)
                     .font(.system(size: 12, weight: selected ? .semibold : .regular))
-                    .foregroundStyle(Theme.ink)
+                    .foregroundStyle(hidden ? Theme.inkMuted : Theme.ink)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 2)
-                Text(item?.at.short ?? "")
-                    .font(Theme.monoFont(10))
-                    .foregroundStyle(Theme.inkMuted)
-                    .lineLimit(1)
-                    .padding(.trailing, 4)
             }
             .padding(.leading, 2)
             .frame(maxHeight: .infinity)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(Self.spokenName(item) ?? path), \(item?.at.spoken ?? "")\(tree.layerOfItem[path].map { ", in \(tree.name(of: $0))" } ?? "")")
+        .accessibilityLabel("\(Self.spokenName(item) ?? path), \(item?.at.spoken ?? "")\(tree.layerOfItem[path].map { ", in \(tree.name(of: $0))" } ?? "")\(hidden ? ", hidden" : "")\(locked ? ", locked" : "")")
         .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityAction(named: hidden ? "Show" : "Hide") { layers.toggleItemHidden(path) }
+        .accessibilityAction(named: locked ? "Unlock" : "Lock") { layers.toggleItemLocked(path) }
+        let lockShown = locked || hovering || selected
+        RowIconButton(symbol: locked ? "lock.fill" : "lock.open", on: locked, label: locked ? "Unlock \(object)" : "Lock \(object)") { layers.toggleItemLocked(path) }
+            .opacity(lockShown ? (locked ? 1 : 0.75) : 0)
+            .allowsHitTesting(lockShown)
+        RowIconButton(symbol: hidden ? "eye.slash" : "eye", on: hidden, label: hidden ? "Show \(object)" : "Hide \(object)") { layers.toggleItemHidden(path) }
     }
 }
 

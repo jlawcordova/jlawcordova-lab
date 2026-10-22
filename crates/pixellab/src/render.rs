@@ -104,19 +104,22 @@ pub struct Leaf {
 /// Items that come from `scene_at` carry a `path`, their path in the
 /// scene's own items, which the depth order has moved them from; without
 /// one they are where they are listed.
+/// An item's path in the scene's own items: the `path` it carries, else where it is listed (`i` under `prefix`).
+fn item_path(item: &Value, prefix: &[usize], i: usize) -> Vec<usize> {
+    match item.get("path").and_then(Value::as_array) {
+        Some(p) => p.iter().map(|n| as_f64(n).unwrap_or(0.0) as usize).collect(),
+        None => {
+            let mut p = prefix.to_vec();
+            p.push(i);
+            p
+        }
+    }
+}
+
 pub fn visible_items(items: &[Value], selected: Option<&[usize]>, prefix: &[usize]) -> (Vec<Value>, Vec<Leaf>) {
     let mut kept: Vec<Value> = Vec::new();
     let mut leaves: Vec<Leaf> = Vec::new();
-    let path_of = |i: usize| -> Vec<usize> {
-        match items[i].get("path").and_then(Value::as_array) {
-            Some(p) => p.iter().map(|n| as_f64(n).unwrap_or(0.0) as usize).collect(),
-            None => {
-                let mut p = prefix.to_vec();
-                p.push(i);
-                p
-            }
-        }
-    };
+    let path_of = |i: usize| -> Vec<usize> { item_path(&items[i], prefix, i) };
     let inner = |item: &Value| -> Vec<Value> { item.get("items").and_then(Value::as_array).cloned().unwrap_or_default() };
     let with_items = |item: &Value, sub: Vec<Value>| -> Value {
         let mut out = item.clone();
@@ -271,18 +274,20 @@ fn layer_summary(scene: &Value, items: &[Value]) -> Vec<Value> {
 
 /// The scene's items with every placed item for which `hidden(item)` holds
 /// marked hidden (as a moving item away from the stage is), leaving paths
-/// alone.
-fn hide_where(items: &[Value], hidden: &dyn Fn(&Value) -> bool) -> Vec<Value> {
+/// alone. `hidden` is given the item and its path in the scene's own items.
+fn hide_where(items: &[Value], prefix: &[usize], hidden: &dyn Fn(&Value, &[usize]) -> bool) -> Vec<Value> {
     items
         .iter()
-        .map(|item| {
+        .enumerate()
+        .map(|(i, item)| {
+            let path = item_path(item, prefix, i);
             if is_group(item) {
                 let inner = item.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
                 let mut out = item.clone();
-                out["items"] = Value::Array(hide_where(&inner, hidden));
+                out["items"] = Value::Array(hide_where(&inner, &path, hidden));
                 return out;
             }
-            if truthy(Some(item)) && !truthy(item.get("hidden")) && hidden(item) {
+            if truthy(Some(item)) && !truthy(item.get("hidden")) && hidden(item, &path) {
                 let mut out = item.clone();
                 if let Some(o) = out.as_object_mut() {
                     o.insert("hidden".into(), Value::Bool(true));
@@ -446,7 +451,7 @@ pub enum Theme {
     Dark,
 }
 
-/// Options for `render_scene_image`. `hide` is a set of layer ids whose
+/// Options for `render_scene_image`. `hide` is a set of layer ids and item paths whose
 /// items aren't drawn or listed; with `focus` (a set of layer ids) the
 /// result adds `focusPng`, the same render with only those layers' items.
 #[derive(Clone, Debug)]
@@ -549,7 +554,10 @@ fn inner_scene_image(
     };
     let mut posed = ordered;
     if let Some(hide) = hide.as_ref().filter(|h| !h.is_empty()) {
-        posed = hide_where(&posed, &|item| item.get("layer").and_then(Value::as_str).is_some_and(|l| hide.has(l)));
+        // A layer's id, or an item's path (like 145.0): the items in those layers, and those items.
+        posed = hide_where(&posed, &[], &|item, path| {
+            item.get("layer").and_then(Value::as_str).is_some_and(|l| hide.has(l)) || hide.has(&path_string(path))
+        });
     }
     let (kept, leaves) = visible_items(&posed, show.as_deref(), &[]);
     let dark = *theme == Theme::Dark;
@@ -573,7 +581,7 @@ fn inner_scene_image(
     let image = paint(&kept)?;
     let focus_image = match focus {
         Some(focus) => {
-            let only = hide_where(&kept, &|item| item.get("layer").and_then(Value::as_str).is_none_or(|l| !focus.has(l)));
+            let only = hide_where(&kept, &[], &|item, _| item.get("layer").and_then(Value::as_str).is_none_or(|l| !focus.has(l)));
             Some(paint(&only)?)
         }
         None => None,

@@ -1,0 +1,123 @@
+# The canvas-first window, end to end on a temp copy of the site
+# (docs/intents/2026-10-floating-library/spec.md, R1-R19). Pixels are scene pixels at time 0:
+# 180,50 the locomotive (id train-loco). The runner checks that window-before/ and window-after/
+# hold the same hero-island.svg: pinching, the Library, hiding and locking change nothing published.
+appearance dark
+open scene:hero-island
+publish @OUT@/window-before
+expect build ok
+done
+# R12, R13: no toolbar; the right panel is on screen; R6: the bar's tools in a scene
+expect toolbar none
+expect inspector shown
+expect floatingbar select,pan,library
+expect library closed
+snapshot @OUT@/window-scene-dark.png
+# a zoom never moves the view on the way: the workspace already holds the stage at 1x, so a big
+# zoom out isn't laid out small and centered first (it jumped to the middle and back)
+zoom 4
+wait 300
+pinchby 0.25 180 50
+expect zoom 1
+wait 600
+expect anchor steady
+# R1, R2: a pinch-step (⌘= is the same) goes one whole level and keeps the pixel under the pointer
+zoom 1
+pinch in 180 50
+expect zoom 2
+expect anchor kept
+pinch in 60 -10
+expect zoom 3
+expect anchor kept
+pinch out 60 -10
+expect zoom 2
+expect anchor kept
+pinch out
+expect zoom 1
+pinch out
+expect zoom 1
+# a pinch follows the fingers: any scale between the levels (the owner asked for a seamless zoom)
+zoom 2
+pinchby 1.2 180 50
+expect zoom 2.4
+expect anchor kept
+pinchby 0.5
+expect zoom 1.2
+expect anchor kept
+pinchby 10
+expect zoom 4
+zoom 1
+zoomkey in
+expect zoom 2
+zoomkey out
+expect zoom 1
+zoom fit
+# R8: the Library opens from the bar; picking an object starts placing it; a drop places one
+library open
+expect library open
+snapshot @OUT@/window-library-dark.png
+library pine
+expect tool place
+librarydrop pine 4 -1 1
+expect object pine
+expect at 4,-1,1
+expect dirty true
+# the drop is undone, so what publishes at the end is the island as it was
+undo
+expect dirty false
+select none
+focus
+key esc
+expect tool select
+expect library open
+key esc
+expect library closed
+# R11: Edit Object opens the object and Back returns to the scene it came from
+select #train-loco
+editobject house
+expect doc object:house
+expect returnscene hero-island
+expect floatingbar pencil,eraser,fill,picker,pan
+snapshot @OUT@/window-object-dark.png
+back
+expect doc scene:hero-island
+# R19: an item's eye and lock in Layers. A locked item is passed by on the stage (the click lands on
+# what is behind it) but the tree, the inspector and the keys still select it
+select #train-loco
+lock selected
+expect lockeditems 143.0
+click 180 50
+expect selected 36.1
+select 143.0
+expect selected 143.0
+expect inspector item
+unlock selected
+expect lockedcount 0
+click 180 50
+expect object locomotive
+# a hidden item isn't drawn, can't be picked, and leaves the selection
+hide selected
+expect selected none
+expect hiddenitems 143.0
+click 180 50
+expect selected 36.1
+# both at once, for the snapshots: the locomotive hidden, the crane mast locked
+select 146.0
+lock selected
+expect lockeditems 146.0
+snapshot @OUT@/window-layers-dark.png
+appearance light
+snapshot @OUT@/window-layers-light.png
+appearance dark
+# view state only: put them back, so nothing but the file on disk is left
+select 143.0
+show selected
+select 146.0
+unlock selected
+expect hiddencount 0
+expect lockedcount 0
+# R17 and the published art: saved, and the island publishes as it did
+save
+publish @OUT@/window-after
+expect build ok
+done

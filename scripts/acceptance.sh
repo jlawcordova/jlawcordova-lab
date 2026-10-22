@@ -8,7 +8,8 @@
 # unsaved copy (stale-agent.mjs, stale.txt); the document is saved as a
 # copy, reopened and published into a folder (document.txt); and scene layers are
 # made, picked, gone inside, hidden, locked, moved, placed into and ungrouped, with
-# the hero island's SVG byte-identical before and after they're saved (layers.txt);
+# the hero island's SVG byte-identical before and after they're saved (layers.txt); the canvas-first window (window.txt: pinch, the floating
+# bar and Library, Edit Object and Back, hiding and locking single items) runs before them, on the same temp site;
 # then the example documents' layers, read from a file, on temp copies of
 # examples/ (examples-harbor.txt, examples-town.txt), and depth order on the harbor example: the front
 # pine moved behind the red house draws behind its wall, the Depth override draws it over, and the saved
@@ -165,6 +166,13 @@ if stage document; then
   thumbs=$(ls "$shots"/copy-site/static/public/thumbnails/*.png | wc -l | tr -d ' ')
   [[ $thumbs == 13 ]] || { echo "expected 13 thumbnails published from the copy, found $thumbs" >&2; exit 1; }
   [[ -f "$shots/copy-site/src/assets/pixel-art/copy.pixellab/manifest.json" ]] || { echo "the copy has no manifest.json" >&2; exit 1; }
+fi
+if stage window; then
+  echo "==> the canvas-first window: pinch, the floating bar and Library, Edit Object and Back, hiding and locking single items; the same SVG after"
+  run window.txt window.log
+  cmp "$shots/window-before/hero-island.svg" "$shots/window-after/hero-island.svg" || { echo "hero-island.svg changed in the window run" >&2; exit 1; }
+  if grep -qE 'hiddenItems|lockedItems' "$site"/src/assets/pixel-art/jlawcordova.pixellab/scenes/*.json; then echo "an item's hidden or locked state went into a scene file" >&2; exit 1; fi
+  echo "hero-island.svg identical after the window run"
 fi
 if stage layers; then
   echo "==> scene layers: the panel, the stage, the menu, the inspector; the same SVG with layers"

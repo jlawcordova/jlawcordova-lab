@@ -53,8 +53,6 @@ struct OverlayStamp: Sendable {
 final class ObjectEditor {
     @ObservationIgnored weak var app: AppModel?
 
-    enum SidebarTab: String, Hashable { case palette, library }
-
     var tool: PaintTool = .pencil
     var color = "ink"
     /// The layer painting goes to, and the frame every loop shows.
@@ -68,7 +66,6 @@ final class ObjectEditor {
     var pixelGrid = UserDefaults.standard.object(forKey: "objectPixelGrid") as? Bool ?? true {
         didSet { UserDefaults.standard.set(pixelGrid, forKey: "objectPixelGrid") }
     }
-    var sidebarTab: SidebarTab = .palette
     /// `object.show` for the open object.
     var info: ObjectShowResult?
     /// The pixel under the pointer, and the keyboard cursor.
@@ -269,10 +266,20 @@ final class ObjectEditor {
         say("\(name) chosen")
     }
 
+    /// The bar's Hand button (H): a held pan, like Space held, until another tool is picked.
+    var handHeld = false
+
     func setTool(_ t: PaintTool) {
         tool = t
+        handHeld = false
         if let v = app?.editor.stageView { v.window?.invalidateCursorRects(for: v) }
         say("\(t.title) tool")
+    }
+
+    func setHand(_ on: Bool) {
+        handHeld = on
+        if let v = app?.editor.stageView { v.window?.invalidateCursorRects(for: v) }
+        say(on ? "Hand tool" : "\(tool.title) tool")
     }
 
     /// Why painting is off on the selected layer, or nil (ObjectMode.paintBlocked).
@@ -820,6 +827,7 @@ final class ObjectEditor {
                 setTool(t)
                 return true
             }
+            if c == StageTool.pan.key { setHand(!handHeld); return true }
             if let n = c.wholeNumberValue {
                 if n == 0 { app.zoom = .fit; return true }
                 if n <= 4 { app.setZoomLevel(index: n - 1); return true }
