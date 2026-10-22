@@ -108,6 +108,19 @@ import Testing
         #expect(r.marked == ["big.svg: … lossless — OVER BUDGET"])
         #expect(r.overBudget.map(\.scene) == ["big"])
 
+        // A scene's image (publish.images) is a png output with no gzip, over or report.
+        let images = try JSONDecoder().decode(ArtBuildResult.self, from: Data("""
+        { "ok": true, "publishDir": "/out", "ms": 40, "unsaved": [], "previewOnly": [], "problems": [],
+          "outputs": [
+            { "file": "a.svg", "scene": "a", "kind": "svg", "raw": 100, "gzip": 20, "over": false, "report": "… lossless", "warnings": [] },
+            { "file": "a.png", "scene": "a", "kind": "png", "raw": 512, "warnings": [] }
+          ] }
+        """.utf8))
+        #expect(images.outputs.map(\.kind) == ["svg", "png"])
+        #expect(images.outputs[1].gzip == nil && images.outputs[1].over == false)
+        #expect(images.report == ["a.svg: … lossless", "a.png: 0.5 KB PNG image"])
+        #expect(images.overBudget.isEmpty)
+
         let failed = try JSONDecoder().decode(ArtBuildResult.self, from: Data("""
         { "ok": false, "publishDir": "/out", "outputs": [], "previewOnly": [], "problems": ["objects/x.json: row 1 is 3 wide, expected 4"], "ms": 3, "unsaved": [] }
         """.utf8))

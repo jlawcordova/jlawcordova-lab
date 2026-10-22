@@ -25,7 +25,7 @@
 #   scripts/acceptance.sh [out-dir]      (default: a new temp dir)
 #
 # Needs build/Pixel Lab.app (scripts/build-app.sh). The scripts expect the
-# site as it was on 2026-10-21 (28 scenes, 204 objects, the house at
+# site as it was on 2026-10-21 (28 scenes, 204 objects, 6 SVGs and 13 thumbnails, the house at
 # px -59,59); update their `expect` lines when the art changes.
 set -euo pipefail
 
@@ -111,7 +111,9 @@ echo "==> the document: save as, reopen the copy, publish into a folder"
 run document.txt document.log
 copied=$(ls "$shots"/copy-out/*.svg | wc -l | tr -d ' ')
 [[ $copied == 6 ]] || { echo "expected 6 SVGs published from the copy, found $copied" >&2; exit 1; }
-[[ -f "$shots/copy.pixellab/manifest.json" ]] || { echo "the copy has no manifest.json" >&2; exit 1; }
+thumbs=$(ls "$shots"/copy-site/static/public/thumbnails/*.png | wc -l | tr -d ' ')
+[[ $thumbs == 13 ]] || { echo "expected 13 thumbnails published from the copy, found $thumbs" >&2; exit 1; }
+[[ -f "$shots/copy-site/src/assets/pixel-art/copy.pixellab/manifest.json" ]] || { echo "the copy has no manifest.json" >&2; exit 1; }
 echo "==> scene layers: the panel, the stage, the menu, the inspector; the same SVG with layers"
 run layers.txt layers.log
 cmp "$shots/layers-before/hero-island.svg" "$shots/layers-after/hero-island.svg" || { echo "hero-island.svg changed when its layers were saved" >&2; exit 1; }

@@ -512,11 +512,27 @@ struct ArtBuildResult: Codable, Sendable, Equatable {
 }
 
 /// One compiled scene: its output file (nil for a preview-only scene), sizes and report line.
+/// `kind` is `svg` or `png`: a scene's image (`publish.images` in the manifest) has no gzip, budget
+/// or report, so those decode as nil, false and a line made from its size.
 struct ArtOutput: Codable, Sendable, Equatable {
     var file: String?
     var scene: String
+    var kind: String
     var raw: Int
-    var gzip: Int
+    var gzip: Int?
     var over: Bool
     var report: String
+
+    enum CodingKeys: String, CodingKey { case file, scene, kind, raw, gzip, over, report }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        file = try c.decodeIfPresent(String.self, forKey: .file)
+        scene = try c.decode(String.self, forKey: .scene)
+        kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? "svg"
+        raw = try c.decode(Int.self, forKey: .raw)
+        gzip = try c.decodeIfPresent(Int.self, forKey: .gzip)
+        over = try c.decodeIfPresent(Bool.self, forKey: .over) ?? false
+        report = try c.decodeIfPresent(String.self, forKey: .report) ?? "\(String(format: "%.1f", Double(raw) / 1024)) KB \(kind.uppercased()) image"
+    }
 }

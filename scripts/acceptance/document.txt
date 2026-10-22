@@ -1,15 +1,16 @@
 # Acceptance 6: the document (spec R3, R4, R7, R10): a site checkout opens the
 # .pixellab document inside it (the site's since 2026-10-20), Save As copies the
 # whole document and the app reopens on the copy, and Publish writes the six SVGs
-# into a folder.
+# into a folder (and the 13 blog thumbnails to the manifest's publish.images, since 2026-10-21).
 appearance dark
 open scene:hero-island
 expect document jlawcordova
 expect documentkind document
 expect scenes 28
 expect objects 204
-# Save As: the copy is a .pixellab with the site's art and its manifest (so its name).
-saveas @OUT@/copy.pixellab
+# Save As: the copy is a .pixellab with the site's art and its manifest (so its name). It sits as deep as the
+# site's document, so the manifest's relative publish.images (../../../../static/public/thumbnails) stays in @OUT@.
+saveas @OUT@/copy-site/src/assets/pixel-art/copy.pixellab
 expect document jlawcordova
 expect documentkind document
 expect scenes 28
@@ -19,7 +20,7 @@ expect at none
 # The copy's manifest publishes next to itself; the script publishes into its own folder instead.
 publish @OUT@/copy-out
 expect build ok
-expect outputs 6
+expect outputs 19
 snapshot @OUT@/document-publish-dark.png
 done
 appearance light
