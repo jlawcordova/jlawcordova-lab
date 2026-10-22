@@ -807,6 +807,8 @@ final class ObjectEditor {
             endStroke()
             tool = t
             return true
+        case .tab:
+            return false
         case .pageUp, .pageDown:
             selectFrame(frame + (k.key == .pageUp ? -1 : 1))
             return true

@@ -115,7 +115,8 @@ fn r4_check_warns_about_an_over_budget_scene_and_exits_0() {
     let (code, stdout, stderr) = cli(&doc, &["check"]);
     assert_eq!(code, 0, "{stderr}");
     assert!(stdout.contains("warning: scenes/sample.json: sample.svg is over its 0.5 KB budget"), "{stdout}");
-    assert!(stdout.contains("1 warning"), "{stdout}");
+    // The sample's pebble stands partly outside its viewBox, which `check` now says too (scene-canvas spec R11).
+    assert!(stdout.contains("outside its viewBox") && stdout.contains("2 warnings"), "{stdout}");
     let (code, stdout, _) = cli(&doc, &["check", "sample", "--json"]);
     assert_eq!(code, 0);
     let r: Value = serde_json::from_str(&stdout).unwrap();

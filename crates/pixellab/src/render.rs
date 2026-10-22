@@ -459,19 +459,19 @@ pub struct SceneImageOptions {
     pub focus: Option<OSet<String>>,
     /// An action playing, and ms into it (`--play hop@120`): its elements take its move instead of their ambient loop.
     pub play: Option<(String, f64)>,
+    /// A window of the scene to render, `[x, y, w, h]` in scene pixels, instead of its box (scene-canvas
+    /// spec R9): the app asks for what is on the stage, so an unbounded scene is never rendered whole.
+    pub view: Option<[i64; 4]>,
 }
 
 impl Default for SceneImageOptions {
     fn default() -> Self {
-        SceneImageOptions { scale: 1, time: 0.0, show: None, theme: Theme::Light, hide: None, focus: None, play: None }
+        SceneImageOptions { scale: 1, time: 0.0, show: None, theme: Theme::Light, hide: None, focus: None, play: None, view: None }
     }
 }
 
-fn view_box_of(scene: &Value) -> Option<[i64; 4]> {
-    let vb = scene.get("viewBox")?.as_array()?;
-    let n = |i: usize| vb.get(i).and_then(as_f64).map(|v| v as i64);
-    Some([n(0)?, n(1)?, n(2)?, n(3)?])
-}
+/// The most pixels a `view` window may hold (4 bytes each): a stage is never this big.
+const MAX_VIEW_PIXELS: i128 = 100_000_000;
 
 fn original<'a>(scene: &'a Value, path: &[usize]) -> Option<&'a Value> {
     let mut list = scene.get("items")?;
@@ -507,8 +507,24 @@ pub fn render_scene_image(sources: &Sources, name: &str, dark_page: &str, option
             .into());
         }
     }
-    let view = view_box_of(scene).ok_or_else(|| Error::Internal("Invalid viewBox".to_string()))?;
-    inner_scene_image(sources, name, scene, view, dark_page, options).map_err(|m| render_error("scene", name, &m))
+    // The box the scene publishes at: its own viewBox, else the fit to what it paints (spec R2, R7).
+    let frame = engine::engine::resolve_frame(sources, name).map_err(|e| render_error("scene", name, &e.0))?;
+    let view = match options.view {
+        Some([_, _, w, h]) if w <= 0 || h <= 0 => {
+            return Err(CommandError::usage("scene.render: view must be x,y,w,h with w and h above 0").into());
+        }
+        Some([_, _, w, h]) if (w as i128) * (h as i128) > MAX_VIEW_PIXELS => {
+            return Err(CommandError::usage(format!("scene.render: view is larger than {MAX_VIEW_PIXELS} pixels")).into());
+        }
+        Some(window) => window,
+        None => frame.view_box,
+    };
+    let mut image = inner_scene_image(sources, name, scene, view, dark_page, options).map_err(|m| render_error("scene", name, &m))?;
+    if let Some(out) = image.as_object_mut() {
+        out.insert("viewBox".into(), Value::Array(view.iter().map(|&n| Value::from(n)).collect()));
+        out.insert("frame".into(), Value::from(if frame.fixed { "fixed" } else { "fit" }));
+    }
+    Ok(image)
 }
 
 fn inner_scene_image(
@@ -520,7 +536,7 @@ fn inner_scene_image(
     options: &SceneImageOptions,
 ) -> std::result::Result<Value, String> {
     let e = |err: engine::EngineError| err.0;
-    let SceneImageOptions { scale, time, show, theme, hide, focus, play } = options;
+    let SceneImageOptions { scale, time, show, theme, hide, focus, play, view: _ } = options;
     let (scale, time) = (*scale, *time);
     let origin = origin_of(scene);
     // The scene as it stands at `time`: every list in the order it draws in then (an item that moves among others
@@ -605,7 +621,7 @@ fn inner_scene_image(
     let mut out = Map::new();
     out.insert("png".into(), Value::String(base64(&preview::encode_png(&image, scale))));
     out.insert("scale".into(), Value::from(scale));
-    out.insert("viewBox".into(), scene.get("viewBox").cloned().unwrap_or(Value::Null));
+    out.insert("viewBox".into(), Value::Null);
     out.insert("width".into(), Value::from(image.width as u64 * scale as u64));
     out.insert("height".into(), Value::from(image.height as u64 * scale as u64));
     out.insert("time".into(), num(time));

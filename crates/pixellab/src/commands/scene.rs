@@ -80,6 +80,32 @@ fn or_null(v: Option<&Value>) -> Value {
     v.filter(|v| !v.is_null()).cloned().unwrap_or(Value::Null)
 }
 
+/// Adds a scene's resolved `viewBox` and its `frame` ("fit" when it has no viewBox of its own, else
+/// "fixed") to a result (scene-canvas spec R7). A scene that can't render has the viewBox it carries, if any.
+fn put_frame(sources: &engine::engine::Sources, name: &str, scene: &Value, m: &mut Map<String, Value>) {
+    let own = scene.get("viewBox").filter(|v| v.is_array());
+    let frame = if own.is_some() { "fixed" } else { "fit" };
+    match (engine::engine::resolve_frame(sources, name), own) {
+        (_, Some(vb)) => {
+            m.insert("viewBox".into(), vb.clone());
+        }
+        (Ok(f), None) => {
+            m.insert("viewBox".into(), json!(f.view_box));
+        }
+        (Err(_), None) => {}
+    }
+    m.insert("frame".into(), json!(frame));
+}
+
+/// "fits 272×200" or "fixed 272×200": a scene's published size.
+fn size_text(r: &Value) -> String {
+    let word = if r.get("frame").and_then(Value::as_str) == Some("fixed") { "fixed" } else { "fits" };
+    match r.get("viewBox").filter(|v| !v.is_null()) {
+        Some(vb) => format!("{word} {}×{}", str_of(vb.get(2)), str_of(vb.get(3))),
+        None => format!("{word} ?"),
+    }
+}
+
 fn list_run(ctx: &mut Ctx, _: Params) -> Result<Value> {
     let loaded = ctx.sources()?;
     let scenes: Vec<Value> = loaded
@@ -92,9 +118,7 @@ fn list_run(ctx: &mut Ctx, _: Params) -> Result<Value> {
                 ("file", json!(engine::format::scene_file(name))),
                 ("output", or_null(scene.get("output"))),
             ]);
-            if let Some(vb) = scene.get("viewBox") {
-                m.insert("viewBox".into(), vb.clone());
-            }
+            put_frame(&loaded.sources, name, scene, &mut m);
             m.insert("origin".into(), scene.get("origin").filter(|v| !v.is_null()).cloned().unwrap_or_else(|| json!([0, 0])));
             m.insert("items".into(), json!(count_items(scene.get("items"))));
             m.insert("motion".into(), json!(truthy(scene.get("motion"))));
@@ -110,11 +134,6 @@ fn list_format(r: &Value, _: &Params) -> String {
     scenes
         .iter()
         .map(|s| {
-            let vb = s.get("viewBox").filter(|v| !v.is_null());
-            let (vw, vh) = match vb {
-                Some(vb) => (str_of(vb.get(2)), str_of(vb.get(3))),
-                None => ("0".to_string(), "0".to_string()),
-            };
             let output = match s.get("output") {
                 Some(Value::String(o)) => o.clone(),
                 _ => "(preview only)".to_string(),
@@ -122,7 +141,7 @@ fn list_format(r: &Value, _: &Params) -> String {
             format!(
                 "{}  {} {} items  {}{}",
                 pad_end(s["name"].as_str().unwrap_or(""), w),
-                pad_end(&format!("{vw}×{vh}"), 9),
+                pad_end(&size_text(s), 13),
                 pad_start(&str_of(s.get("items")), 4),
                 output,
                 if truthy(s.get("motion")) { "  · motion" } else { "" }
@@ -172,8 +191,10 @@ fn show_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     };
     let mut out =
         obj(vec![("name", json!(name)), ("file", json!(engine::format::scene_file(&name))), ("output", or_null(scene.get("output")))]);
-    if let Some(vb) = scene.get("viewBox") {
-        out.insert("viewBox".into(), vb.clone());
+    let loaded = ctx.sources()?;
+    put_frame(&loaded.sources, &name, &scene, &mut out);
+    if let Some(margin) = scene.get("margin") {
+        out.insert("margin".into(), margin.clone());
     }
     out.insert("origin".into(), scene.get("origin").filter(|v| !v.is_null()).cloned().unwrap_or_else(|| json!([0, 0])));
     out.insert("items".into(), json!(items.len()));
@@ -210,6 +231,7 @@ fn show_format(r: &Value, _: &Params) -> String {
     let mut lines = vec![
         format!("{}  ({})", s("name"), s("file")),
         format!("output    {output}"),
+        format!("size      {}", size_text(r)),
         format!("viewBox   {}, {}, {}×{}", vb(0), vb(1), vb(2), vb(3)),
         format!("origin    {}", join(r.get("origin"), ", ")),
         format!("items     {} in {} group{}", s("items"), groups, plural(groups)),
@@ -322,6 +344,10 @@ fn render_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
             Some(p) => Some(parse_play(p)?),
             None => None,
         },
+        view: params.get("view").and_then(Value::as_array).filter(|v| v.len() == 4).map(|v| {
+            let n = |i: usize| v[i].as_i64().unwrap_or(0);
+            [n(0), n(1), n(2), n(3)]
+        }),
     };
     let image = render_scene_image(&loaded.sources, &name, &dark_page, &options)?;
     let mut out = obj(vec![("scene", json!(name))]);
@@ -390,6 +416,13 @@ pub fn commands() -> Vec<Command> {
     props.insert("theme".into(), theme());
     props.insert("play".into(), play_param());
     props.insert(
+        "view".into(),
+        json!({
+            "type": "array", "items": { "type": "integer" }, "minItems": 4, "maxItems": 4,
+            "description": "a window of the scene to render instead of its whole box: x,y,w,h in scene pixels (the result's viewBox is then the window)"
+        }),
+    );
+    props.insert(
         "show".into(),
         json!({ "type": "string", "pattern": "^\\d+(\\.\\d+)*$", "description": "an item path whose variant group to show, like 12.0" }),
     );
@@ -409,7 +442,9 @@ pub fn commands() -> Vec<Command> {
         render_run,
     );
     render.description = Some(concat!(
-        "Returns { png (base64), scale, viewBox, width, height, time, items: [{ path, object, at, id, bounds: [x, y, w, h] }] }. ",
+        "Returns { png (base64), scale, viewBox, frame, width, height, time, items: [{ path, object, at, id, bounds: [x, y, w, h] }] }. ",
+        "viewBox is the box the scene publishes at (its own, or the fit to what it paints; frame says which: \"fixed\" or \"fit\"), ",
+        "or the --view window when one is given. ",
         "Bounds are in output pixels (scale included), for hit-testing. Of each run of data-class variant groups only the first shows, ",
         "or the one holding --show. --hide leaves out the items in those layers (and the layers inside them), as hiding them in Pixel Lab does; ",
         "--focus adds focusPng, the same render with only that layer's items. ",

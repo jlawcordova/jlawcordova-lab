@@ -822,3 +822,116 @@ pub fn place_in_group(
     let message = format!("{object} placed at {} in group {}", spoken(&item), show(dirs));
     Ok(json!({ "path": path_value(&path), "group": path_value(dirs), "item": item, "message": message }))
 }
+
+// ----------------------------------------------------------- stacking (scene-canvas spec R16, R17)
+
+/// Where an item rests: the level it stands at, and the object it rests on (None for the ground).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Stand {
+    pub level: i64,
+    pub over: Option<String>,
+}
+
+/// Every placed item with its path, groups flattened, in list order.
+fn placed_items<'a>(items: &'a [Value], dirs: &mut Vec<usize>, out: &mut Vec<(Vec<usize>, &'a Value)>) {
+    for (i, item) in items.iter().enumerate() {
+        dirs.push(i);
+        if is_group(item) {
+            if let Some(inner) = item.get("items").and_then(Value::as_array) {
+                placed_items(inner, dirs, out);
+            }
+        } else {
+            out.push((dirs.clone(), item));
+        }
+        dirs.pop();
+    }
+}
+
+/// The level an item rests at over its column and row: the top of the highest block that covers any of the
+/// tiles its own block size or footprint covers, in whole levels; level 0 (the ground) when none does. A sprite
+/// stands at that level; a block of height h rests with its bottom on it, so its level (the level of its
+/// top face) is that plus h. `ignore` leaves one item out (the one being dropped); `below` counts only
+/// items whose top is no higher than that level (what is under an item, not on it).
+pub fn stand_level(sources: &Sources, doc: &Value, item: &Value, ignore: Option<&[usize]>, below: Option<f64>) -> Stand {
+    let origin = eng::origin_of(doc);
+    let ground = Stand { level: 0, over: None };
+    let Ok(me) = eng::item_box(sources, item, origin) else { return ground };
+    let height = match eng::resolve(sources, &js_string(item.get("object"))) {
+        Ok(r) => r.block.map(|b| b.size[2] as f64),
+        Err(_) => None,
+    };
+    let mut found: Option<(f64, String)> = None;
+    let mut all = Vec::new();
+    placed_items(doc.get("items").and_then(Value::as_array).map_or(&[][..], |v| v.as_slice()), &mut Vec::new(), &mut all);
+    for (path, other) in all {
+        if ignore.is_some_and(|p| p == path.as_slice()) {
+            continue;
+        }
+        // Only a block holds something up: a sprite standing on a tile (a pine, a pebble) is not a floor.
+        if !eng::resolve(sources, &js_string(other.get("object"))).is_ok_and(|r| r.block.is_some()) {
+            continue;
+        }
+        let Ok(o) = eng::item_box(sources, other, origin) else { continue };
+        let covers = o.c0 < me.c1 && o.c1 > me.c0 && o.r0 < me.r1 && o.r1 > me.r0;
+        if !covers || below.is_some_and(|limit| o.l1 > limit + 1e-9) {
+            continue;
+        }
+        if found.as_ref().is_none_or(|(top, _)| o.l1 > *top) {
+            found = Some((o.l1, js_string(other.get("object"))));
+        }
+    }
+    match found {
+        // Whole levels.
+        Some((top, over)) => Stand { level: (top - 1e-9).ceil() as i64 + height.map_or(0, |h| h as i64), over: Some(over) },
+        None => ground,
+    }
+}
+
+/// Sets the level an item at `at` stands at: the third number of a tile, or a pixel item's `level`
+/// (left out at 0).
+pub fn put_level(at: &mut Value, level: i64) {
+    if let Some(tile) = at.get_mut("tile").and_then(Value::as_array_mut) {
+        while tile.len() < 3 {
+            tile.push(json!(0));
+        }
+        tile[2] = json!(level);
+    } else if let Some(map) = at.as_object_mut() {
+        if level == 0 {
+            map.shift_remove("level");
+        } else {
+            map.insert("level".into(), json!(level));
+        }
+    }
+}
+
+/// Drops an item onto whatever it stands over: down to the level where it rests on the top of the
+/// block under it, or on the ground. Never up. Returns `{ path, item, message }`.
+pub fn drop_item(sources: &Sources, doc: &mut Value, path: &[usize]) -> Result<Value> {
+    let item = placed_at(doc, path)?.clone();
+    let object = js_string(item.get("object"));
+    let at = item.get("at").cloned().unwrap_or(Value::Null);
+    let current = match tile_of(&item) {
+        Some(tile) => num_at(Some(tile), 2),
+        None => at.get("level").and_then(Value::as_f64).unwrap_or(0.0),
+    };
+    let current = if current.is_nan() { 0.0 } else { current };
+    // What is under it: the item's own base is its level (a sprite), or its level less its height (a block).
+    let base = eng::item_box(sources, &item, eng::origin_of(doc)).map_or(current, |b| b.l0.min(current));
+    let stand = stand_level(sources, doc, &item, Some(path), Some(base));
+    let level = (stand.level as f64).min(current) as i64;
+    let moved = (level as f64) != current;
+    if let Some(target) = item_at_mut(doc, path) {
+        put_level(&mut target["at"], level);
+    }
+    let item = item_at(doc, path).cloned().unwrap_or(Value::Null);
+    let rests = match &stand.over {
+        Some(over) if level == stand.level => format!("on top of {over}"),
+        _ => "on the ground".to_string(),
+    };
+    let message = if moved {
+        format!("{object} dropped to level {level}, {rests}")
+    } else {
+        format!("{object} already rests at level {level}, {rests}")
+    };
+    Ok(json!({ "path": path_value(path), "item": item, "message": message, "over": stand.over, "changed": moved }))
+}

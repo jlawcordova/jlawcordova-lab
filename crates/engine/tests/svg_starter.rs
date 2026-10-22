@@ -207,7 +207,7 @@ fn r17_the_editors_starters_are_the_same_documents_as_npm_run_art_new_writes() {
         starter_sprite(4, 3),
         json!({ "kind": "sprite", "anchor": [2, 2], "keys": { "o": "ink" }, "layers": [{ "map": ["....", "....", "...."] }] })
     );
-    assert_eq!(starter_scene(), json!({ "viewBox": [-64, -64, 128, 128], "origin": [0, 0], "items": [] }));
+    assert_eq!(starter_scene(), json!({ "origin": [0, 0], "items": [] }));
     assert_eq!(starter_extends("body"), json!({ "kind": "sprite", "extends": "body", "keys": {}, "rows": {} }));
     assert_eq!(
         starter_block(),
@@ -221,7 +221,7 @@ fn the_starters_keep_the_key_order_of_the_node_documents() {
         engine::format::stringify(&starter_sprite(5, 2)),
         r#"{"kind":"sprite","anchor":[2,1],"keys":{"o":"ink"},"layers":[{"map":[".....","....."]}]}"#
     );
-    assert_eq!(engine::format::stringify(&starter_scene()), r#"{"viewBox":[-64,-64,128,128],"origin":[0,0],"items":[]}"#);
+    assert_eq!(engine::format::stringify(&starter_scene()), r#"{"origin":[0,0],"items":[]}"#);
     assert_eq!(engine::format::stringify(&starter_extends("body")), r#"{"kind":"sprite","extends":"body","keys":{},"rows":{}}"#);
     assert_eq!(
         engine::format::stringify(&starter_block()),
