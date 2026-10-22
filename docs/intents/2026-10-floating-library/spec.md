@@ -81,7 +81,7 @@ This is a change to the Mac app, apart from one widened parameter: `scene.render
     - Edit › Edit Object (⌘↩) opens the selected item's object.
   - **Back out:**
     - In the object view, a pill at the stage's top left shows **‹ Back · hero-island › house**. Back, or the scene's name in it, returns to the scene the owner came from (the last scene, when they didn't come from one).
-    - View › Back to <scene> (⌘[) does the same from the keyboard.
+    - View › Back to <scene> (⌘[) does the same from the keyboard. In the object view, ⌘] and ⌘[ no longer step layers; plain ] and [ still do (the owner's decision, 2026-10-22).
     - Clicking any scene in the sidebar opens that scene.
   - **Other ways in:** File › New Object stays, and so does opening an object from Search.
 
@@ -257,6 +257,7 @@ The acceptance scripts that use `mode`, `sidebar` or `tool place` are updated to
   - The shortcuts table:
     - Drops A and ⌥⌘I.
     - Adds L, ⌘=, ⌘−, ⌘↩ and ⌘[.
+    - The layer row reads "] / [ | Next / previous layer (object mode only)", without ⌘] and ⌘[.
     - Notes pinch and ⌘-scroll for zoom.
 - `docs/cli.md` is regenerated for `scene.render`'s widened `hide` (D12). No other command changes.
 - The docs site is rebuilt to check links.
@@ -287,6 +288,7 @@ The owner settled the concerns raised in review on 2026-10-22:
   - Removed: A (Place) and ⌥⌘I (Inspector).
   - Added: L, ⌘= and ⌘−, ⌘↩ for Edit Object, and ⌘[ for Back.
   - The owner accepted all of these.
+  - ⌘[ already stepped layers in the object view. The owner chose (2026-10-22) that Back takes ⌘[, and layers keep plain ] and [.
 - **Scroll bars:** respect the system's "Show scroll bars" setting (R5, D3), rather than forcing overlay scrollers.
 - **The sidebar:** it stays collapsible through View › Hide Sidebar.
 - **Publish:** it stays beside Save in the right panel, as prototyped.

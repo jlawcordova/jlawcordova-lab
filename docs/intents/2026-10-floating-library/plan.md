@@ -124,7 +124,7 @@ main ── PR #38 (intent, spec, plan; owner merges)
    - `BackPill`.
    - Edit Object in `StageMenu` and the Library menu.
    - The menu items Edit › Edit Object (⌘↩) and View › Back to <scene> (⌘[).
-   - Before this step, settle the ⌘[ clash (Risks).
+   - The object view's ⌘] and ⌘[ stop stepping layers; plain ] and [ still do. Test: `R11: ⌘[ goes back and [ still steps the layer`.
    - Tests: `R11: Edit Object from a scene, then Back, returns to it`, `R11: Back with no scene to return to opens the last scene`.
 8. **The window's chrome and the right panel (R12–R14).**
    - `DocumentToolbar`, `AgentToolbarButton` and the sidebar toggle are deleted, and the compact title bar is set.
@@ -150,7 +150,6 @@ main ── PR #38 (intent, spec, plan; owner merges)
 | Step | Who | Where | Then |
 |---|---|---|---|
 | Merge PR #38 | The owner | `intent/floating-library` → `main` | The main session cuts `feat/floating-library` from `main` |
-| Settle the ⌘[ clash | The owner, asked by the main session | chat | Step 7 follows their answer |
 | 1–12 | The main session, back to back | `feat/floating-library`, in its own worktree (other sessions share the main checkout) | Opens the PR into `main` |
 | Review | The owner | The PR: snapshots, the pasted checks, and an installed build (`scripts/install.sh`) to try pinch and drag on the trackpad | Feedback becomes commits on the same branch. The owner merges |
 
@@ -165,13 +164,10 @@ main ── PR #38 (intent, spec, plan; owner merges)
   - The acceptance pass checks that the published art is byte-identical.
 
 ## Risks
-- **⌘[ already has a job in objects.**
-  - Today ] and [ step layers in an object, and the README lists ⌘] and ⌘[ as the same. A menu item on ⌘[ (spec D9, R11) would take ⌘[ before the stage sees it, in exactly the view where Back applies.
-  - The main session asks the owner before step 7, with three options:
-    - (a) Back takes ⌘[, and layers keep ] and [ without ⌘. The README row changes.
-    - (b) Back uses another key.
-    - (c) Back keeps the keyboard path through Esc in the object view.
-  - The recommendation is (a). If the answer changes the spec, the spec is updated in the same commit as step 7.
+- **⌘[ already had a job in objects.**
+  - ] and [ step layers in an object, and ⌘] and ⌘[ did too.
+  - The owner chose (2026-10-22) that Back takes ⌘[ and layers keep plain ] and [.
+  - Step 7 drops the ⌘ variants, step 10 updates the README row, and the R11 test pins both.
 - **The riskiest step is pinch zoom anchored under the pointer** (step 1).
   - The stage's content size changes with the zoom. Its `ScrollView` is SwiftUI on top of `NSScrollView`, so the clip view's origin has to be set after layout. Otherwise the art jumps.
   - Handled by setting it on the next layout pass from the anchor's scene point, which `StageGeometry` maps both ways. The R1 test checks the anchor stays within a pixel.
