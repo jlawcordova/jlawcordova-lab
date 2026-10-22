@@ -321,11 +321,21 @@ fn render_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let hidden = if hide_refs.is_empty() {
         None
     } else {
+        // A layer (id or name) wins; a reference that is no layer but is an item's path hides that item.
         let mut ids = Vec::new();
+        let mut paths = Vec::new();
         for r in &hide_refs {
-            ids.push(str_of(find_layer(&scene, r)?.get("id")));
+            match find_layer(&scene, r) {
+                Ok(layer) => ids.push(str_of(layer.get("id"))),
+                Err(_) if parse_path(r).is_some() => paths.push(r.to_string()),
+                Err(err) => return Err(err.into()),
+            }
         }
-        Some(closure(&scene, &ids))
+        let mut set = closure(&scene, &ids);
+        for p in paths {
+            set.add(p);
+        }
+        Some(set)
     };
     let focused = match opt_str(&params, "focus") {
         Some(f) => Some(closure(&scene, &[str_of(find_layer(&scene, f)?.get("id"))])),
@@ -428,7 +438,7 @@ pub fn commands() -> Vec<Command> {
     );
     props.insert(
         "hide".into(),
-        json!({ "type": "array", "items": { "type": "string" }, "description": "layers (ids or names) whose items are left out" }),
+        json!({ "type": "array", "items": { "type": "string" }, "description": "layers (ids or names) whose items are left out, or item paths like 12.0 to leave out single items" }),
     );
     props.insert(
         "focus".into(),
@@ -446,7 +456,7 @@ pub fn commands() -> Vec<Command> {
         "viewBox is the box the scene publishes at (its own, or the fit to what it paints; frame says which: \"fixed\" or \"fit\"), ",
         "or the --view window when one is given. ",
         "Bounds are in output pixels (scale included), for hit-testing. Of each run of data-class variant groups only the first shows, ",
-        "or the one holding --show. --hide leaves out the items in those layers (and the layers inside them), as hiding them in Pixel Lab does; ",
+        "or the one holding --show. --hide leaves out the items in those layers (and the layers inside them) and the items at those paths, as hiding them in Pixel Lab does (a name that is a layer wins over a path); ",
         "--focus adds focusPng, the same render with only that layer's items. ",
         "Ambient loops are placed at --time; --play <action>@<ms> places the elements that have that action where it has them <ms> into it. ",
         "On the command line, --out <file.png> writes the PNG."
