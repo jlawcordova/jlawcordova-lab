@@ -137,7 +137,7 @@ doc="$out/examples/chat.pixellab"
 rm -rf "$doc" && cp -R "$root/examples/harbor.pixellab" "$doc" && migrate_doc "$doc" > /dev/null
 sed "s#@OUT@#$shots#g" "$root/scripts/acceptance/chat-setup.txt" > "$out/chat-setup.txt"
 FAKE_CLAUDE_INSTALL_S=1 FAKE_CLAUDE_LOGIN_MS=2500 PIXELLAB_CLAUDE_HOME="$claude_home" PIXELLAB_CLAUDE_INSTALLER="$root/scripts/fake-claude/install.sh" \
-  PIXELLAB_SCRIPT="$out/chat-setup.txt" PIXELLAB_DOC="$doc" PIXELLAB_STATE="$chat_state" "$app/Contents/MacOS/PixelLab" 2>&1 | grep '^script:' > "$out/chat-setup.log" || true
+  PIXELLAB_SCRIPT="$out/chat-setup.txt" PIXELLAB_DOC="$doc" PIXELLAB_STATE="$chat_state" "$app/Contents/MacOS/PixelLab" -rightTab inspector 2>&1 | grep '^script:' > "$out/chat-setup.log" || true
 tail -1 "$out/chat-setup.log"
 grep -q 'all steps passed' "$out/chat-setup.log"
 proposal=$(ls "$chat_state"/proposals/*.json | head -1)
@@ -191,7 +191,7 @@ echo "==> migrate: a format-1 document is R9's problem; Migrate… asks, Cancel 
 old="$out/examples/old-format.pixellab"
 old_document "$old"
 sed "s#@OUT@#$shots#g" "$root/scripts/acceptance/migrate.txt" > "$out/migrate.txt"
-PIXELLAB_SCRIPT="$out/migrate.txt" PIXELLAB_DOC="$old" PIXELLAB_STATE="$out/state-migrate" "$app/Contents/MacOS/PixelLab" -documentPath "" 2>&1 | grep '^script:' > "$out/migrate.log" || true
+PIXELLAB_SCRIPT="$out/migrate.txt" PIXELLAB_DOC="$old" PIXELLAB_STATE="$out/state-migrate" "$app/Contents/MacOS/PixelLab" -documentPath "" -rightTab inspector 2>&1 | grep '^script:' > "$out/migrate.log" || true
 tail -1 "$out/migrate.log"
 grep -q 'all steps passed' "$out/migrate.log"
 [[ -f "$old/palette.json" && ! -e "$old/palette.mjs" && -z $(find "$old" -name '*.mjs') ]] || { echo "the migrated document still has .mjs sources" >&2; exit 1; }
@@ -204,13 +204,13 @@ PIXELLAB_STATE="$canvas_state" "$program" scene new meadow --document "$canvas" 
 grep -q viewBox "$canvas/scenes/meadow.json" && { echo "scene new wrote a viewBox (R1)" >&2; exit 1; }
 perl -0pi -e 's/\A\{\n/{\n  "output": "meadow.svg",\n/' "$canvas/scenes/meadow.json"
 sed "s#@OUT@#$shots#g" "$root/scripts/acceptance/canvas.txt" > "$out/canvas.txt"
-PIXELLAB_SCRIPT="$out/canvas.txt" PIXELLAB_DOC="$canvas" PIXELLAB_STATE="$canvas_state" "$app/Contents/MacOS/PixelLab" 2>&1 | grep '^script:' > "$out/canvas.log" || true
+PIXELLAB_SCRIPT="$out/canvas.txt" PIXELLAB_DOC="$canvas" PIXELLAB_STATE="$canvas_state" "$app/Contents/MacOS/PixelLab" -showFrame YES 2>&1 | grep '^script:' > "$out/canvas.log" || true
 tail -1 "$out/canvas.log"
 grep -q 'all steps passed' "$out/canvas.log"
 for f in harbor.svg harbor-flat.svg; do
   cmp "$shots/canvas-before/$f" "$shots/canvas-after/$f" || { echo "$f changed while a scene without a size was made (R4)" >&2; exit 1; }
 done
-meadow_width=$(sed -n 's/.*<svg[^>]* width="\([0-9]*\)".*/\1/p' "$shots/canvas-after/meadow.svg" | head -1)
+meadow_width=$(sed -n 's/.*<svg[^>]* viewBox="[-0-9]* [-0-9]* \([0-9]*\) [0-9]*".*/\1/p' "$shots/canvas-after/meadow.svg" | head -1)
 [[ -n $meadow_width && $meadow_width -gt 128 ]] || { echo "the meadow's SVG is $meadow_width wide: it should fit what was placed far from the origin (R2)" >&2; exit 1; }
 echo "harbor SVGs byte-identical; the meadow publishes at ${meadow_width} px wide, fit to its content (the old default cut at 128)"
 echo "==> the temp site after the run"

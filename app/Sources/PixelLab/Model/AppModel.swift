@@ -49,7 +49,8 @@ final class AppModel {
     }
     /// View › Show Published Frame: the outline of the box a scene publishes at.
     var showFrame: Bool = UserDefaults.standard.object(forKey: SettingsKey.showFrame) as? Bool ?? true {
-        didSet { UserDefaults.standard.set(showFrame, forKey: SettingsKey.showFrame) }
+        // Remembered, except under the script hook or a snapshot run, which must leave the owner's settings alone.
+        didSet { if script == nil, snapshot == nil { UserDefaults.standard.set(showFrame, forKey: SettingsKey.showFrame) } }
     }
     var showInspector = true
     var searchText = ""

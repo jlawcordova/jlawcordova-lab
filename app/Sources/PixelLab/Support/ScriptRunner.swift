@@ -1294,7 +1294,7 @@ final class ScriptRunner {
             }.joined(separator: " | ")
             guard titles.contains(want) else { throw Failure("Edit › Move has no “\(want)”: \(titles)") }
             return "Edit › Move has \(want)"
-        case "frame": got = doc?.frameInfo?.frame ?? "none"
+        case "frame": got = doc?.ref.kind == .object ? String(model.objectEditor.frame) : (doc?.frameInfo?.frame ?? "none")
         case "size": got = doc.map { "\(Int($0.publishSize.width)),\(Int($0.publishSize.height))" } ?? "none"
         case "outline": got = model.showFrame ? "on" : "off"
         case "window": got = doc?.window.map { "\(Int($0.minX)),\(Int($0.minY)),\(Int($0.width)),\(Int($0.height))" } ?? "none"
@@ -1424,9 +1424,11 @@ final class ScriptRunner {
             // A pixel of the stage's scene render, in scene pixels: "#RRGGBB" or empty.
             let parts = words.dropFirst(2)
             guard let p = parts.first.flatMap(PixelPoint.init(spec:)), let render = doc?.render else { throw Failure("expect scenepixel x,y <#RRGGBB|empty>") }
-            let colors = PixelColors(cgImage: render.image.cgImage, scale: render.scale)
+            // One pixel of the render (the stage's window can be millions of pixels).
+            let sc = max(render.scale, 1)
             let q = PixelPoint(p.x - Int(render.viewBox.minX), p.y - Int(render.viewBox.minY))
-            got = colors?.hex(q) ?? "empty"
+            let cell = render.image.cgImage.cropping(to: CGRect(x: q.x * sc, y: q.y * sc, width: sc, height: sc))
+            got = cell.flatMap { PixelColors(cgImage: $0, scale: sc) }?.hex(PixelPoint(0, 0)) ?? "empty"
             let wantColor = parts.dropFirst().joined(separator: " ").uppercased()
             guard got.uppercased() == wantColor else { throw Failure("expected scenepixel \(p) \(wantColor), got \(got)") }
             return "scene pixel \(p) = \(got)"
