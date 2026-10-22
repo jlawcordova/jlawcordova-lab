@@ -486,6 +486,22 @@ final class AppModel {
                 doc.renderCount += 1
             } while doc.needsRender && document === doc
             doc.rendering = false
+            // A scene just opened: if nothing has the keyboard, the stage does, so Tab, ⌘↓, the arrows and
+            // Return work without a click first (a text field or a list the owner is in keeps it).
+            if document === doc, !doc.stageFocused, doc.render != nil, doc.ref.kind == .scene {
+                doc.stageFocused = true
+                // The stage's view is made by the layout after this render lands: wait for it.
+                Task {
+                    for _ in 0..<20 {
+                        try? await Task.sleep(for: .milliseconds(50))
+                        guard document === doc else { return }
+                        if let w = editor.stageView?.window {
+                            if w.firstResponder === w { editor.focusStage() }
+                            return
+                        }
+                    }
+                }
+            }
             if doc.ref.kind == .object, document === doc, !objectEditor.playing { objectEditor.requestExtras() }
             if document === doc { agent.syncGhost() }
         }

@@ -268,6 +268,20 @@ final class StageInputView: NSView {
         if !editor.handleKey(input) { super.keyDown(with: event) }
     }
 
+    /// Keys the window would otherwise take before `keyDown` (the key-view loop takes Tab, the main
+    /// menu takes ⌘↓): while the stage is the first responder in a scene, they are the stage's
+    /// (docs/intents/2026-10-scene-canvas/spec.md, R15, R16).
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.type == .keyDown, isScene, let editor, window?.firstResponder === self, let input = Self.keyInput(event) else {
+            return super.performKeyEquivalent(with: event)
+        }
+        let plain = !input.command && !input.control && !input.option
+        let tab = input.key == .tab && plain
+        let drop = input.key == .down && input.command && !input.control && !input.option && !input.shift
+        guard tab || drop, editor.handleKey(input) else { return super.performKeyEquivalent(with: event) }
+        return true
+    }
+
     override func keyUp(with event: NSEvent) {
         if event.keyCode == 49, let editor, editor.spaceHeld {
             editor.spaceHeld = false
@@ -276,6 +290,37 @@ final class StageInputView: NSView {
             return
         }
         super.keyUp(with: event)
+    }
+
+    /// A key-down event for a key, as the keyboard sends it: what the script hook dispatches through the window.
+    static func keyEvent(for k: KeyInput, window: NSWindow) -> NSEvent? {
+        let (code, chars): (UInt16, String) = switch k.key {
+        case .left: (123, String(UnicodeScalar(NSLeftArrowFunctionKey)!))
+        case .right: (124, String(UnicodeScalar(NSRightArrowFunctionKey)!))
+        case .down: (125, String(UnicodeScalar(NSDownArrowFunctionKey)!))
+        case .up: (126, String(UnicodeScalar(NSUpArrowFunctionKey)!))
+        case .pageUp: (116, String(UnicodeScalar(NSPageUpFunctionKey)!))
+        case .pageDown: (121, String(UnicodeScalar(NSPageDownFunctionKey)!))
+        case .tab: (48, k.shift ? "\u{19}" : "\t")
+        case .delete: (51, "\u{7f}")
+        case .returnKey: (36, "\r")
+        case .escape: (53, "\u{1b}")
+        case .space: (49, " ")
+        case .char(let c): (0, String(c))
+        }
+        var flags: NSEvent.ModifierFlags = []
+        if k.shift { flags.insert(.shift) }
+        if k.option { flags.insert(.option) }
+        if k.command { flags.insert(.command) }
+        if k.control { flags.insert(.control) }
+        switch k.key {
+        case .left, .right, .up, .down: flags.formUnion([.numericPad, .function])
+        case .pageUp, .pageDown: flags.insert(.function)
+        default: break
+        }
+        return NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
+                                windowNumber: window.windowNumber, context: nil, characters: chars,
+                                charactersIgnoringModifiers: k.key == .tab ? "\t" : chars, isARepeat: false, keyCode: code)
     }
 
     static func keyInput(_ event: NSEvent) -> KeyInput? {

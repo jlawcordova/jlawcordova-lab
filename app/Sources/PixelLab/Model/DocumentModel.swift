@@ -148,6 +148,8 @@ final class DocumentModel {
         if kept != selection { selection = kept }
     }
 
+    /// The stage has been given the keyboard once for this doc (see `AppModel.requestRender`).
+    @ObservationIgnored var stageFocused = false
     @ObservationIgnored var rendering = false
     @ObservationIgnored var needsRender = false
     @ObservationIgnored var checking = false

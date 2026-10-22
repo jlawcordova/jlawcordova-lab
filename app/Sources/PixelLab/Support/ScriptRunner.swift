@@ -350,6 +350,17 @@ final class ScriptRunner {
             return nil
         case "key":
             guard let k = KeyInput(spec: try arg(words, 1)) else { throw Failure("unknown key \(words[1])") }
+            // A key press the way the owner makes one: a real NSEvent through NSApp.sendEvent (the window's
+            // key equivalents, then the first responder's keyDown), so it fails when the stage isn't the
+            // first responder or the key is taken before it. `calls` skips that and calls the handler.
+            if words.count < 3 || words[2] != "calls", model.document?.ref.kind == .scene, !k.command || k.key == .down {
+                guard let view = editor.stageView, let window = view.window else { throw Failure("no stage") }
+                guard window.firstResponder === view else { throw Failure("the stage isn't the first responder (click it, or `focus`): \(String(describing: window.firstResponder))") }
+                guard let event = StageInputView.keyEvent(for: k, window: window) else { throw Failure("can't make a key event for \(words[1])") }
+                NSApp.sendEvent(event)
+                try? await Task.sleep(for: .milliseconds(60))
+                return nil
+            }
             if k.command {
                 // Menu shortcuts the script can name.
                 switch k.key {
