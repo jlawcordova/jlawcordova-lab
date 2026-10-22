@@ -312,3 +312,23 @@ import Testing
         #expect(edit()?.shortcut == "⌘↩")
     }
 }
+
+@MainActor @Suite struct RightPanelTests {
+    @Test("R14: Save is disabled when clean and its label says so")
+    func testR14SaveIsDisabledWhenCleanAndItsLabelSaysSo() {
+        let app = AppModel()
+        app.document = DocumentModel(ref: DocRef(.scene, "a"))
+        #expect(!app.canSave)
+        #expect(RightColumn.saveLabel(unsaved: app.canSave) == "Save, all saved")
+        app.document?.status = DocStatus(doc: "scene:a", dirty: true, canUndo: true, canRedo: false)
+        #expect(app.canSave)
+        #expect(RightColumn.saveLabel(unsaved: app.canSave) == "Save, unsaved changes")
+    }
+
+    @Test("R14: the Agent tab shows the waiting count")
+    func testR14TheAgentTabShowsTheWaitingCount() {
+        #expect(RightColumn.tabLabel("Agent", pending: 0) == "Agent")
+        #expect(RightColumn.tabLabel("Agent", pending: 1) == "Agent, 1 proposal to review")
+        #expect(RightColumn.tabLabel("Agent", pending: 3) == "Agent, 3 proposals to review")
+    }
+}

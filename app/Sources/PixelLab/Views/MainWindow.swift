@@ -29,8 +29,8 @@ struct MainWindow: View {
     }
 }
 
-/// Board 03's document window: unified toolbar, sidebar, stage with the
-/// timeline strip under it, inspector.
+/// Board 03's document window: a slim title bar with no toolbar, the sidebar, the stage with its
+/// floating bar and the timeline strip under it, and the inspector column.
 struct DocumentWindow: View {
     @Environment(AppModel.self) private var model
 
@@ -56,8 +56,9 @@ struct DocumentWindow: View {
             }
             .background(Theme.hero)
         }
-        .inspector(isPresented: $model.showInspector) {
-            // Inspector | ✦ Agent (docs/intents/2026-10-agent-chat/spec.md, D12).
+        // Always shown: no button, menu item or key hides it (docs/intents/2026-10-floating-library/spec.md, R13).
+        .inspector(isPresented: .constant(true)) {
+            // Inspector | ✦ Agent … Publish · Save (docs/intents/2026-10-agent-chat/spec.md, D12; floating-library R14).
             RightColumn()
                 .inspectorColumnWidth(min: 260, ideal: 340, max: 520)
         }
@@ -65,7 +66,8 @@ struct DocumentWindow: View {
         .overlay { LayerMenuLayer() }
         .navigationTitle(model.windowTitle)
         .navigationSubtitle(model.document == nil ? "" : (model.document?.isDirty == true ? "Edited" : "Saved"))
-        .toolbar { DocumentToolbar() }
+        // No toolbar: the title and its Edited / Saved subtitle in a slim title bar (R12).
+        .toolbar(removing: .sidebarToggle)
         .toolbarBackground(Theme.hero, for: .windowToolbar)
         .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
         .background(Theme.page)
@@ -136,111 +138,6 @@ struct DocumentWindow: View {
     }
 }
 
-struct DocumentToolbar: ToolbarContent {
-    @Environment(AppModel.self) private var model
-
-    var body: some ToolbarContent {
-        ToolbarItem(placement: .principal) {
-            Picker("Mode", selection: Binding(get: { model.mode }, set: { model.switchMode(to: $0) })) {
-                Text("Scene").tag(DocRef.Kind.scene)
-                Text("Object").tag(DocRef.Kind.object)
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 150)
-            .help("Edit scenes or objects (Object with an item selected opens its object)")
-        }
-        ToolbarItemGroup(placement: .primaryAction) {
-            if model.mode == .object {
-                Picker("Tool", selection: Binding(get: { model.objectEditor.tool }, set: { model.objectEditor.setTool($0); model.editor.focusStage() })) {
-                    ForEach(PaintTool.allCases) { tool in
-                        Label("\(tool.title) (\(String(tool.key).uppercased()))", systemImage: tool.symbol)
-                            .labelStyle(.iconOnly)
-                            .tag(tool)
-                            .accessibilityLabel("\(tool.title) tool")
-                    }
-                }
-                .pickerStyle(.segmented)
-                .help("Pencil (B) · Eraser (E) · Fill (G) · Picker (I); Option-click with the pencil picks; Shift-click draws a line; hold Space to pan")
-            } else {
-                Picker("Tool", selection: Binding(get: { model.editor.tool }, set: { model.editor.setTool($0); model.editor.focusStage() })) {
-                    ForEach(StageTool.allCases) { tool in
-                        Label("\(tool.title) (\(String(tool.key).uppercased()))", systemImage: tool.symbol)
-                            .labelStyle(.iconOnly)
-                            .tag(tool)
-                            .accessibilityLabel("\(tool.title) tool")
-                    }
-                }
-                .pickerStyle(.segmented)
-                .help("Select (V) · Place (A) · Pan (H); hold Space to pan")
-            }
-
-            Menu {
-                Button("Fit") { model.zoom = .fit }
-                Divider()
-                ForEach(Zoom.levels(for: model.mode), id: \.self) { n in
-                    Button("\(n)×") { model.zoom = .level(n) }
-                }
-            } label: {
-                Text(zoomLabel).monospacedDigit().frame(minWidth: 52)
-            }
-            .menuIndicator(.visible)
-            .fixedSize()
-            .help(model.mode == .object ? "Zoom: Fit (⌘0) or 4×, 8×, 12×, 16× (⌘1–⌘4)" : "Zoom: Fit (⌘0) or 1×–4× (⌘1–⌘4)")
-            .accessibilityLabel("Zoom, \(zoomLabel)")
-
-            Button {
-                if model.mode == .object { model.objectEditor.pixelGrid.toggle() } else { model.showGrid.toggle() }
-            } label: {
-                Label("Grid", systemImage: gridOn ? "square.grid.3x3.fill" : "square.grid.3x3")
-            }
-            .help(model.mode == .object
-                  ? (gridOn ? "Hide the pixel grid (⌘')" : "Show the pixel grid, from 8× (⌘')")
-                  : (gridOn ? "Hide the iso grid (⌘')" : "Show the iso grid (⌘')"))
-            .accessibilityLabel(model.mode == .object ? "Pixel grid" : "Grid")
-
-            Button {
-                Task { await model.publish() }
-            } label: {
-                Label("Publish", systemImage: "square.and.arrow.up.on.square")
-            }
-            .help("Publish: compile every scene and write the SVGs to the document's publish folder (⌘B)")
-            .accessibilityLabel("Publish")
-            .disabled(model.build?.running == true)
-
-            Button {
-                Task { await model.save() }
-            } label: {
-                Text("Save")
-            }
-            .buttonStyle(AccentButtonStyle())
-            .disabled(!model.canSave)
-            .help("Save the source (⌘S)")
-            .accessibilityLabel("Save")
-        }
-        ToolbarItem(placement: .primaryAction) {
-            AgentToolbarButton(agent: model.agent)
-        }
-        ToolbarItem(placement: .primaryAction) {
-            Button {
-                model.showInspector.toggle()
-            } label: {
-                Label("Inspector", systemImage: "sidebar.right")
-            }
-            .help(model.showInspector ? "Hide the inspector (⌥⌘I)" : "Show the inspector (⌥⌘I)")
-            .accessibilityLabel(model.showInspector ? "Hide Inspector" : "Show Inspector")
-        }
-    }
-
-    private var gridOn: Bool { model.mode == .object ? model.objectEditor.pixelGrid : model.showGrid }
-
-    private var zoomLabel: String {
-        switch model.zoom {
-        case .fit: "Fit \(model.effectiveZoom)×"
-        case .level(let n): "\(n)×"
-        }
-    }
-}
-
 struct NoticeBar: View {
     var text: String
     var dismiss: () -> Void
@@ -261,7 +158,7 @@ struct NoticeBar: View {
 }
 
 /// The one accent button (Save): accent fill, dark ink, dimmed when disabled
-/// rather than turning gray, so the toolbar keeps board 03's single accent.
+/// rather than turning gray, so the window keeps board 03's single accent.
 struct AccentButtonStyle: ButtonStyle {
     var height: CGFloat = 28
     @Environment(\.isEnabled) private var isEnabled
@@ -275,33 +172,5 @@ struct AccentButtonStyle: ButtonStyle {
             .background(Theme.accent, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             .opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.45)
             .contentShape(Rectangle())
-    }
-}
-
-/// The toolbar's way into the Agent tab (docs/intents/2026-10-agent-chat/spec.md, D13), with
-/// the count of proposals waiting (a small accent badge; nothing when there are none).
-struct AgentToolbarButton: View {
-    var agent: AgentModel
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        let n = agent.pendingCount
-        Button {
-            model.showAgentTab()
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "sparkles")
-                if n > 0 {
-                    Text("\(n)")
-                        .font(.system(size: 10, weight: .bold).monospacedDigit())
-                        .foregroundStyle(Theme.onAccent)
-                        .padding(.horizontal, 5)
-                        .frame(minWidth: 16, minHeight: 16)
-                        .background(Theme.accent, in: Capsule())
-                }
-            }
-        }
-        .help(n == 0 ? "Agent: chat with Claude about the scene (⌥⌘A)" : "Agent: \(n) proposal\(n == 1 ? "" : "s") to review (⌥⌘A)")
-        .accessibilityLabel(n == 0 ? "Agent" : "Agent, \(n) proposal\(n == 1 ? "" : "s") to review")
     }
 }

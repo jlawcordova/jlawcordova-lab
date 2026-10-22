@@ -15,7 +15,7 @@ struct PixelLabApp: App {
                 .frame(minWidth: 960, minHeight: 600)
         }
         .defaultSize(width: 1440, height: 900)
-        .windowToolbarStyle(.unified)
+        .windowToolbarStyle(.unifiedCompact)
         .commands { PixelLabCommands(model: model) }
 
         // A single window SwiftUI remembers the frame of. Its automatic Window

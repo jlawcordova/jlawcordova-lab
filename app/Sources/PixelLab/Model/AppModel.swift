@@ -59,7 +59,6 @@ final class AppModel {
         // Remembered, except under the script hook or a snapshot run, which must leave the owner's settings alone.
         didSet { if script == nil, snapshot == nil { UserDefaults.standard.set(showFrame, forKey: SettingsKey.showFrame) } }
     }
-    var showInspector = true
     /// The Library popover over the stage is open (docs/intents/2026-10-floating-library/spec.md, R8).
     var libraryOpen = false
 
@@ -1121,9 +1120,8 @@ final class AppModel {
         }
     }
 
-    /// The toolbar's sparkle, Window › Agent (⌥⌘A), Ask Claude about this: the Agent tab, shown.
+    /// The Agent tab's sparkle, Window › Agent (⌥⌘A), Ask Claude about this: the Agent tab, shown.
     func showAgentTab(focusInput: Bool = false) {
-        showInspector = true
         rightTab = .agent
         chat.start()
         if focusInput { chat.focusRequest += 1 }
