@@ -2,7 +2,7 @@
 
 The intent, spec and plan merge to `main` together in PR #38 (`intent/floating-library`). The code then starts on `feat/floating-library`, cut from `main` after that merge.
 
-The change is to the Mac app only (`app/`), its test hook and acceptance scripts, and the README. Nothing in `crates/`, `docs/cli.md`, the document format, the CLI or MCP changes.
+The change is to the Mac app (`app/`), its test hook and acceptance scripts, and the README. There's one exception: `scene.render`'s `hide` also takes item paths, so single items can be hidden (spec R19, D12). That's a small change in `crates/pixellab` and `docs/cli.md`. The document format, the engine and the published art don't change.
 
 ## Files that change
 
@@ -46,8 +46,23 @@ The change is to the Mac app only (`app/`), its test hook and acceptance scripts
 - `app/Sources/PixelLab/Views/RightColumn.swift`: the tab row, Inspector | ✦ Agent ⟨n⟩ … Publish · Save (D8).
 - `app/Sources/PixelLab/Views/ObjectPanels.swift`: the palette shown without the Palette | Library switch, if the switch lives there (D6).
 
+**Layers: hide and lock single items (R19)**
+- `crates/pixellab/src/render.rs`: `hide` matches item paths as well as layer ids and names (a layer wins).
+- `crates/pixellab/src/commands/scene.rs`: the `hide` schema and the command description mention item paths.
+- `crates/pixellab/tests/render.rs`: `R19: hide takes an item path` and `R19: a layer name wins over a path`.
+- `docs/cli.md` (generated): `npm run docs:cli`.
+- `app/Sources/PixelLab/Model/LayersModel.swift`:
+  - `LayerViewState` gains `hiddenItems` and `lockedItems` (path and object), with the toggles.
+  - Entries follow `reordered` and are dropped on open or reload when the path's object differs.
+  - `renderParams` sends the hidden items.
+- `app/Sources/PixelLab/Model/LayerTree.swift`: the pickability check skips hidden and locked items.
+- `app/Sources/PixelLab/Views/LayersPanel.swift`: the item row loses its position text and gains the group row's lock and eye buttons.
+- `app/Tests/PixelLabTests/LayerTests.swift`: the R19 tests in step 6.
+
 **Tests and the test hook**
-- `app/Sources/PixelLab/Support/ScriptRunner.swift`: the steps and expects in D10, plus aliases for `mode`, `sidebar` and `tool place`.
+- `app/Sources/PixelLab/Support/ScriptRunner.swift`:
+  - The steps and expects in D10, plus aliases for `mode`, `sidebar` and `tool place`.
+  - `hide|show|lock|unlock` take item paths, and `expect hiddenitems|lockeditems` checks them (D12).
 - `app/Tests/PixelLabTests/CanvasTests.swift` (new): Swift Testing suites named by requirement (`R1: …`).
 - `app/Tests/PixelLabTests/StageTests.swift`: tests that used the Place tool or `sidebarTab` updated.
 - `scripts/acceptance/canvas.txt` (new): the end-to-end run of the new window on the temp site copy.
@@ -59,11 +74,11 @@ The change is to the Mac app only (`app/`), its test hook and acceptance scripts
 
 ## Order of work
 
-There's one slice: one branch and one PR into `main`. The steps form one chain. The window chrome, the bar, the Library and Back all touch `StageView`, `AppModel` and `ScriptRunner`, so parallel runners would fight over the same files. The work fits one sitting.
+There's one slice: one branch and one PR into `main`. The steps form one chain. The window chrome, the bar, the Library, Back and the item rows all touch `StageView`, `AppModel`, `LayersModel` and `ScriptRunner`, so parallel runners would fight over the same files. The program change in step 5 is small enough to stay in the same slice.
 
 ```
 main ── PR #38 (intent, spec, plan; owner merges)
-  └── feat/floating-library ── steps 1–10 ── PR "A canvas-first window" (owner merges) ──▶ main
+  └── feat/floating-library ── steps 1–12 ── PR "A canvas-first window" (owner merges) ──▶ main
 ```
 
 **PR: A canvas-first window, with a floating library** (`feat/floating-library` → `main`). Each step is one commit, and `swift build --package-path app` and `scripts/test-app.sh` pass after each one.
@@ -90,19 +105,33 @@ main ── PR #38 (intent, spec, plan; owner merges)
    - The ghost tag names the target layer.
    - The sidebar's pickers and both `sidebarTab`s are removed, and `PlaceIntoChip` is deleted.
    - Tests: `R8: L opens and Esc closes, placing first`, `R9: the ghost tag names the layer placing goes into` (the cases from `../2026-10-scene-layers/spec.md` D13), `R10: the sidebar has no Library`.
-5. **Edit Object and Back (R11).**
+5. **Item paths in `scene.render`'s `hide` (R19, program).**
+   - `render.rs` matches item paths after layer ids and names.
+   - The schema and description are updated, and `docs/cli.md` is regenerated.
+   - Tests in `crates/pixellab/tests/render.rs`: `R19: hide takes an item path` and `R19: a layer name wins over a path`.
+   - `cargo fmt --check`, `cargo test` and `npm test` pass.
+6. **Hide and lock single items (R19, app).**
+   - `LayerViewState.hiddenItems` and `lockedItems`, with their toggles, following `reordered` and dropped on a mismatch.
+   - `renderParams` sends the hidden items, and `LayerTree` skips hidden and locked items when picking.
+   - The `LayersPanel` item row gets the lock and eye buttons in place of its position.
+   - Tests:
+     - `R19: a hidden item isn't drawn or picked, and leaves the selection`
+     - `R19: a locked item can't be picked on the stage but selects from the tree`
+     - `R19: a hide follows a depth sort's reordered path`
+     - `R19: a stale entry is dropped on reload`
+7. **Edit Object and Back (R11).**
    - `editObject` and `backToScene` with `returnScene`.
    - `BackPill`.
    - Edit Object in `StageMenu` and the Library menu.
    - The menu items Edit › Edit Object (⌘↩) and View › Back to <scene> (⌘[).
    - Before this step, settle the ⌘[ clash (Risks).
    - Tests: `R11: Edit Object from a scene, then Back, returns to it`, `R11: Back with no scene to return to opens the last scene`.
-6. **The window's chrome and the right panel (R12–R14).**
+8. **The window's chrome and the right panel (R12–R14).**
    - `DocumentToolbar`, `AgentToolbarButton` and the sidebar toggle are deleted, and the compact title bar is set.
    - The inspector is always presented, and `showInspector` and its menu item go.
    - `RightColumn`'s row gets the Agent badge, Publish and Save.
    - Tests: `R14: Save is disabled when clean and its label says so`, `R14: the Agent tab shows the waiting count`.
-7. **The test hook (R17).**
+9. **The test hook (R17).**
    - The D10 steps and expects, and the `mode`, `sidebar` and `tool place` aliases.
    - `layers.txt` updated.
    - `canvas.txt` written and added to `acceptance.sh`, which runs on the temp site copy:
@@ -110,18 +139,19 @@ main ── PR #38 (intent, spec, plan; owner merges)
      - `expect toolbar none`, `expect inspector shown` and `expect floatingbar select,pan,library`;
      - `library open`, `librarydrop pine 4 -1 1`, `expect at 4,-1,1`;
      - `editobject house`, `expect floatingbar pencil,eraser,fill,picker,pan`, then `back` and `expect returnscene hero-island`;
+     - `hide` and `lock` on an item path, `expect hiddenitems`, a click that passes through the locked item, then `show` and `unlock`;
      - save, and the hero island's SVG byte-identical after publishing.
-8. **Docs (R18).** The README tour and shortcuts table, then `npm run docs:site`.
-9. **Snapshots (R16).** In dark and light: the scene stage with the bar, the open Library, the object view with the Back pill, and the right panel's row. Each is taken with `snapshot <png>` from a script on a temp document copy, then checked against the prototype boards.
-10. **Full verification**, every check in Proof, pasted into the PR. Then open the PR and hand over.
+10. **Docs (R18).** The README tour and shortcuts table, then `npm run docs:site`.
+11. **Snapshots (R16).** In dark and light: the scene stage with the bar, the open Library, the object view with the Back pill, the right panel's row, and Layers with a hidden and a locked item. Each is taken with `snapshot <png>` from a script on a temp document copy, then checked against the prototype boards.
+12. **Full verification**, every check in Proof, pasted into the PR. Then open the PR and hand over.
 
 ## Workflow and reviews
 
 | Step | Who | Where | Then |
 |---|---|---|---|
 | Merge PR #38 | The owner | `intent/floating-library` → `main` | The main session cuts `feat/floating-library` from `main` |
-| Settle the ⌘[ clash | The owner, asked by the main session | chat | Step 5 follows their answer |
-| 1–10 | The main session, back to back | `feat/floating-library`, in its own worktree (other sessions share the main checkout) | Opens the PR into `main` |
+| Settle the ⌘[ clash | The owner, asked by the main session | chat | Step 7 follows their answer |
+| 1–12 | The main session, back to back | `feat/floating-library`, in its own worktree (other sessions share the main checkout) | Opens the PR into `main` |
 | Review | The owner | The PR: snapshots, the pasted checks, and an installed build (`scripts/install.sh`) to try pinch and drag on the trackpad | Feedback becomes commits on the same branch. The owner merges |
 
 - **Runners and merging:**
@@ -129,16 +159,19 @@ main ── PR #38 (intent, spec, plan; owner merges)
   - If `main` moves, the main session merges it into `feat/floating-library` before the next step.
   - Only the owner merges into `main`.
 - **Owner review:** one, at the PR. How pinch and drag feel on a real trackpad can't be checked by a script. The look is set by the approved prototype.
-- **Independent review:** none. The change doesn't touch what's written to the site, proposals, approval or the MCP surface. The acceptance pass checks that the published art is byte-identical.
+- **Independent review:** none.
+  - The change doesn't touch what's written to the site, proposals or approval.
+  - Its one change to the MCP surface is a read-only render parameter that writes nothing (step 5), covered by its tests and `docs/cli.md`.
+  - The acceptance pass checks that the published art is byte-identical.
 
 ## Risks
 - **⌘[ already has a job in objects.**
   - Today ] and [ step layers in an object, and the README lists ⌘] and ⌘[ as the same. A menu item on ⌘[ (spec D9, R11) would take ⌘[ before the stage sees it, in exactly the view where Back applies.
-  - The main session asks the owner before step 5, with three options:
+  - The main session asks the owner before step 7, with three options:
     - (a) Back takes ⌘[, and layers keep ] and [ without ⌘. The README row changes.
     - (b) Back uses another key.
     - (c) Back keeps the keyboard path through Esc in the object view.
-  - The recommendation is (a). If the answer changes the spec, the spec is updated in the same commit as step 5.
+  - The recommendation is (a). If the answer changes the spec, the spec is updated in the same commit as step 7.
 - **The riskiest step is pinch zoom anchored under the pointer** (step 1).
   - The stage's content size changes with the zoom. Its `ScrollView` is SwiftUI on top of `NSScrollView`, so the clip view's origin has to be set after layout. Otherwise the art jumps.
   - Handled by setting it on the next layout pass from the anchor's scene point, which `StageGeometry` maps both ways. The R1 test checks the anchor stays within a pixel.
@@ -148,8 +181,13 @@ main ── PR #38 (intent, spec, plan; owner merges)
 - **Esc has several jobs.** On the stage it already clears the selection and leaves a layer, and it stops placing. With the popover open, it closes the popover only after the stage has nothing else to undo. The order is tested in step 4.
 - **Drag from the popover.** The popover is an in-window overlay, not an `NSPopover`, so the existing `onDrag` and the stage's drop keep working (D5). Nothing new in the drag path.
 - **The test hook and acceptance.** The aliases keep the existing scripts running. `layers.txt` is the only one whose expects change. A failing `expect` about the art means the code is wrong, not the script (`CLAUDE.md`), unless the site's art changed.
-- **The Agent window's ⌘↩** (Approve) and Edit › Edit Object (⌘↩) live in different windows. The menu item is enabled only when the main window is key and a scene item is selected. Checked in step 5 with `agentkey cmd+return` in an existing chat script.
+- **The Agent window's ⌘↩** (Approve) and Edit › Edit Object (⌘↩) live in different windows. The menu item is enabled only when the main window is key and a scene item is selected. Checked in step 7 with `agentkey cmd+return` in an existing chat script.
 - **The Command Line Tools build.** No `@State`: all new state lives on `AppModel` or the editors.
+- **Hidden items are keyed by path** (D12).
+  - A path moves when an edit or depth sort reorders items. The app's own edits report that in `reordered`, and the entry follows it.
+  - Outside changes can't be followed, so an entry whose path no longer holds its object is dropped.
+  - Tested in step 6. The rare case of an outside edit that swaps two items of the same object is accepted (spec, Areas of concern).
+- **A layer and an item path with the same text in `hide`.** The layer wins, and the test in step 5 pins it. Layer names are words; item paths are numbers with dots.
 - **Options not chosen:**
   - An `NSPopover` for the Library: it closes on a drag out, and doesn't take board 03's look.
   - Smooth zoom: it breaks whole-zoom pixel art.
@@ -157,8 +195,8 @@ main ── PR #38 (intent, spec, plan; owner merges)
 
 ## Proof
 Run from the `feat/floating-library` worktree, with the output pasted into the PR:
-- `swift build --package-path app` with no errors, and `scripts/test-app.sh` with every test passing, including the new `R1`–`R14` tests in `CanvasTests.swift`.
-- `cargo fmt --check`, `cargo test` with no failures, and `npm test` with `# fail 0`. Nothing in `crates/` changes, but `CLAUDE.md` asks for them.
+- `swift build --package-path app` with no errors, and `scripts/test-app.sh` with every test passing, including the new `R1`–`R14` tests in `CanvasTests.swift` and the `R19` tests in `LayerTests.swift`.
+- `cargo fmt --check`, `cargo test` with no failures (including the R19 render tests), and `npm test` with `# fail 0`.
 - `scripts/build-app.sh`, then `scripts/acceptance.sh` exits 0, with `canvas.txt` in the log ending "all steps passed" and the hero island's SVG byte-identical.
-- `npm run docs:site` builds with no broken links, and `npm run docs:cli` leaves `git status` clean (no command changed).
+- `npm run docs:site` builds with no broken links, and `npm run docs:cli` leaves `git status` clean apart from the committed `scene.render` change.
 - Snapshots in dark and light of the four views in step 9, compared with the prototype boards `Groups.dc.html`, `Object.dc.html` and `AgentChat.dc.html`, and attached to the PR.
