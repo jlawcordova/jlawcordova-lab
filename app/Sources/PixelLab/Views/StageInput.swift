@@ -40,7 +40,9 @@ struct StageInput: NSViewRepresentable {
 }
 
 final class StageInputView: NSView {
-    var geometry: StageGeometry?
+    var geometry: StageGeometry? {
+        didSet { keepScroll(from: oldValue) }
+    }
     weak var editor: SceneEditor?
     weak var objects: ObjectEditor?
     var tool: StageTool = .select
@@ -48,6 +50,44 @@ final class StageInputView: NSView {
     var isScene = true
     private var panStart: (window: CGPoint, origin: CGPoint)?
     private var tracking: NSTrackingArea?
+
+    /// The workspace changed size or place (it grew, or the viewport did): scroll
+    /// so the scene pixel at the middle of the view stays there, and what the
+    /// owner is looking at stays put.
+    private func keepScroll(from old: StageGeometry?) {
+        guard isScene, let old, let new = geometry, old.zoom == new.zoom,
+              old.viewBox != new.viewBox || old.contentSize != new.contentSize,
+              let scroll = enclosingScrollView else { return }
+        let clip = scroll.contentView
+        let size = clip.bounds.size
+        let center = old.scenePoint(fromView: CGPoint(x: clip.bounds.origin.x + size.width / 2, y: clip.bounds.origin.y + size.height / 2))
+        DispatchQueue.main.async { [weak self] in
+            guard let scroll = self?.enclosingScrollView else { return }
+            let clip = scroll.contentView
+            let p = new.viewPoint(fromScene: center)
+            clip.scroll(to: CGPoint(x: max(p.x - size.width / 2, 0), y: max(p.y - size.height / 2, 0)))
+            scroll.reflectScrolledClipView(clip)
+            self?.applyReveal()
+        }
+    }
+
+    /// A scene rect to keep in view, applied again once the workspace has grown to hold it.
+    private var pendingReveal: CGRect?
+
+    /// Scrolls so a rect in scene pixels is visible, with a margin, at the zoom the owner has (R18).
+    func reveal(sceneRect: CGRect) {
+        pendingReveal = sceneRect
+        applyReveal()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            self?.applyReveal()
+            self?.pendingReveal = nil
+        }
+    }
+
+    private func applyReveal() {
+        guard let g = geometry, let r = pendingReveal else { return }
+        scrollToVisible(g.viewRect(fromScene: r).insetBy(dx: -48, dy: -48))
+    }
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -59,7 +99,7 @@ final class StageInputView: NSView {
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityLabel("Stage")
-        setAccessibilityHelp("Scenes: V select, A place, H pan. A click picks a layer, a double-click goes inside it, Shift-click adds to the selection; the Layers list selects from the keyboard. Arrows move the selection by a tile, Option-arrows one item by a pixel, Shift-up and down by a level. Command-G groups, Shift-Command-G ungroups. Return places the library object at the cursor. Objects: B pencil, E eraser, G fill, I picker; arrows move the pixel cursor, Return paints at it, Delete erases it, [ and ] change layer, Page Up and Page Down change frame.")
+        setAccessibilityHelp("Scenes: V select, A place, H pan. A click picks a layer, a double-click goes inside it, Shift-click adds to the selection; the Layers list selects from the keyboard. Arrows move the selection by a tile, Option-arrows one item by a pixel, Shift-up and down by a level. Command-G groups, Shift-Command-G ungroups. Tab and Shift-Tab select the next and previous item. Command-Down drops the selection onto what is below it. Return places the library object at the cursor, on top of a block that is there. Objects: B pencil, E eraser, G fill, I picker; arrows move the pixel cursor, Return paints at it, Delete erases it, [ and ] change layer, Page Up and Page Down change frame.")
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
@@ -228,6 +268,20 @@ final class StageInputView: NSView {
         if !editor.handleKey(input) { super.keyDown(with: event) }
     }
 
+    /// Keys the window would otherwise take before `keyDown` (the key-view loop takes Tab, the main
+    /// menu takes ⌘↓): while the stage is the first responder in a scene, they are the stage's
+    /// (docs/intents/2026-10-scene-canvas/spec.md, R15, R16).
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.type == .keyDown, isScene, let editor, window?.firstResponder === self, let input = Self.keyInput(event) else {
+            return super.performKeyEquivalent(with: event)
+        }
+        let plain = !input.command && !input.control && !input.option
+        let tab = input.key == .tab && plain
+        let drop = input.key == .down && input.command && !input.control && !input.option && !input.shift
+        guard tab || drop, editor.handleKey(input) else { return super.performKeyEquivalent(with: event) }
+        return true
+    }
+
     override func keyUp(with event: NSEvent) {
         if event.keyCode == 49, let editor, editor.spaceHeld {
             editor.spaceHeld = false
@@ -238,6 +292,37 @@ final class StageInputView: NSView {
         super.keyUp(with: event)
     }
 
+    /// A key-down event for a key, as the keyboard sends it: what the script hook dispatches through the window.
+    static func keyEvent(for k: KeyInput, window: NSWindow) -> NSEvent? {
+        let (code, chars): (UInt16, String) = switch k.key {
+        case .left: (123, String(UnicodeScalar(NSLeftArrowFunctionKey)!))
+        case .right: (124, String(UnicodeScalar(NSRightArrowFunctionKey)!))
+        case .down: (125, String(UnicodeScalar(NSDownArrowFunctionKey)!))
+        case .up: (126, String(UnicodeScalar(NSUpArrowFunctionKey)!))
+        case .pageUp: (116, String(UnicodeScalar(NSPageUpFunctionKey)!))
+        case .pageDown: (121, String(UnicodeScalar(NSPageDownFunctionKey)!))
+        case .tab: (48, k.shift ? "\u{19}" : "\t")
+        case .delete: (51, "\u{7f}")
+        case .returnKey: (36, "\r")
+        case .escape: (53, "\u{1b}")
+        case .space: (49, " ")
+        case .char(let c): (0, String(c))
+        }
+        var flags: NSEvent.ModifierFlags = []
+        if k.shift { flags.insert(.shift) }
+        if k.option { flags.insert(.option) }
+        if k.command { flags.insert(.command) }
+        if k.control { flags.insert(.control) }
+        switch k.key {
+        case .left, .right, .up, .down: flags.formUnion([.numericPad, .function])
+        case .pageUp, .pageDown: flags.insert(.function)
+        default: break
+        }
+        return NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
+                                windowNumber: window.windowNumber, context: nil, characters: chars,
+                                charactersIgnoringModifiers: k.key == .tab ? "\t" : chars, isARepeat: false, keyCode: code)
+    }
+
     static func keyInput(_ event: NSEvent) -> KeyInput? {
         let f = event.modifierFlags
         let key: KeyInput.Key
@@ -246,6 +331,7 @@ final class StageInputView: NSView {
         case 124: key = .right
         case 125: key = .down
         case 126: key = .up
+        case 48: key = .tab
         case 116: key = .pageUp
         case 121: key = .pageDown
         case 51, 117: key = .delete

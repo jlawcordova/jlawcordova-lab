@@ -50,6 +50,31 @@ final class DocumentModel {
     var origin: CGPoint?
     var summary: String?
 
+    // The scene's size (docs/intents/2026-10-scene-canvas/spec.md, R9, R10)
+    /// `scene.frame`: whether the box follows the content or is fixed, the box
+    /// the scene publishes at (scene pixels) and its margin. nil until asked.
+    var frameInfo: SceneFrameResult? {
+        didSet { syncFrameDraft() }
+    }
+    /// The inspector's box field: "x, y, w, h".
+    var frameDraft = ""
+    /// The timeline generation `frameInfo` was asked for in; a later one is stale.
+    @ObservationIgnored var frameStamp: Int?
+    /// The scene pixels the stage renders (the workspace); grows, never shrinks.
+    var window: CGRect?
+    /// Where the stage cursor has been, beyond the art: the workspace holds it too.
+    @ObservationIgnored var reach: CGRect?
+
+    /// The box the scene publishes at (an empty scene's one tile, until `scene.frame` answers).
+    var publishBox: CGRect { frameInfo?.box ?? CGRect(x: -16, y: -8, width: 32, height: 16) }
+    var publishSize: CGSize { publishBox.size }
+    func syncFrameDraft() {
+        let b = publishBox
+        frameDraft = "\(Int(b.minX)), \(Int(b.minY)), \(Int(b.width)), \(Int(b.height))"
+    }
+
+    var isFixedFrame: Bool { frameInfo?.isFixed ?? false }
+
     // Scene editing (slice 4)
     /// `scene.items`: every placed item in paint order, and the groups.
     var items: [SceneItemInfo] = []
@@ -123,6 +148,8 @@ final class DocumentModel {
         if kept != selection { selection = kept }
     }
 
+    /// The stage has been given the keyboard once for this doc (see `AppModel.requestRender`).
+    @ObservationIgnored var stageFocused = false
     @ObservationIgnored var rendering = false
     @ObservationIgnored var needsRender = false
     @ObservationIgnored var checking = false
@@ -145,4 +172,9 @@ final class DocumentModel {
         let next = selection.map { $0.following(reordered) }
         if next != selection { selection = next }
     }
+}
+
+extension CGRect {
+    /// `scene.render`'s `view`: x, y, w, h in scene pixels.
+    var sceneView: JSONValue { [JSONValue(Int(minX)), JSONValue(Int(minY)), JSONValue(Int(width)), JSONValue(Int(height))] }
 }

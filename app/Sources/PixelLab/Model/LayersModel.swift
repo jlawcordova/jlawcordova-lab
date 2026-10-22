@@ -155,7 +155,10 @@ final class LayersModel {
         settledMove = itemsCurrent ? measured : nil
         syncDraft()
         app?.editor.syncDrafts()
-        if let l = doc?.selectedItem?.at.standingLevel { app?.editor.placeLevel = l }
+        if let l = doc?.selectedItem?.at.standingLevel {
+            app?.editor.placeLevel = l
+            app?.editor.levelOnPurpose = false
+        }
     }
 
     /// A scene edit's result came back, having put the items in depth order and

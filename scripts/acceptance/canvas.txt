@@ -1,0 +1,130 @@
+# A scene without a size, and keyboard block placement, end to end on a temp copy of the harbor
+# example (docs/intents/2026-10-scene-canvas/spec.md, R1-R19). acceptance.sh makes `meadow` with the
+# bundled CLI first (scene new, then an output so it publishes) and checks afterwards that the
+# harbor's SVGs are byte-identical before and after (R4) and that the meadow's SVG is wider than the
+# old 128-pixel default, so nothing was cut off (R2).
+appearance dark
+open scene:harbor
+publish @OUT@/canvas-before
+expect build ok
+done
+# R4, R10: a scene with a viewBox keeps it, and the stage shows what would publish
+expect frame fixed
+expect size 272,200
+expect outline on
+frame outline off
+expect outline off
+frame outline on
+snapshot @OUT@/canvas-harbor-dark.png
+# R1, R6: a scene made in the app has no size; empty, it is one tile around the origin
+new scene field
+expect doc scene:field
+expect frame fit
+expect size 32,16
+# R19: every key is a menu item under Edit > Move, and the drop key is a shortcut
+expect movemenu Select Next Item (Tab)
+expect movemenu Select Previous Item (⇧Tab)
+expect movemenu Up a Level (⇧↑, Page Up)
+expect movemenu Drop onto What Is Below [⌘↓]
+expect movemenu Place at the Cursor, on Top of a Block (Return)
+# R17: Return puts the item on top of the block under the cursor; no level change needed
+open scene:meadow
+expect frame fit
+expect size 32,16
+zoom 1
+library grass
+hover 0 0 0
+key return
+expect at 0,0,0
+expect size 30,32
+key return
+expect at 0,0,1
+library walls
+key return
+expect at 0,0,2
+# a level set on purpose wins over the stack (R17)
+level 0
+key return
+expect at 0,0,0
+undo
+expect items 3
+# R15: Tab and Shift-Tab step through the items in depth order, wrapping
+select none
+key tab
+expect selected 0
+key tab
+expect selected 1
+key shift+tab
+expect selected 0
+key shift+tab
+expect selected 2
+# R14: the keys that work today still do
+key shift+up
+expect at 0,0,3
+key pagedown
+expect at 0,0,2
+key right
+expect at 1,0,2
+key left
+expect at 0,0,2
+key pageup
+expect at 0,0,3
+# R16: one key drops it onto what it stands over, as one undo step
+key cmd+down
+expect at 0,0,2
+undo
+expect at 0,0,3
+redo
+expect at 0,0,2
+# R9: the stage has no edge: place far from anything drawn, and the box grows to hold it
+select none
+library pine
+hover 40 -30 0
+place 40 -30
+expect object pine
+expect frame fit
+expect size 1141,121
+snapshot @OUT@/canvas-far-dark.png
+# R18: with nothing selected the arrows move the cursor, and the stage follows it past the art
+select none
+hover 40 -30 0
+expect cursor 40,-30,0
+key right
+key right
+key right
+key right
+key right
+key right
+key right
+key right
+key right
+key right
+key right
+key right
+key right
+key right
+key right
+key right
+key right
+key right
+key right
+key right
+wait 900
+expect cursor 60,-30,0
+expect visible cursor true
+snapshot @OUT@/canvas-cursor-dark.png
+# R8: fix the size on purpose, then take it off again
+frame box -300,-100,600,400
+expect frame fixed
+expect size 600,400
+snapshot @OUT@/canvas-fixed-dark.png
+frame fit
+expect frame fit
+save
+expect dirty false
+appearance light
+snapshot @OUT@/canvas-far-light.png
+appearance dark
+publish @OUT@/canvas-after
+expect build ok
+done
