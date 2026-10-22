@@ -6,6 +6,15 @@ import SwiftUI
 enum Zoom: Hashable, Sendable {
     case fit
     case level(Int)
+    /// Any scale between the kind's first and last level: where a pinch leaves it
+    /// (docs/intents/2026-10-floating-library/plan.md, Departures: a seamless zoom).
+    case scale(Double)
+
+    /// "2" for a whole zoom, "2.4" between levels.
+    static func format(_ scale: Double) -> String {
+        let r = (scale * 10).rounded() / 10
+        return r == r.rounded() ? String(Int(r)) : String(format: "%.1f", r)
+    }
 
     /// Scenes: 1×–4×. Objects: 4×–16×.
     static func levels(for kind: DocRef.Kind) -> [Int] { kind == .scene ? [1, 2, 3, 4] : [4, 8, 12, 16] }
@@ -13,9 +22,9 @@ enum Zoom: Hashable, Sendable {
 
 /// What the zoom readout shows: the level, and a number that tells one showing from the next.
 struct ZoomReadoutValue: Equatable, Sendable {
-    var level: Int
+    var scale: Double
     var id: Int
-    var text: String { "\(level)×" }
+    var text: String { "\(Zoom.format(scale))×" }
 }
 
 /// Why the app can't open the document yet; the setup screen shows it.
@@ -652,7 +661,7 @@ final class AppModel {
     /// The window the stage renders now, growing the doc's if the box, the
     /// cursor, the zoom or the viewport need more room.
     func workspace(for doc: DocumentModel) -> CGRect {
-        let pad = StageWindow.pad(viewport: stageViewport, zoom: effectiveZoom)
+        let pad = StageWindow.pad(viewport: stageViewport, zoom: zoomScale)
         let window = StageWindow.grow(current: doc.window, needed: neededRect(for: doc), pad: pad)
         if doc.window != window { doc.window = window }
         return window
@@ -662,7 +671,7 @@ final class AppModel {
     /// workspace has to grow to hold what's on stage.
     func ensureWorkspace() {
         guard let doc = document, doc.ref.kind == .scene, let window = doc.window else { return }
-        let pad = StageWindow.pad(viewport: stageViewport, zoom: effectiveZoom)
+        let pad = StageWindow.pad(viewport: stageViewport, zoom: zoomScale)
         if StageWindow.grow(current: window, needed: neededRect(for: doc), pad: pad) != window { requestRender() }
     }
 
@@ -1052,11 +1061,11 @@ final class AppModel {
     var zoom: Zoom {
         get { mode == .scene ? sceneZoom : objectZoom }
         set {
-            let before = effectiveZoom
+            let before = zoomScale
             if mode == .scene { sceneZoom = newValue } else { objectZoom = newValue }
             ensureWorkspace()
-            let after = effectiveZoom
-            if after != before { showZoomReadout(after) }
+            let after = zoomScale
+            if after != before { showZoomReadout(Double(after), announce: announceZoomChanges) }
         }
     }
 
@@ -1066,11 +1075,16 @@ final class AppModel {
     @ObservationIgnored var readoutSeconds = 1.1
     @ObservationIgnored private var readoutCount = 0
 
-    private func showZoomReadout(_ level: Int) {
+    /// A pinch changes the zoom many times a second: it says the zoom once, at its end (`announceZoom`).
+    @ObservationIgnored var announceZoomChanges = true
+
+    func announceZoom() { editor.announce("Zoom \(Zoom.format(Double(zoomScale)))×") }
+
+    private func showZoomReadout(_ scale: Double, announce: Bool) {
         readoutCount += 1
-        let value = ZoomReadoutValue(level: level, id: readoutCount)
+        let value = ZoomReadoutValue(scale: scale, id: readoutCount)
         zoomReadout = value
-        editor.announce("Zoom \(level)×")
+        if announce { announceZoom() }
         Task { [weak self, seconds = readoutSeconds] in
             try? await Task.sleep(for: .seconds(seconds))
             guard let self, self.zoomReadout?.id == value.id else { return }
@@ -1085,13 +1099,32 @@ final class AppModel {
     @discardableResult
     func stepZoom(by steps: Int, anchor: CGPoint? = nil) -> Bool {
         guard steps != 0, let doc = document else { return false }
-        let levels = Zoom.levels(for: doc.ref.kind)
-        let current = effectiveZoom
-        let at = levels.lastIndex { $0 <= current } ?? 0
-        let next = min(max(at + steps, 0), levels.count - 1)
-        guard levels[next] != current else { return false }
+        let levels = Zoom.levels(for: doc.ref.kind).map(Double.init)
+        let current = Double(zoomScale)
+        // From between levels, a step goes to the next level in that direction.
+        let next: Double?
+        if steps > 0 { next = levels.filter { $0 > current + 0.001 }.prefix(steps).last ?? (current < levels.last! - 0.001 ? levels.last : nil) }
+        else { next = levels.filter { $0 < current - 0.001 }.suffix(-steps).first ?? (current > levels.first! + 0.001 ? levels.first : nil) }
+        guard let next else { return false }
         (editor.stageView as? StageInputView)?.anchorNextZoom(atView: anchor)
-        zoom = .level(levels[next])
+        zoom = .level(Int(next))
+        return true
+    }
+
+    /// A pinch or ⌘-scroll: the zoom times `factor`, any scale between the kind's first and last level, so the
+    /// art grows with the fingers. The pixel under `anchor` stays where it is. Returns whether it changed.
+    @discardableResult
+    func scaleZoom(by factor: CGFloat, anchor: CGPoint? = nil) -> Bool {
+        guard factor.isFinite, factor > 0, let doc = document else { return false }
+        let levels = Zoom.levels(for: doc.ref.kind)
+        let lo = Double(levels.first ?? 1), hi = Double(levels.last ?? 4)
+        let next = min(max(Double(zoomScale * factor), lo), hi)
+        guard abs(next - Double(zoomScale)) > 0.0005 else { return false }
+        (editor.stageView as? StageInputView)?.anchorNextZoom(atView: anchor)
+        let quiet = announceZoomChanges
+        announceZoomChanges = false
+        zoom = abs(next - next.rounded()) < 0.001 ? .level(Int(next.rounded())) : .scale(next)
+        announceZoomChanges = quiet
         return true
     }
 
@@ -1111,15 +1144,25 @@ final class AppModel {
         return min(max(fit, levels.lowerBound), levels.upperBound)
     }
 
-    /// The zoom the stage draws at now.
-    var effectiveZoom: Int {
+    /// The zoom the stage draws at now, in points per art pixel: a whole number except after a pinch.
+    var zoomScale: CGFloat {
         guard let doc = document else { return 1 }
         switch zoom {
-        case .level(let n): return n
-        case .fit:
-            if let forced = snapshot?.zoom { return forced }
-            return fitZoom(art: doc.ref.kind == .scene ? doc.publishSize : (doc.render?.artSize ?? .zero), viewport: stageViewport, kind: doc.ref.kind)
+        case .level(let n): return CGFloat(n)
+        case .scale(let s): return CGFloat(s)
+        case .fit: return CGFloat(fitValue(doc))
         }
+    }
+
+    /// "3" or "2.4": the zoom as shown.
+    var zoomText: String { Zoom.format(Double(zoomScale)) }
+
+    /// The whole zoom, for what only needs a level (the nearest).
+    var effectiveZoom: Int { Int(zoomScale.rounded()) }
+
+    private func fitValue(_ doc: DocumentModel) -> Int {
+        if let forced = snapshot?.zoom { return forced }
+        return fitZoom(art: doc.ref.kind == .scene ? doc.publishSize : (doc.render?.artSize ?? .zero), viewport: stageViewport, kind: doc.ref.kind)
     }
 
     /// The Agent tab's sparkle, Window › Agent (⌥⌘A), Ask Claude about this: the Agent tab, shown.

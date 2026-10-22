@@ -14,8 +14,8 @@ enum StageWindow {
     static let grain: CGFloat = 32
 
     /// The room to leave on a side: a viewport's worth at this zoom.
-    static func pad(viewport: CGSize, zoom: Int) -> CGFloat {
-        let z = CGFloat(max(zoom, 1))
+    static func pad(viewport: CGSize, zoom: CGFloat) -> CGFloat {
+        let z = max(zoom, 1)
         let want = max(viewport.width, viewport.height) / z
         return min(max((want / grain).rounded(.up) * grain, minPad), maxPad)
     }

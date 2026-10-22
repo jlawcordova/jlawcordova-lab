@@ -63,7 +63,7 @@ It reopens the last scene or object you had open, else the hero island. The wind
 
 ## A short tour
 
-**The window.** The canvas is the window. There is no toolbar: the left sidebar lists every scene and, under it, the open scene's **Layers** (or, in an object, its **Palette**); the right panel is always shown. A **floating bar** at the bottom center of the stage holds the tools: **Select** (V) and **Hand** (H), and the **Library** (L) in a scene; the paint tools and the Hand in an object. Zoom with a trackpad **pinch** (or ⌘-scroll, or View › Zoom In ⌘= and Zoom Out ⌘−; ⌘0 fits): it steps through the whole zoom levels (1×–4× in a scene, 4×–16× in an object), keeps the art under the pointer where it is, and a small readout ("2×") shows for a moment. Scroll with two fingers, drag with the Hand or hold Space; the scroll bars follow the system's "Show scroll bars" setting. **Save** and **Publish** are in the right panel's tab row, beside **Inspector** and **✦ Agent**, whose badge counts the proposals waiting.
+**The window.** The canvas is the window. There is no toolbar: the left sidebar lists every scene and, under it, the open scene's **Layers** (or, in an object, its **Palette**); the right panel is always shown. A **floating bar** at the bottom center of the stage holds the tools: **Select** (V) and **Hand** (H), and the **Library** (L) in a scene; the paint tools and the Hand in an object. Zoom with a trackpad **pinch** (or ⌘-scroll, or View › Zoom In ⌘= and Zoom Out ⌘−; ⌘0 fits): a pinch zooms as your fingers do, smoothly between 1× and 4× in a scene (4×–16× in an object), and keeps the art under the pointer where it is; ⌘= and ⌘− and ⌘1–⌘4 go to whole levels, where the pixels are even, and a small readout ("2.4×") shows for a moment. Scroll with two fingers, drag with the Hand or hold Space; the scroll bars follow the system's "Show scroll bars" setting. **Save** and **Publish** are in the right panel's tab row, beside **Inspector** and **✦ Agent**, whose badge counts the proposals waiting.
 
 **Scene mode.** The stage draws the scene crisply on the 32×16 isometric grid; in the night appearance the hero island's drop shadow takes the page color, as the site's dark theme does. Open the **Library** (the bar's button, or L): a search field and a grid of small thumbnails, which scrolls if the library is large. Click an object to start placing it, then click a tile (⌥-click places by pixel; Esc or V stops); or drag a thumbnail onto the stage to place one where it lands. A thumbnail's right-click menu has Place and **Edit Object**, and so does double-clicking it. Click an item to select it; drag it, use the arrow keys, or edit Col, Row and Level (X, Y and Level for pixel-placed items) in the inspector. Duplicate, Remove and Snap to Tile are in the inspector and the Edit menu. Everything undoes. Scenes with motion get a timeline: Play (⌥⌘P) and scrub.
 
@@ -115,8 +115,8 @@ It reopens the last scene or object you had open, else the hero island. The wind
 | L | Open or close the Library (scene mode) |
 | B / E / G / I / H | Pencil / Eraser / Fill / Picker / Hand (object mode) |
 | Space (hold) | Pan with any tool |
-| Pinch, ⌘-scroll | Zoom a level in or out, under the pointer |
-| ⌘= / ⌘− | Zoom in / out a level, centered on the stage |
+| Pinch, ⌘-scroll | Zoom smoothly, under the pointer |
+| ⌘= / ⌘− | Zoom in / out to the next whole level, centered on the stage |
 | 1 – 4, 0 (or ⌘1 – ⌘4, ⌘0) | Zoom 1×–4× (objects 4×–16×), Fit |
 | ⌘' | Show or hide the grid (the pixel grid in object mode) |
 | View › Show Published Frame | Show or hide the outline of the box the scene publishes at (scene; no key) |

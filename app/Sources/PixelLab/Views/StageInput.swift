@@ -199,39 +199,25 @@ final class StageInputView: NSView {
 
     // MARK: Zoom
 
-    /// A pinch's running total; one level per `pinchStep`, reset when the gesture ends (R1).
-    private var pinch: CGFloat = 0
-    private var wheel: CGFloat = 0
-    static let pinchStep: CGFloat = 0.25
-    static let wheelStep: CGFloat = 24
-
+    /// A pinch zooms as the fingers do: each event scales the zoom by its magnification, so the art grows
+    /// smoothly between the levels, within the kind's first and last. The zoom is announced once, at the end.
     override func magnify(with event: NSEvent) {
-        pinch += event.magnification
-        if abs(pinch) >= Self.pinchStep {
-            zoomStep(pinch > 0 ? 1 : -1, atView: point(event))
-            pinch = 0
-        }
-        if event.phase == .ended || event.phase == .cancelled { pinch = 0 }
+        editor?.app?.scaleZoom(by: 1 + event.magnification, anchor: point(event))
+        if event.phase == .ended || event.phase == .cancelled { editor?.app?.announceZoom() }
     }
 
-    /// ⌘-scroll zooms: a notch of a mouse wheel is a level, a trackpad's running total a level per
-    /// threshold. Plain scrolling goes to the scroll view.
+    /// ⌘-scroll zooms too: a trackpad smoothly, a notch of a mouse wheel by a quarter. Plain scrolling goes
+    /// to the scroll view.
     override func scrollWheel(with event: NSEvent) {
         guard event.modifierFlags.contains(.command) else {
             super.scrollWheel(with: event)
             return
         }
         let dy = event.scrollingDeltaY
-        if event.hasPreciseScrollingDeltas {
-            wheel += dy
-            if abs(wheel) >= Self.wheelStep {
-                zoomStep(wheel > 0 ? 1 : -1, atView: point(event))
-                wheel = 0
-            }
-            if event.phase == .ended || event.phase == .cancelled { wheel = 0 }
-        } else if dy != 0 {
-            zoomStep(dy > 0 ? 1 : -1, atView: point(event))
-        }
+        guard dy != 0 else { return }
+        let factor: CGFloat = event.hasPreciseScrollingDeltas ? exp(dy * 0.008) : (dy > 0 ? 1.25 : 0.8)
+        editor?.app?.scaleZoom(by: factor, anchor: point(event))
+        if event.phase == .ended || event.phase == .cancelled { editor?.app?.announceZoom() }
     }
 
     override func mouseExited(with event: NSEvent) {

@@ -30,9 +30,9 @@ struct StageGeometry: Equatable {
     /// Centers the art in the content, which is at least the viewport.
     /// When the art fits the viewport the content is the viewport (no scrolling);
     /// when it doesn't, the content is the art plus `margin` on each side.
-    init(viewBox: CGRect, zoom: Int, viewport: CGSize, margin: CGFloat, tileOrigin: CGPoint?) {
+    init(viewBox: CGRect, zoom: CGFloat, viewport: CGSize, margin: CGFloat, tileOrigin: CGPoint?) {
         self.viewBox = viewBox
-        self.zoom = CGFloat(max(zoom, 1))
+        self.zoom = max(zoom, 1)
         self.tileOrigin = tileOrigin
         let art = CGSize(width: viewBox.width * self.zoom, height: viewBox.height * self.zoom)
         contentSize = CGSize(
@@ -47,9 +47,9 @@ struct StageGeometry: Equatable {
     /// render covers a workspace `window` of scene pixels, wider than the art on
     /// every side, so the content has no edge to stop at. It is at least the
     /// viewport, and centered in it when smaller.
-    init(window: CGRect, zoom: Int, viewport: CGSize, tileOrigin: CGPoint?) {
+    init(window: CGRect, zoom: CGFloat, viewport: CGSize, tileOrigin: CGPoint?) {
         viewBox = window
-        self.zoom = CGFloat(max(zoom, 1))
+        self.zoom = max(zoom, 1)
         self.tileOrigin = tileOrigin
         let art = CGSize(width: window.width * self.zoom, height: window.height * self.zoom)
         contentSize = CGSize(width: max(art.width, viewport.width), height: max(art.height, viewport.height))

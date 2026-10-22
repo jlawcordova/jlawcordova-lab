@@ -20,7 +20,7 @@ import Testing
     @Test func testR9WorkspaceCoversAViewportAtAnyZoom() {
         let viewport = CGSize(width: 1000, height: 700)
         for zoom in 1...4 {
-            let pad = StageWindow.pad(viewport: viewport, zoom: zoom)
+            let pad = StageWindow.pad(viewport: viewport, zoom: CGFloat(zoom))
             let w = StageWindow.grow(current: nil, needed: box, pad: pad)
             // The art at the center can be scrolled until the edge of the window reaches the viewport's far side.
             #expect(w.width * CGFloat(zoom) >= viewport.width, Comment(rawValue: "zoom \(zoom)"))

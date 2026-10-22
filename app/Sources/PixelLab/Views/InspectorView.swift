@@ -83,11 +83,11 @@ struct InspectorView: View {
                 Text(summary).font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(2)
             }
             if doc.ref.kind == .scene {
-                Text("\(Int(doc.publishSize.width))×\(Int(doc.publishSize.height)) px · \(doc.isFixedFrame ? "fixed" : "fits") · \(model.effectiveZoom)×")
+                Text("\(Int(doc.publishSize.width))×\(Int(doc.publishSize.height)) px · \(doc.isFixedFrame ? "fixed" : "fits") · \(model.zoomText)×")
                     .font(Theme.monoFont(10.5))
                     .foregroundStyle(Theme.inkMuted)
             } else if let render = doc.render {
-                Text("\(Int(render.viewBox.width))×\(Int(render.viewBox.height)) px · \(model.effectiveZoom)×")
+                Text("\(Int(render.viewBox.width))×\(Int(render.viewBox.height)) px · \(model.zoomText)×")
                     .font(Theme.monoFont(10.5))
                     .foregroundStyle(Theme.inkMuted)
             }

@@ -332,3 +332,72 @@ import Testing
         #expect(RightColumn.tabLabel("Agent", pending: 3) == "Agent, 3 proposals to review")
     }
 }
+
+@MainActor @Suite struct SeamlessZoomTests {
+    func app(zoom: Zoom) -> AppModel {
+        let app = AppModel()
+        app.document = DocumentModel(ref: DocRef(.scene, "a"))
+        app.stageViewport = CGSize(width: 1000, height: 700)
+        app.zoom = zoom
+        return app
+    }
+
+    @Test("R1: a pinch scales the zoom by its factor, between the levels")
+    func testR1APinchScalesBetweenTheLevels() {
+        let a = app(zoom: .level(2))
+        #expect(a.scaleZoom(by: 1.2))
+        #expect(abs(a.zoomScale - 2.4) < 0.0001, "no whole-level steps: the art grows with the fingers")
+        #expect(a.zoomText == "2.4")
+        #expect(a.zoomReadout?.text == "2.4×")
+        #expect(a.scaleZoom(by: 0.5))
+        #expect(abs(a.zoomScale - 1.2) < 0.0001)
+        #expect(a.effectiveZoom == 1, "what needs a level gets the nearest")
+    }
+
+    @Test("R1: a pinch stops at the kind's first and last level")
+    func testR1APinchStopsAtTheEnds() {
+        let a = app(zoom: .level(3))
+        #expect(a.scaleZoom(by: 10))
+        #expect(a.zoomScale == 4)
+        #expect(!a.scaleZoom(by: 1.5), "already at 4×")
+        #expect(a.scaleZoom(by: 0.01))
+        #expect(a.zoomScale == 1)
+        #expect(!a.scaleZoom(by: 0.5))
+        let o = AppModel()
+        o.document = DocumentModel(ref: DocRef(.object, "house"))
+        o.mode = .object
+        o.zoom = .level(8)
+        o.scaleZoom(by: 100)
+        #expect(o.zoomScale == 16)
+        o.scaleZoom(by: 0.001)
+        #expect(o.zoomScale == 4)
+    }
+
+    @Test("R2: ⌘= and ⌘− from between levels go to the next level")
+    func testR2StepsFromBetweenLevels() {
+        let a = app(zoom: .scale(2.4))
+        #expect(a.stepZoom(by: 1))
+        #expect(a.zoomScale == 3)
+        a.zoom = .scale(2.4)
+        #expect(a.stepZoom(by: -1))
+        #expect(a.zoomScale == 2)
+        a.zoom = .scale(3.6)
+        #expect(a.stepZoom(by: 1))
+        #expect(a.zoomScale == 4)
+    }
+
+    @Test("R1: the pinch keeps the anchor at any scale")
+    func testR1TheAnchorHoldsAtAnyScale() {
+        let window = CGRect(x: -400, y: -300, width: 800, height: 600)
+        let viewport = CGSize(width: 1000, height: 700)
+        for z in [1.0, 1.37, 2.5, 3.9] as [CGFloat] {
+            let old = StageGeometry(window: window, zoom: 1.5, viewport: viewport, tileOrigin: .zero)
+            let new = StageGeometry(window: window, zoom: z, viewport: viewport, tileOrigin: .zero)
+            let inClip = CGPoint(x: 420, y: 260)
+            let scene = old.scenePoint(fromView: CGPoint(x: 700 + inClip.x, y: 300 + inClip.y))
+            let origin = new.clipOrigin(keeping: scene, at: inClip)
+            let after = new.viewPoint(fromScene: scene)
+            #expect(abs(after.x - origin.x - inClip.x) < 1 && abs(after.y - origin.y - inClip.y) < 1, Comment(rawValue: "zoom \(z)"))
+        }
+    }
+}

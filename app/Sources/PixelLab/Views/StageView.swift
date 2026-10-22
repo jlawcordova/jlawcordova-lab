@@ -66,7 +66,7 @@ struct StageView: View {
     @ViewBuilder
     private func content(viewport: CGSize) -> some View {
         if let doc = model.document, let render = doc.render {
-            let zoom = model.effectiveZoom
+            let zoom = model.zoomScale
             // A scene's stage has no edge: it shows a workspace around the art (R9). An object's is its card.
             let geometry = doc.ref.kind == .scene
                 ? StageGeometry(window: render.viewBox, zoom: zoom, viewport: viewport, tileOrigin: doc.origin)
@@ -105,7 +105,7 @@ struct StageView: View {
                         .opacity(played != nil ? 0 : (focus == nil ? 1 : 0.22))
                         .offset(x: geometry.artOrigin.x, y: geometry.artOrigin.y)
                         .allowsHitTesting(false)
-                        .accessibilityLabel("\(doc.ref.name), \(doc.ref.kind.rawValue) at \(zoom)×")
+                        .accessibilityLabel("\(doc.ref.name), \(doc.ref.kind.rawValue) at \(model.zoomText)×")
                         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: focus == nil)
                     if let played {
                         let o = geometry.viewPoint(fromScene: played.viewBox.origin)

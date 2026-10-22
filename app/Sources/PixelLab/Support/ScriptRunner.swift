@@ -552,11 +552,17 @@ final class ScriptRunner {
             let steps = try arg(words, 1) == "in" ? 1 : -1
             let at: CGPoint? = words.count >= 4 ? geometry.viewPoint(fromScene: CGPoint(x: try int(words, 2), y: try int(words, 3))) : nil
             view.zoomStep(steps, atView: at)
-            return "zoom \(model.effectiveZoom)"
+            return "zoom \(model.zoomText)"
+        case "pinchby":
+            // A pinch by a factor (a magnify event's effect), anchored at a scene pixel or the middle: pinchby 1.1 [<x> <y>].
+            guard let view = editor.stageView as? StageInputView, let geometry = view.geometry, let factor = Double(try arg(words, 1)) else { throw Failure("pinchby <factor> [<x> <y>]") }
+            let at: CGPoint? = words.count >= 4 ? geometry.viewPoint(fromScene: CGPoint(x: try int(words, 2), y: try int(words, 3))) : nil
+            model.scaleZoom(by: CGFloat(factor), anchor: at)
+            return "zoom \(model.zoomText)"
         case "zoomkey":
             // ⌘= / ⌘−, centered on the stage.
             model.stepZoom(by: try arg(words, 1) == "in" ? 1 : -1)
-            return "zoom \(model.effectiveZoom)"
+            return "zoom \(model.zoomText)"
         case "sidebar":
             // The sidebar has no Library any more: `sidebar library` opens the popover, the others close it.
             switch try arg(words, 1) {
@@ -1465,7 +1471,7 @@ final class ScriptRunner {
         case "ghosttime": got = model.agent.visibleGhost?.image.time.map { String(Int($0)) } ?? "none"
         case "scenes": got = String(model.scenes.count)
         case "objects": got = String(model.objects.count)
-        case "zoom": got = String(model.effectiveZoom)
+        case "zoom": got = model.zoomText
         case "returnscene": got = model.returnScene?.name ?? "none"
         case "floatingbar":
             // The bar's buttons by id: select,pan,library in a scene; pencil,eraser,fill,picker,pan in an object (R6).
