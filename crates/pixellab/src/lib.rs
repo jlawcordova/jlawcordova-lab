@@ -18,6 +18,7 @@ pub mod diff;
 pub mod document;
 pub mod errors;
 pub mod help;
+pub mod history;
 pub mod jsonrpc;
 pub mod layer_ops;
 pub mod merge;

@@ -36,11 +36,12 @@ use engine::engine::{load_sources, validate};
 use engine::format::{self, stringify, Docs};
 use serde_json::{json, Map, Value};
 
-use crate::author::Author;
+use crate::author::{Author, AuthorKind};
 use crate::context::{doc_file, DocKind, Found, Loaded};
 use crate::diff::unified_diff;
 use crate::document::{Document, Env};
 use crate::errors::{CommandError, Error, Result};
+use crate::history::{Change, History};
 use crate::merge::{fold_scene, merge3, trailing, untrailing};
 use crate::open_docs::unsaved_in_app;
 use crate::sorting::{path_changes, remap_json, sort_scene, Sorted};
@@ -324,6 +325,8 @@ pub struct Session {
     pub on_stale: Option<Box<dyn FnMut(Value)>>,
     pub now: Box<dyn Fn() -> f64>,
     pub state: State,
+    /// The document's version history (docs/intents/2026-10-autosave/spec.md, D3).
+    pub history: History,
     /// Open docs by ref, in the order they were opened.
     pub entries: engine::omap::OMap<String, Entry>,
     pub seq: u64,
@@ -336,6 +339,15 @@ pub struct Session {
 impl Session {
     pub fn new(document: Document, options: Options) -> Session {
         let state = create_state(state_dir(&options.env));
+        let history = History::new(&state.dir, &document.root);
+        // Version 0: the document as it is before this session writes anything. A history that
+        // can't be written never stops an edit; saves say so in the debug log only.
+        if let Err(e) = history.ensure_base(&document.source_dir, (options.now)()) {
+            eprintln!("pixellab: can't start the version history: {}", e.message());
+        }
+        if let Err(e) = history.thin((options.now)()) {
+            eprintln!("pixellab: can't thin the version history: {}", e.message());
+        }
         Session {
             document,
             mode: options.mode,
@@ -348,6 +360,7 @@ impl Session {
             on_stale: options.on_stale,
             now: options.now,
             state,
+            history,
             entries: engine::omap::OMap::new(),
             seq: 0,
             settled: Vec::new(),
@@ -796,6 +809,30 @@ impl Session {
         Ok(Plan { text, disk, problems, conflict, diff })
     }
 
+    /// Records a write in the version history, by this request's author. A history that can't be
+    /// written doesn't fail the save that's already on disk.
+    pub fn record(&mut self, change: Change, labels: &[String]) {
+        let author = self.author.clone();
+        if let Err(e) = self.history.record(&[change], &author, labels, (self.now)()) {
+            eprintln!("pixellab: can't record the version: {}", e.message());
+        }
+    }
+
+    /// Records a file that changed on disk without this session, unless the history already has it
+    /// as it is now (another Pixel Lab writer recorded it).
+    fn note_outside(&mut self, file: &str, before: Option<String>, disk: &Disk) {
+        let now_hash = disk.hash.clone();
+        let latest = self.history.latest().map(|n| self.history.files_at(n));
+        if latest.as_ref().and_then(|f| f.get(file)).is_some_and(|h| *h == now_hash) {
+            return;
+        }
+        let change = Change { file: file.to_string(), before, after: disk.exists.then(|| disk.text.clone()) };
+        let author = Author::of(AuthorKind::Outside);
+        if let Err(e) = self.history.record(&[change], &author, &["Changed outside Pixel Lab".to_string()], (self.now)()) {
+            eprintln!("pixellab: can't record the version: {}", e.message());
+        }
+    }
+
     /// Saves a doc: writes its file ('direct') or a proposal ('propose').
     pub fn save(&mut self, ref_: &str, force: bool) -> Result<Value> {
         let plan = self.plan(ref_)?;
@@ -833,6 +870,9 @@ impl Session {
         let wrote = plan.text != plan.disk.text || !plan.disk.exists;
         if wrote {
             write_atomic(&plan.disk.path, &plan.text)?;
+            let labels = edits(self.entry(ref_)?);
+            let before = plan.disk.exists.then(|| plan.disk.text.clone());
+            self.record(Change { file: file.clone(), before, after: Some(plan.text.clone()) }, &labels);
         }
         let hash = hash_text(&plan.text);
         self.match_disk(ref_, Base { exists: true, hash: Some(hash.clone()), text: plan.text.clone() }, plan.text.clone(), None);
@@ -976,6 +1016,8 @@ impl Session {
         if !disk.exists || disk.hash == entry.base.hash || self.is_dirty(ref_) {
             return false;
         }
+        let (file, before) = (entry.file.clone(), entry.base.exists.then(|| entry.base.text.clone()));
+        self.note_outside(&file, before, &disk);
         if self.load_from_disk(ref_, &disk).is_err() {
             return false;
         }
@@ -1109,6 +1151,7 @@ impl Session {
             return Ok(Value::Object(spread(head, self.status(ref_))));
         }
         let before = stringify(&entry.doc);
+        self.note_outside(&entry.file, entry.base.exists.then(|| entry.base.text.clone()), &disk);
         let sorted = self.load_from_disk(ref_, &disk)?;
         {
             let e = self.entries.get_mut(ref_).expect("open");
@@ -1191,6 +1234,7 @@ impl Session {
             )
             .into());
         };
+        self.note_outside(&entry.file, entry.base.exists.then(|| entry.base.text.clone()), &disk);
         if ours == entry.clean {
             let sorted = self.load_from_disk(ref_, &disk)?;
             self.invalidate();

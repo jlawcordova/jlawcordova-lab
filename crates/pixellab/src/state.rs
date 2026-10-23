@@ -205,6 +205,12 @@ fn resolve(p: &str) -> PathBuf {
     out
 }
 
+/// A document's path as every process names it: its real path when it exists (symlinks and
+/// `/private` folded), else `path.resolve`. History and owner keys hash it.
+pub fn real_path(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| resolve(&path.to_string_lossy()))
+}
+
 /// The state dir for an environment.
 pub fn state_dir(env: &HashMap<String, String>) -> PathBuf {
     if let Some(s) = env.get("PIXELLAB_STATE").filter(|s| !s.is_empty()) {
