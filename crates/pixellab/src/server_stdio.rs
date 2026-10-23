@@ -41,6 +41,12 @@ pub fn version() -> &'static str {
     option_env!("PIXELLAB_VERSION").filter(|v| !v.is_empty()).unwrap_or(env!("CARGO_PKG_VERSION"))
 }
 
+/// How long after a doc's last change the server saves it: PIXELLAB_AUTOSAVE_MS (the script hook
+/// uses 100), else a second (docs/intents/2026-10-autosave/spec.md, R1).
+pub fn autosave_ms(env: &Env) -> f64 {
+    env.get("PIXELLAB_AUTOSAVE_MS").and_then(|v| v.trim().parse::<f64>().ok()).filter(|v| *v >= 0.0).unwrap_or(1000.0)
+}
+
 enum Event {
     Line(Option<String>),
     Tick,
@@ -68,10 +74,12 @@ pub fn start(
     let notify = rpc.clone();
     // The app's server notices stale docs itself (the watcher), so proposal.apply can tell it.
     let stale = rpc.clone();
+    let autosave_ms = autosave_ms(&env);
     let mut session = Session::new(
         document,
         Options {
             env,
+            autosave_ms: Some(autosave_ms),
             mode: Mode::Direct,
             on_change: Some(Box::new(move |status| notify.notify("doc.changed", status))),
             on_stale: Some(Box::new(move |doc| stale.notify("doc.stale", doc))),
@@ -194,7 +202,9 @@ pub fn start(
                                 continue;
                             }
                             let disk = read_source(&session.document, entry.kind, &entry.name);
-                            if is_stale(entry, &disk) {
+                            // A doc with a save pending takes the change, three ways, and autosave
+                            // writes the result (R7); only a clash is left to the owner.
+                            if is_stale(entry, &disk) && session.merge(&ref_).is_err() {
                                 rpc.notify("doc.stale", json!({ "doc": ref_, "file": file }));
                             }
                         }
@@ -202,6 +212,7 @@ pub fn start(
                         open_docs.update(&docs_of(&session), &mut |t| log(t));
                     }
                 }
+                session.autosave(now, false);
                 if let Some(w) = state.as_mut() {
                     let changes = w.poll(now);
                     if changes.proposals {
@@ -219,6 +230,9 @@ pub fn start(
             }
         }
     }
+    // Everything that can be saved is, and the open version closes (R24).
+    session.autosave(now_ms(), true);
+    let _ = session.history.mark(None);
     rpc.stop();
     open_docs.remove();
     0

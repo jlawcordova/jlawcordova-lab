@@ -105,7 +105,58 @@ fn summary_format(r: &Value, _: &Params) -> String {
 
 fn save_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let ref_ = entry_of(ctx, doc_of(&params), false)?;
-    ctx.session()?.save(&ref_, flag(&params, "force"))
+    let session = ctx.session()?;
+    let saved = session.save(&ref_, flag(&params, "force"))?;
+    // Saving by hand (⌘S) closes the version, as a Mac app's Save saves a version (R5).
+    let _ = session.history.mark(None);
+    Ok(saved)
+}
+
+/// doc.flush: saves now what autosave would save soon (docs/intents/2026-10-autosave/spec.md, D1).
+fn flush_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
+    let only = match opt_str(&params, "doc") {
+        Some(d) => Some(resolve_doc(ctx, d)?.ref_),
+        None => None,
+    };
+    let session = ctx.session()?;
+    let refs: Vec<String> = match &only {
+        Some(r) if session.entries.has(r) => vec![r.clone()],
+        Some(_) => vec![],
+        None => session.entries.keys().cloned().collect(),
+    };
+    let mut docs = Vec::new();
+    for r in refs {
+        if session.is_dirty(&r) {
+            session.save_now(&r);
+        }
+        let (state, problems) = session.save_state(&r);
+        docs.push(json!({ "doc": r, "saveState": state, "problems": problems }));
+    }
+    let saved = docs.iter().all(|d| d["saveState"] == "saved");
+    Ok(json!({ "saved": saved, "docs": docs }))
+}
+
+fn flush_format(r: &Value, _: &Params) -> String {
+    let lines: Vec<String> = r["docs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|d| match str_of(d.get("saveState")).as_str() {
+            "problems" => format!(
+                "{}: not saved, {} problem{}",
+                str_of(d.get("doc")),
+                str_of(d.get("problems")),
+                if d["problems"] == 1 { "" } else { "s" }
+            ),
+            "conflict" => format!("{}: not saved, its file changed on disk and clashes", str_of(d.get("doc"))),
+            other => format!("{}: {other}", str_of(d.get("doc"))),
+        })
+        .collect();
+    if lines.is_empty() {
+        "no docs open".into()
+    } else {
+        lines.join("\n")
+    }
 }
 
 fn save_format(r: &Value, _: &Params) -> String {
@@ -224,6 +275,18 @@ pub fn commands() -> Vec<Command> {
             true,
             save_run,
             save_format,
+        ),
+        session_command(
+            "doc.flush",
+            "Save every open doc with changes now (or one), as autosave would soon",
+            Some(concat!(
+                "Edits save themselves about a second after the last one; this saves now. A doc with problems isn't written (saveState problems), ",
+                "and one whose file changed on disk is merged first (saveState conflict when that clashes). Returns { saved, docs: [{ doc, saveState, problems }] }."
+            )),
+            json!({ "type": "object", "properties": { "doc": doc_param() } }),
+            true,
+            flush_run,
+            flush_format,
         ),
         session_command(
             "doc.revert",

@@ -309,6 +309,7 @@ fn serve_stdio_place_undo_redo_save_with_doc_changed_after_each() {
         json!({
             "doc": "scene:sample", "dirty": true, "canUndo": true, "canRedo": false,
             "undoLabel": "pebble placed at column 1, row 0, level 0", "redoLabel": null, "author": { "kind": "owner" },
+            "saveState": "pending", "problems": 0,
             "file": "scenes/sample.json", "exists": true, "stale": false,
             "undo": 1, "redo": [], "edits": ["pebble placed at column 1, row 0, level 0"], "unsavedInApp": false,
         })
@@ -690,10 +691,13 @@ fn run_cli(args: &[&str], env: &HashMap<String, String>, state: &Path) -> (i32, 
 }
 
 #[test]
-fn r5_r7_the_stdio_server_sends_doc_stale_for_a_dirty_doc_whose_file_changed_and_keeps_open_pid_json() {
+fn r7_the_stdio_server_merges_a_change_on_disk_into_a_dirty_doc_and_keeps_open_pid_json() {
     let doc = make_document();
     let state = temp_dir("pixellab-state-");
-    let mut server = start_server(&["--stdio", "--document", doc.root.to_str().unwrap()], &doc.env(), &state);
+    let mut env = doc.env();
+    // Long enough that the place is still pending when the file changes (autosave spec, R7).
+    env.insert("PIXELLAB_AUTOSAVE_MS".into(), "3000".into());
+    let mut server = start_server(&["--stdio", "--document", doc.root.to_str().unwrap()], &env, &state);
     let info = server.request("session.info", json!({}))["result"].clone();
     let open_file = state.join("open").join(format!("{}.json", info["pid"]));
     server.request("scene.place", json!({ "name": "sample", "object": "pebble", "at": [3, 3, 0] }));
@@ -707,10 +711,11 @@ fn r5_r7_the_stdio_server_sends_doc_stale_for_a_dirty_doc_whose_file_changed_and
     let text = fs::read_to_string(&file).unwrap().replace("\"tile\": [0, 0, 1]", "\"tile\": [0, 0, 2]");
     assert!(text.contains("[0, 0, 2]"));
     fs::write(&file, text).unwrap();
-    let stale = server.wait_for(since, "doc.stale", |m| m["method"] == "doc.stale");
-    assert_eq!(stale["params"], json!({ "doc": "scene:sample", "file": "scenes/sample.json" }));
-    let merged = server.request("doc.merge", json!({ "doc": "scene:sample" }));
-    assert_eq!([merged["result"]["merged"].clone(), merged["result"]["dirty"].clone()], [json!(true), json!(true)]);
+    server.wait_for(since, "the merged doc saved", |m| m["method"] == "doc.changed" && m["params"]["saveState"] == "saved");
+    assert!(!server.notifications().iter().skip(since).any(|m| m["method"] == "doc.stale"), "a merge that works isn't stale");
+    let now = read_json(&file);
+    assert!(pebble_at(&now, json!([0, 0, 2])).is_some(), "theirs kept: {now}");
+    assert!(pebble_at(&now, json!([3, 3, 0])).is_some(), "ours kept: {now}");
     server.request("doc.close", json!({ "doc": "scene:sample", "force": true }));
     assert_eq!(read_json(&open_file)["docs"], json!([]), "closing updates the list");
     server.request("shutdown", json!({}));

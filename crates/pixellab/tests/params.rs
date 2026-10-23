@@ -325,6 +325,7 @@ fn every_command_is_well_formed_and_has_a_group() {
         "scene.show",
     ];
     let mutating = [
+        "doc.flush",
         "doc.merge",
         "doc.redo",
         "doc.reload",
@@ -396,7 +397,7 @@ fn every_command_is_well_formed_and_has_a_group() {
     let session: Vec<&str> = names.iter().copied().filter(|n| reg.get(n).unwrap().session).collect();
     assert_eq!(
         session,
-        ["doc.close", "doc.merge", "doc.open", "doc.redo", "doc.reload", "doc.revert", "doc.save", "doc.status", "doc.undo"]
+        ["doc.close", "doc.flush", "doc.merge", "doc.open", "doc.redo", "doc.reload", "doc.revert", "doc.save", "doc.status", "doc.undo"]
     );
     let writes: Vec<&str> = names.iter().copied().filter(|n| reg.get(n).unwrap().writes_direct).collect();
     assert_eq!(

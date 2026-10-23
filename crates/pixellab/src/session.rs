@@ -159,6 +159,19 @@ pub struct Entry {
     pub proposal: Option<String>,
     pub proposed: Option<Proposed>,
     pub synced: Option<Value>,
+    /// When the doc last changed, for autosave's pause (docs/intents/2026-10-autosave/spec.md, D1).
+    pub changed_at: Option<f64>,
+    /// Why autosave last couldn't write it, until it changes again.
+    pub blocked: Option<Blocked>,
+}
+
+/// Why autosave couldn't write a doc (D1).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Blocked {
+    /// It has this many problems.
+    Problems(usize),
+    /// Its file changed on disk and the change clashes with the open copy.
+    Conflict,
 }
 
 /// What an edit's function returns: its result's fields, and its message
@@ -210,6 +223,8 @@ pub struct Options {
     /// `{ doc, file }` when an open doc with unsaved edits can't take what changed on disk (proposal.apply's conflict).
     pub on_stale: Option<Box<dyn FnMut(Value)>>,
     pub now: Box<dyn Fn() -> f64>,
+    /// Save a doc this long after its last change (the app's server); None: only when asked.
+    pub autosave_ms: Option<f64>,
 }
 
 impl Default for Options {
@@ -222,6 +237,7 @@ impl Default for Options {
             on_change: None,
             on_stale: None,
             now: Box::new(crate::state::now_ms),
+            autosave_ms: None,
         }
     }
 }
@@ -324,6 +340,7 @@ pub struct Session {
     pub on_change: Option<Box<dyn FnMut(Value)>>,
     pub on_stale: Option<Box<dyn FnMut(Value)>>,
     pub now: Box<dyn Fn() -> f64>,
+    pub autosave_ms: Option<f64>,
     pub state: State,
     /// The document's version history (docs/intents/2026-10-autosave/spec.md, D3).
     pub history: History,
@@ -359,6 +376,7 @@ impl Session {
             on_change: options.on_change,
             on_stale: options.on_stale,
             now: options.now,
+            autosave_ms: options.autosave_ms,
             state,
             history,
             entries: engine::omap::OMap::new(),
@@ -511,6 +529,8 @@ impl Session {
                 proposal: None,
                 proposed: None,
                 synced: None,
+                changed_at: None,
+                blocked: None,
             };
             self.entries.set(ref_.clone(), entry);
             self.invalidate();
@@ -538,6 +558,8 @@ impl Session {
             proposal: None,
             proposed: None,
             synced: None,
+            changed_at: None,
+            blocked: None,
         };
         self.entries.set(ref_.clone(), entry);
         self.invalidate();
@@ -669,11 +691,93 @@ impl Session {
         out.insert("undoLabel".into(), label(entry.undo.last()));
         out.insert("redoLabel".into(), label(entry.redo.last()));
         out.insert("author".into(), self.author.to_json());
+        let (state, problems) = self.save_state(ref_);
+        out.insert("saveState".into(), json!(state));
+        out.insert("problems".into(), json!(problems));
         out
     }
 
-    /// Tells whoever listens that a doc's status changed.
+    /// `saved`, `pending` (a save is coming), `problems` or `conflict` (autosave can't write it), and
+    /// how many problems (D1).
+    pub fn save_state(&self, ref_: &str) -> (&'static str, usize) {
+        let Some(entry) = self.entries.get(ref_) else { return ("saved", 0) };
+        match &entry.blocked {
+            Some(Blocked::Problems(n)) => ("problems", *n),
+            Some(Blocked::Conflict) => ("conflict", 0),
+            None if self.is_dirty(ref_) => ("pending", 0),
+            None => ("saved", 0),
+        }
+    }
+
+    /// Saves every doc whose last change is at least `autosave_ms` old (`force_all`: every dirty
+    /// doc now, a blocked one too). A doc with problems stays unsaved and is blocked until it
+    /// changes; one whose file changed on disk is merged, then saved; a clash blocks it and is
+    /// reported stale. Returns each doc tried, with what happened.
+    pub fn autosave(&mut self, now: f64, force_all: bool) -> Vec<Value> {
+        let wait = self.autosave_ms;
+        let due: Vec<String> = self
+            .entries
+            .values()
+            .filter(|e| {
+                let dirty = serialize(&e.doc).as_deref() != Some(e.clean.as_str());
+                dirty && (force_all || (e.blocked.is_none() && wait.is_some_and(|w| e.changed_at.is_none_or(|t| now - t >= w))))
+            })
+            .map(|e| e.ref_.clone())
+            .collect();
+        let mut out = Vec::new();
+        for ref_ in due {
+            out.push(self.save_now(&ref_));
+        }
+        out
+    }
+
+    /// One autosave of a doc (D1).
+    pub fn save_now(&mut self, ref_: &str) -> Value {
+        let mut result = self.save(ref_, false);
+        if let Err(Error::Command(e)) = &result {
+            if e.code == "conflict" {
+                result = match self.merge(ref_) {
+                    Ok(_) => self.save(ref_, false),
+                    Err(err) => Err(err),
+                };
+            }
+        }
+        match result {
+            Ok(r) => json!({ "doc": ref_, "saved": true, "wrote": r.get("wrote").cloned().unwrap_or(Value::Bool(false)) }),
+            Err(err) => {
+                let (code, n) = match &err {
+                    Error::Command(e) => (e.code.clone(), e.details.as_ref().and_then(Value::as_array).map_or(1, Vec::len)),
+                    Error::Internal(_) => ("internal".to_string(), 0),
+                };
+                let blocked = if code == "invalid" { Blocked::Problems(n.max(1)) } else { Blocked::Conflict };
+                let stale = blocked == Blocked::Conflict;
+                let file = self.entries.get(ref_).map(|e| e.file.clone()).unwrap_or_default();
+                if let Some(e) = self.entries.get_mut(ref_) {
+                    e.blocked = Some(blocked);
+                }
+                self.notify(ref_);
+                if stale {
+                    if let Some(f) = self.on_stale.as_mut() {
+                        f(json!({ "doc": ref_, "file": file }));
+                    }
+                }
+                json!({ "doc": ref_, "saved": false, "code": code, "message": err.message() })
+            }
+        }
+    }
+
+    /// Tells whoever listens that a doc's status changed, and notes when, for autosave.
     fn changed(&mut self, ref_: &str) {
+        let now = (self.now)();
+        if let Some(e) = self.entries.get_mut(ref_) {
+            e.changed_at = Some(now);
+            e.blocked = None;
+        }
+        self.notify(ref_);
+    }
+
+    /// Sends a doc's live status to whoever listens.
+    fn notify(&mut self, ref_: &str) {
         if self.on_change.is_some() && self.entries.has(ref_) {
             let status = Value::Object(self.live_status(ref_));
             (self.on_change.as_mut().expect("a listener"))(status);

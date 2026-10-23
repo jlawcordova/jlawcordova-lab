@@ -23,6 +23,7 @@
 | [`chat context`](#chatcontext) | Build the selection block an Agent chat message carries: what's selected, as the saved document has it | read |
 | [`check`](#check) | Validate the sources with the engine, all of them or one doc | read |
 | [`doc close`](#docclose) | Close an open doc (refused with unsaved changes unless --force) | session |
+| [`doc flush`](#docflush) | Save every open doc with changes now (or one), as autosave would soon | edit, session |
 | [`doc merge`](#docmerge) | Merge the changes to a doc's file on disk into its working copy, keeping the unsaved edits | edit, session |
 | [`doc open`](#docopen) | Open a scene or object as a working copy, with undo and redo | session |
 | [`doc redo`](#docredo) | Redo the last undone edit to an open doc | edit, session |
@@ -387,6 +388,22 @@ read-only · session only (`serve`) · MCP tool `doc_close`
 | --- | --- | --- | --- |
 | `doc` (positional) | string | required | the doc: scene:<name>, object:<name>, or a name (scenes/<name>, objects/<name>) |
 | `--force` | boolean | default `false` | drop unsaved changes |
+
+#### doc.flush
+
+Save every open doc with changes now (or one), as autosave would soon.
+
+```
+pixellab doc flush [doc]
+```
+
+Edits save themselves about a second after the last one; this saves now. A doc with problems isn't written (saveState problems), and one whose file changed on disk is merged first (saveState conflict when that clashes). Returns { saved, docs: [{ doc, saveState, problems }] }.
+
+edits docs · session only (`serve`) · MCP tool `doc_flush`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `doc` (positional) | string |  | the doc: scene:<name>, object:<name>, or a name (scenes/<name>, objects/<name>) |
 
 #### doc.merge
 
