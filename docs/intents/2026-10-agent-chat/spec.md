@@ -1,6 +1,8 @@
 # Spec: Agent chat (from intent.md 2026-10-21)
 Status: approved (the owner accepted the intent, spec and plan up front and reviews everything in the final PR).
 
+> **Superseded in part (2026-10-23):** R2's "no tool that writes files outside a proposal", R16, R17, R21 and R24's proposals are replaced by [`../2026-10-autosave/spec.md`](../2026-10-autosave/spec.md) (R16–R18): a chat's edits apply as Claude makes them, and a turn that changed something ends with a change card (Undo These Changes, Show in Versions). The rest of this spec still holds.
+
 The prototype canvas named in the intent (`AgentChat.dc.html`, `Agent.dc.html`, `Groups.dc.html`, `GroupsDay.dc.html`, `Main.dc.html`) is the design for everything the owner sees. This spec settles what it leaves open: how Claude Code runs, how a message carries the selection, how questions and proposals come back, the setup flow, storage, and the tests. Where the app departs from the prototype, it says so where it happens.
 
 Everything about the `claude` CLI below was checked against `claude --help` and `claude auth … --help` of Claude Code 2.1.290 on the owner's Mac on 2026-10-21, and a headless run against a temp copy of `examples/harbor.pixellab` (D1, "What a real run showed").
