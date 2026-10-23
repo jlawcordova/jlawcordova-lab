@@ -1,5 +1,5 @@
 # Intent: Object libraries and palette files
-Author: J. Law Cordova (owner). Status: draft.
+Author: J. Law Cordova (owner). Status: draft (a revision of the intent accepted in PR #42, for the autosave and floating Library changes that merged since).
 
 ## Problem
 In the owner's words:
@@ -15,9 +15,12 @@ Palettes have the same problem. Each document has its own, so moving objects bet
 ## Proposed outcome
 Object libraries:
 - A new kind of Pixel Lab file, `.pixellib`: an object library, holding objects without being a document of scenes.
-- The Library panel in the app, which shows a document's objects, can export them to a `.pixellib`. Categories are set there, in the Library panel, before exporting.
+- The app can export a document's objects to a `.pixellib`.
 - Categories can be nested, so the owner can find an object without scanning a flat list.
-- A document can import a `.pixellib`. Importing copies the library's objects into the document, so the document stays self-contained and later changes to the library don't reach it. The imported objects keep their categories, which show in the document's Library panel.
+- In the Library popover, categories are tabs below the search. A category's subcategories show as headings inside its tab.
+- The first tab, All, is the default and shows every object, grouped under its category headings. Objects with no category, such as every object in today's documents, are in their own tab, Others, placed last.
+- An object's category is set in the object inspector, while editing the object, before exporting.
+- A document can import a `.pixellib`. Importing copies the library's objects into the document, so the document stays self-contained and later changes to the library don't reach it. The imported objects keep their categories, which show in the document's Library popover.
 - A document can import more than one library. When two objects share a name, both are kept and the newer one gets a suffix.
 - The document's world palette colors the imported objects. A library keeps the values its objects' colors had when it was exported, as a record rather than a palette the document uses. If those differ from the document's, the owner gets a warning, so an import never changes how an object looks without saying so.
 - A library object that uses a palette color the document doesn't have can't be imported as it is. The app offers to convert the missing color to one the document already has, and says plainly that this changes how the imported object looks.
@@ -33,12 +36,12 @@ Palette files:
 Both kinds of import follow one rule: an import never changes how existing art looks without telling the owner. Imported objects are the document's own once copied, and can be edited like any other.
 
 ## Affected users and systems
-- The owner in the app: setting categories in the Library panel, exporting a library, importing a library into a document, and using a palette file.
+- The owner in the app: setting categories in the object inspector, finding objects by category in the Library popover, exporting a library, importing a library into a document, and using a palette file.
 - Agents and the CLI, which should be able to do the same, plus editing a library's categories.
 - `.pixellab` documents, the examples, and what Publish writes.
 
 ## Constraints
-- Every action is something the CLI, the app and agents can all do; agents' edits stay proposals.
+- Every action is something the CLI, the app and agents can all do. Agents' edits apply as they're made, like any other edit, and the version history takes them back.
 - Never write to the owner's real document from tests or scripts.
 - No new dependencies without asking.
 - Out of scope: editors in the app for `.pixellib` and palette files. Both stay future options.
