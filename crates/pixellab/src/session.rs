@@ -36,6 +36,7 @@ use engine::engine::{load_sources, validate};
 use engine::format::{self, stringify, Docs};
 use serde_json::{json, Map, Value};
 
+use crate::author::Author;
 use crate::context::{doc_file, DocKind, Found, Loaded};
 use crate::diff::unified_diff;
 use crate::document::{Document, Env};
@@ -105,6 +106,21 @@ pub struct Step {
     pub before: String,
     pub labels: Vec<String>,
     pub seq: u64,
+    /// Who made it (docs/intents/2026-10-autosave/spec.md, D7).
+    pub author: Author,
+}
+
+impl Step {
+    /// What the Edit menu calls it: its last label, the count when it holds
+    /// several, and whose it is for anyone but the owner ("Place pine (Claude)").
+    pub fn menu_label(&self) -> String {
+        let what = match self.labels.len() {
+            0 => String::new(),
+            1 => self.labels[0].clone(),
+            n => format!("{} ({n} edits)", self.labels.last().expect("a label")),
+        };
+        format!("{what}{}", self.author.label_suffix())
+    }
 }
 
 /// What a doc was when it last matched its file.
@@ -300,6 +316,10 @@ pub struct Session {
     pub agent: Option<String>,
     /// The Agent chat this session works for (docs/intents/2026-10-agent-chat/spec.md, D7).
     pub chat: Option<Value>,
+    /// Who the request being run comes from (docs/intents/2026-10-autosave/spec.md, D8).
+    pub author: Author,
+    /// Whether that request came from a client of the owner (D10), not the app itself.
+    pub remote: bool,
     pub on_change: Option<Box<dyn FnMut(Value)>>,
     pub on_stale: Option<Box<dyn FnMut(Value)>>,
     pub now: Box<dyn Fn() -> f64>,
@@ -322,6 +342,8 @@ impl Session {
             env: options.env,
             agent: options.agent,
             chat: options.chat,
+            author: Author::owner(),
+            remote: false,
             on_change: options.on_change,
             on_stale: options.on_stale,
             now: options.now,
@@ -565,11 +587,11 @@ impl Session {
         if changed {
             let coalesce = key.is_some()
                 && entry.last.as_ref().is_some_and(|(k, t)| Some(k.as_str()) == key && time - t < COALESCE_MS)
-                && !entry.undo.is_empty();
+                && entry.undo.last().is_some_and(|s| s.author.same(&self.author));
             if coalesce {
                 entry.undo.last_mut().expect("a step").labels.push(message.clone());
             } else {
-                entry.undo.push(Step { before, labels: vec![message.clone()], seq: next_seq });
+                entry.undo.push(Step { before, labels: vec![message.clone()], seq: next_seq, author: self.author.clone() });
                 if entry.undo.len() > UNDO_LIMIT {
                     entry.undo.remove(0);
                 }
@@ -607,7 +629,7 @@ impl Session {
     pub fn details(&self, ref_: &str) -> Value {
         let entry = self.entries.get(ref_).expect("an open doc");
         let disk = read_source(&self.document, entry.kind, &entry.name);
-        let mut out = self.status(ref_);
+        let mut out = self.live_status(ref_);
         out.insert("file".into(), Value::String(entry.file.clone()));
         out.insert("exists".into(), Value::Bool(entry.base.exists));
         out.insert("stale".into(), Value::Bool(is_stale(entry, &disk)));
@@ -625,10 +647,22 @@ impl Session {
         Value::Object(out)
     }
 
+    /// The status plus what the app shows of it (docs/intents/2026-10-autosave/spec.md, D1, D11):
+    /// the Edit menu's labels and who made the latest change.
+    pub fn live_status(&self, ref_: &str) -> Map<String, Value> {
+        let mut out = self.status(ref_);
+        let entry = self.entries.get(ref_).expect("an open doc");
+        let label = |s: Option<&Step>| s.map_or(Value::Null, |s| Value::String(s.menu_label()));
+        out.insert("undoLabel".into(), label(entry.undo.last()));
+        out.insert("redoLabel".into(), label(entry.redo.last()));
+        out.insert("author".into(), self.author.to_json());
+        out
+    }
+
     /// Tells whoever listens that a doc's status changed.
     fn changed(&mut self, ref_: &str) {
         if self.on_change.is_some() && self.entries.has(ref_) {
-            let status = Value::Object(self.status(ref_));
+            let status = Value::Object(self.live_status(ref_));
             (self.on_change.as_mut().expect("a listener"))(status);
         }
     }
@@ -646,7 +680,7 @@ impl Session {
             ]);
             return Ok(Value::Object(spread(head, self.status(ref_))));
         };
-        to.push(Step { before: stringify(&entry.doc), labels: snap.labels.clone(), seq: snap.seq });
+        to.push(Step { before: stringify(&entry.doc), labels: snap.labels.clone(), seq: snap.seq, author: snap.author.clone() });
         // A step from before the doc last matched its file: undoing it is itself a change from disk.
         if snap.seq <= entry.base_seq {
             if undo {
@@ -726,7 +760,7 @@ impl Session {
         let seq = self.seq;
         let entry = self.entries.get_mut(ref_).expect("open");
         entry.doc = doc;
-        entry.undo.push(Step { before, labels: vec![format!("Sorted {name} by depth")], seq });
+        entry.undo.push(Step { before, labels: vec![format!("Sorted {name} by depth")], seq, author: self.author.clone() });
         self.invalidate();
         self.changed(ref_);
         Ok(Some(sorted))
@@ -906,7 +940,12 @@ impl Session {
             let e = self.entries.get_mut(ref_).expect("open");
             e.doc = data;
             if changed {
-                e.undo.push(Step { before, labels: vec![format!("Reverted {ref_} to the file on disk")], seq });
+                e.undo.push(Step {
+                    before,
+                    labels: vec![format!("Reverted {ref_} to the file on disk")],
+                    seq,
+                    author: self.author.clone(),
+                });
                 if e.undo.len() > UNDO_LIMIT {
                     e.undo.remove(0);
                 }
@@ -1282,7 +1321,12 @@ impl Session {
         {
             let e = self.entries.get_mut(ref_).expect("open");
             e.doc = data;
-            e.undo.push(Step { before, labels: vec![format!("Merged the changes to {} from disk", entry.file)], seq: keep });
+            e.undo.push(Step {
+                before,
+                labels: vec![format!("Merged the changes to {} from disk", entry.file)],
+                seq: keep,
+                author: Author::of(crate::author::AuthorKind::Outside),
+            });
             if e.undo.len() > UNDO_LIMIT {
                 e.undo.remove(0);
             }

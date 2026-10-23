@@ -203,6 +203,7 @@ fn run(argv: &[String], io: &mut Io) -> Result<i32, Error> {
         cwd: io.cwd.clone(),
     })?;
     let mut session = Session::new(document, Options { env: io.env.clone(), ..Options::default() });
+    session.author = crate::author::Author::cli();
     let mut result = {
         let mut ctx = Ctx::new(&mut session);
         registry.call(&mut ctx, command.name, Value::Object(checked.clone()), false)?

@@ -15,6 +15,7 @@ use std::io::{BufRead, Write};
 use serde_json::{json, Map, Value};
 
 use crate::activity_summary::activity_summary;
+use crate::author::Author;
 use crate::context::Ctx;
 use crate::document::{Document, Env};
 use crate::errors::Error;
@@ -142,6 +143,7 @@ pub fn start(
     let chat = chat_of(&env);
     let mut session =
         Session::new(document, Options { env, mode: if direct { Mode::Direct } else { Mode::Propose }, chat, ..Options::default() });
+    session.author = Author::agent(None, session.chat.clone());
     let left = left_out(direct);
     let rpc = Output::new(output);
     let mut handle = |method: &str, params: Value, _: &Value| -> Result<Value, Failure> {
@@ -155,6 +157,7 @@ pub fn start(
                             None => name.to_string(),
                         }
                     });
+                session.author = Author::agent(session.agent.clone(), session.chat.clone());
                 Ok(initialize_result(params.get("protocolVersion").and_then(Value::as_str)))
             }
             "notifications/initialized" | "notifications/cancelled" => Ok(Value::Null),

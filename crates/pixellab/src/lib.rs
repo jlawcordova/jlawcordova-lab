@@ -9,6 +9,7 @@
 
 pub mod activity_summary;
 pub mod argv;
+pub mod author;
 pub mod chat_context;
 pub mod cli;
 pub mod commands;
