@@ -64,22 +64,20 @@ choose 1
 chat wait
 expect chosen Only these 2
 expect cards 1
-expect ghostchat Make these taller
-expect banner Previewing proposal #1 from the chat “Make these taller”
+expect cardstatus Applied
+expect version newest author agent in Make these taller
 snapshot @OUT@/chat-banner-dark.png
 appearance light
 snapshot @OUT@/chat-banner-light.png
 appearance dark
-# R17: another chat hides this chat's ghost
+# Another chat has its own cards
 chat new
-expect ghostchat off
+expect cards 0
 chat open 2
-card ghost
-expect ghostchat Make these taller
-card reject
-expect cardstatus Rejected
-expect lastnote You rejected #1 · nothing changed
-expect proposals 0
+expect cards 1
+card undo
+expect cardstatus Undone
+expect lastnote You undid these changes
 # R6: Ask Claude about this, from the Inspector
 righttab inspector
 select 80.0

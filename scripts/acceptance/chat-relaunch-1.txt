@@ -1,6 +1,6 @@
 # The Agent chat across launches (docs/intents/2026-10-agent-chat/spec.md, R3, R16), part 1 of 3, on a temp
-# harbor copy with its own state dir: a chat with a Claude session and a waiting proposal; then the app quits.
-# Between launches acceptance.sh rejects the proposal with the CLI (Pixel Lab is closed).
+# harbor copy with its own state dir: a chat with a Claude session and a change card; then the app quits.
+# Between launches acceptance.sh undoes the chat's version with the CLI (Pixel Lab is closed).
 open scene:harbor
 righttab agent
 expect setup ready
@@ -12,5 +12,4 @@ select 14.0
 chat send Move it one tile down-right
 chat wait
 expect cards 1
-expect cardstatus Waiting for you
-expect proposals 1
+expect cardstatus Applied

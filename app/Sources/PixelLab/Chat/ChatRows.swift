@@ -11,6 +11,7 @@ struct ChatRow: Identifiable, Equatable {
         case steps([ChatMessage])
         case question(ChatMessage)
         case proposal(ChatMessage)
+        case change(ChatMessage)
         case note(ChatMessage)
         case typing
     }
@@ -45,6 +46,7 @@ struct ChatRow: Identifiable, Equatable {
             case .claude: kinds.append((m.id, .claude(m)))
             case .question: kinds.append((m.id, .question(m)))
             case .proposal: kinds.append((m.id, .proposal(m)))
+            case .change: kinds.append((m.id, .change(m)))
             case .note: kinds.append((m.id, .note(m)))
             }
         }

@@ -44,7 +44,7 @@ fn build_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let started = Instant::now();
     let doc = ctx.document()?;
     let out: Option<PathBuf> = match opt_str(&params, "dir").filter(|d| !d.is_empty()) {
-        Some(dir) => Some(crate::open_docs::resolve(Path::new(dir))),
+        Some(dir) => Some(crate::state::resolve_path(Path::new(dir))),
         None => doc.publish_dir.clone(),
     };
     let Some(out) = out else {

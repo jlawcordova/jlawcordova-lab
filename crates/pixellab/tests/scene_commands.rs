@@ -15,7 +15,7 @@ use pixellab::context::{Ctx, DocKind};
 use pixellab::document::{open_document, OpenOptions};
 use pixellab::errors::{CommandError, Error};
 use pixellab::registry::registry;
-use pixellab::session::{Mode, Options, Session};
+use pixellab::session::{Options, Session};
 use pixellab::sorting::sort_scene;
 use serde_json::{json, Value};
 
@@ -65,7 +65,7 @@ fn lab() -> Lab {
         cwd: doc.root.clone(),
     })
     .unwrap();
-    Lab { session: Session::new(document, Options { mode: Mode::Direct, env, ..Options::default() }), _doc: doc }
+    Lab { session: Session::new(document, Options { env, ..Options::default() }), _doc: doc }
 }
 
 impl Lab {

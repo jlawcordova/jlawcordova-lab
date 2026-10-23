@@ -1,4 +1,4 @@
-//! The activity summaries, the state dir and the proposals (ports cli/test/activity-and-proposals.test.mjs).
+//! The activity summaries and the state dir (ports cli/test/activity-and-proposals.test.mjs).
 #![allow(clippy::result_large_err)]
 
 use std::collections::HashMap;
@@ -9,7 +9,7 @@ use pixellab::activity_summary::activity_summary;
 use pixellab::context::Ctx;
 use pixellab::errors::Result;
 use pixellab::registry::{Command, Params};
-use pixellab::state::{create_state, iso_time, new_proposal_id, parse_activity, state_dir, write_atomic};
+use pixellab::state::{create_state, iso_time, parse_activity, state_dir, write_atomic};
 use serde_json::{json, Map, Value};
 
 fn run(_: &mut Ctx, _: Params) -> Result<Value> {
@@ -44,10 +44,6 @@ impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
     }
-}
-
-fn base(id: &str, doc: &str, created: &str) -> Value {
-    json!({ "baseHash": null, "source": "", "summary": [], "agent": null, "id": id, "doc": doc, "createdAt": created })
 }
 
 #[test]
@@ -88,16 +84,6 @@ fn edits_keep_their_own_summary_other_commands_fall_back_to_the_format() {
 }
 
 #[test]
-fn proposals_list_oldest_first_by_created_at_even_within_one_second() {
-    let tmp = TempDir::new("order");
-    let state = create_state(&tmp.0);
-    state.write_proposal(&base("20261019-112830-ffffff", "scene:a", "2026-10-19T11:28:30.100Z")).unwrap();
-    state.write_proposal(&base("20261019-112830-000000", "object:b", "2026-10-19T11:28:30.900Z")).unwrap();
-    let docs: Vec<String> = state.list_proposals().iter().map(|p| p["doc"].as_str().unwrap().to_string()).collect();
-    assert_eq!(docs, ["scene:a", "object:b"]);
-}
-
-#[test]
 fn iso_time_matches_to_iso_string() {
     // Values from `node -e "console.log(new Date(<ms>).toISOString())"`.
     for (ms, want) in [
@@ -113,65 +99,6 @@ fn iso_time_matches_to_iso_string() {
     ] {
         assert_eq!(iso_time(ms), want, "{ms}");
     }
-}
-
-#[test]
-fn new_proposal_id_is_sortable_and_file_safe() {
-    let id = new_proposal_id(1792555782123.0);
-    assert_eq!(id.len(), 22);
-    assert!(id.starts_with("20261021-040942-"), "{id}");
-    assert!(id[16..].bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)));
-    assert_ne!(new_proposal_id(0.0), new_proposal_id(0.0));
-}
-
-#[test]
-fn proposal_numbering_carries_on_across_writes_and_a_rewrite_keeps_its_number() {
-    let tmp = TempDir::new("numbers");
-    let state = create_state(&tmp.0);
-    let a = state.write_proposal(&base("20261019-112830-aaaaaa", "scene:a", "2026-10-19T11:28:30.100Z")).unwrap();
-    let b = state.write_proposal(&base("20261019-112831-bbbbbb", "scene:b", "2026-10-19T11:28:31.100Z")).unwrap();
-    assert_eq!(a["number"], 1);
-    assert_eq!(b["number"], 2);
-    // key order: id, number, then the proposal's own keys
-    let keys: Vec<&String> = a.as_object().unwrap().keys().collect();
-    assert_eq!(keys, ["id", "number", "format", "baseHash", "source", "summary", "agent", "doc", "createdAt"]);
-    let again = state.write_proposal(&base("20261019-112830-aaaaaa", "scene:a2", "2026-10-19T11:28:30.100Z")).unwrap();
-    assert_eq!(again["number"], 1);
-    assert_eq!(state.number_of("20261019-112830-aaaaaa"), Some(1));
-    assert_eq!(state.number_of("20261019-999999-ffffff"), None);
-    let c = state.write_proposal(&base("20261019-112832-cccccc", "scene:c", "2026-10-19T11:28:32.100Z")).unwrap();
-    assert_eq!(c["number"], 3);
-    assert_eq!(fs::read_to_string(tmp.0.join("proposal-numbers.log")).unwrap().lines().count(), 3);
-    let read = state.read_proposal("20261019-112830-aaaaaa").unwrap();
-    assert_eq!(read["doc"], "scene:a2");
-    assert_eq!(read["number"], 1);
-    assert!(fs::read_to_string(tmp.0.join("proposals/20261019-112830-aaaaaa.json")).unwrap().ends_with("}\n"));
-}
-
-#[test]
-fn proposals_validate_ids_read_and_remove() {
-    let tmp = TempDir::new("ids");
-    let state = create_state(&tmp.0);
-    let bad = state.read_proposal("nope").unwrap_err();
-    assert_eq!(bad.message(), "no proposal nope; ids look like 20261019-142301-a1b2c3 (pixellab proposal list)");
-    let missing = state.read_proposal("20261019-112830-aaaaaa").unwrap_err();
-    assert_eq!(missing.message(), "no proposal 20261019-112830-aaaaaa (pixellab proposal list)");
-    assert!(!state.has_proposal("nope"));
-    state.write_proposal(&base("20261019-112830-aaaaaa", "scene:a", "2026-10-19T11:28:30.100Z")).unwrap();
-    assert!(state.has_proposal("20261019-112830-aaaaaa"));
-    fs::write(tmp.0.join("proposals/20261019-112831-bbbbbb.json"), "{ not json").unwrap();
-    assert_eq!(state.list_proposals().len(), 1);
-    assert!(state
-        .read_proposal("20261019-112831-bbbbbb")
-        .unwrap_err()
-        .message()
-        .starts_with("proposal 20261019-112831-bbbbbb is not valid JSON: "));
-    state.remove_proposal("20261019-112830-aaaaaa").unwrap();
-    assert!(!state.has_proposal("20261019-112830-aaaaaa"));
-    assert_eq!(
-        state.remove_proposal("20261019-112830-aaaaaa").unwrap_err().message(),
-        "no proposal 20261019-112830-aaaaaa (pixellab proposal list)"
-    );
 }
 
 #[test]

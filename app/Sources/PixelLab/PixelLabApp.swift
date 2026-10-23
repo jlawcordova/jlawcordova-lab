@@ -61,14 +61,19 @@ struct PixelLabCommands: Commands {
                 .keyboardShortcut("o")
         }
         CommandGroup(replacing: .saveItem) {
+            // Edits save themselves; Save saves now and starts a new version (docs/intents/2026-10-autosave/spec.md, R5).
             Button("Save") { Task { await model.save() } }
                 .keyboardShortcut("s")
-                .disabled(!model.canSave)
+                .disabled(model.document == nil)
             Button("Save As…") { Task { await model.saveAs() } }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
                 .disabled(model.phase != .ready)
-            Button("Revert to Saved") { Task { await model.revert() } }
-                .disabled(!model.canSave)
+            Menu("Revert To") {
+                Button("Last Opened") { Task { await model.restoreLastOpened() } }
+                    .disabled(model.sessionInfo?.openedVersion == nil)
+                Button("Browse All Versions…") { Task { await model.versions.open() } }
+            }
+            .disabled(model.phase != .ready)
             Divider()
             Button("Publish") { Task { await model.publish() } }
                 .keyboardShortcut("b")
@@ -123,9 +128,10 @@ struct PixelLabCommands: Commands {
                 .disabled(!(model.mode == .scene && model.document?.selectedLayer != nil))
         }
         CommandGroup(replacing: .undoRedo) {
-            Button("Undo") { undoOrText(Selector(("undo:"))) { await model.undo() } }
+            // "Undo Place Pine (Claude)": whose step it is, for anyone but the owner (R20).
+            Button(model.undoTitle) { undoOrText(Selector(("undo:"))) { await model.undo() } }
                 .keyboardShortcut("z")
-            Button("Redo") { undoOrText(Selector(("redo:"))) { await model.redo() } }
+            Button(model.redoTitle) { undoOrText(Selector(("redo:"))) { await model.redo() } }
                 .keyboardShortcut("z", modifiers: [.command, .shift])
         }
         CommandGroup(after: .toolbar) {
@@ -156,7 +162,7 @@ struct PixelLabCommands: Commands {
         }
         // The chat in the main window, and the review window (spec D13).
         CommandGroup(before: .windowList) {
-            Button(model.agent.pendingCount > 0 ? "Agent (\(model.agent.pendingCount) to review)" : "Agent") { model.showAgentTab(focusInput: true) }
+            Button("Agent") { model.showAgentTab(focusInput: true) }
                 .keyboardShortcut("a", modifiers: [.command, .option])
                 .disabled(model.phase != .ready)
             Button("Agent Window") { openWindow(id: WindowID.agent) }

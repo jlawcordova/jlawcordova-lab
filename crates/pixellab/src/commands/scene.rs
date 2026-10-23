@@ -31,7 +31,7 @@ pub fn play_param() -> Value {
     })
 }
 
-/// scene.render's and proposal.render's theme (`THEME`).
+/// scene.render's and history.render's theme (`THEME`).
 pub fn theme() -> Value {
     json!({
         "type": "string",

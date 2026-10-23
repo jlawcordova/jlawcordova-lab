@@ -14,35 +14,33 @@ expect suggestion Make these taller
 expect context item 83 object=pine at=px -30,78
 chat send Move these one tile east
 chat wait
+# R18: the turn's edits applied, and the chat says what changed on a card
 expect cards 1
-expect cardstatus Waiting for you
-# R17: the chat's proposal ghosts on the stage with the banner, and counts in the badge
-expect ghostchat Move these one tile east
-expect banner Previewing proposal #4 from the chat “Move these one tile east”
-expect badge 1
-expect proposalsource Chat · Move these one tile east
-expect askedabout pine 83 and pine 84
-snapshot @OUT@/chat-proposal-dark.png
-appearance light
-snapshot @OUT@/chat-proposal-light.png
-appearance dark
-# R16: approve from the card: the document changes, the card and a note say so
-card approve
 expect cardstatus Applied
-expect lastnote You approved #4 · wrote scenes/closeup-front-trees.json
-expect proposals 0
-expect badge none
-expect dirty false
+expect cardtitle 2 edits to closeup-front-trees
+expect version newest author agent in Move these one tile east
+snapshot @OUT@/chat-change-dark.png
+appearance light
+snapshot @OUT@/chat-change-light.png
+appearance dark
+# R14: Undo These Changes on the card takes the turn back
+card undo
+expect cardstatus Undone
+expect lastnote You undid these changes
 # blocks suggest raising
 select 7
 expect suggestion Raise it a level
 chat send Raise it a level
 chat wait
 expect cards 2
-# R20–R22: the Agent window: Claude Code's row, the proposal's source, the Chats filter
+# Show in Versions: the panel, on the turn's version, ghosted
+card show
+expect version newest author agent in Move these one tile east
+expect ghost on
+snapshot @OUT@/chat-versions-dark.png
+versions close
+# R19, R20: the Agent window: Claude Code's row and the Chats filter, no proposals
 agentwindow
-expect proposalnumber 5
-expect proposalsource Chat · Move these one tile east
 activity chats
 expect activityrows 9
 snapshot agent @OUT@/chat-agent-window-dark.png
@@ -50,7 +48,3 @@ appearance light
 snapshot agent @OUT@/chat-agent-window-light.png
 activity all
 appearance dark
-card reject
-expect cardstatus Rejected
-expect lastnote You rejected #5 · nothing changed
-expect proposals 0

@@ -33,12 +33,9 @@ import Testing
         #expect(results == [true, true, true, true, true])
         guard case .text(let reply) = events[events.count - 2] else { Issue.record("no reply"); return }
         #expect(reply.hasPrefix("Moved pine 14.0 and pine 39.0 one tile down-right."))
-        // The save's result names the proposal: a card.
-        let save = events.compactMap { e -> String? in if case .toolResult(_, _, let t) = e, t.contains("\"proposal\"") { return t }; return nil }.first
-        let card = ChatModel.proposal(from: save ?? "")
-        #expect(card?.number == 1)
-        #expect(card?.doc == "scene:harbor")
-        #expect(card?.edits?.count == 2)
+        // The two moves changed the document: the turn ends with a change card (autosave spec, R18).
+        let texts = events.compactMap { e -> String? in if case .toolResult(_, _, let t) = e { return t }; return nil }
+        #expect(texts.filter(ChatModel.edited).count == 2)
     }
 
     @Test func R1_unknownLinesAreIgnoredAndNonJSONIsADiagnostic() {
@@ -200,7 +197,8 @@ import Testing
         #expect(StepText.human(tool: "scene_move", input: ["item": "51", "nudge": [2, 0]], result: nil, ok: true, objectAt: at) == "Nudged rock 51 by 2 px right")
         #expect(StepText.human(tool: "scene_items", input: ["name": "harbor"], result: #"{"scene":"harbor","items":[{},{},{}]}"#, ok: true) == "Looked through the 3 items in harbor")
         #expect(StepText.human(tool: "object_show", input: ["name": "pine"], result: #"{"name":"pine","kind":"sprite","size":[11,18]}"#, ok: true) == "Looked at the pine sprite (11×18)")
-        #expect(StepText.human(tool: "doc_save", input: ["doc": "scene:harbor"], result: #"{"proposal":"x","number":12}"#, ok: true) == "Saved it as proposal #12 for you to review")
+        #expect(StepText.human(tool: "doc_save", input: ["doc": "scene:harbor"], result: #"{"wrote":true}"#, ok: true) == "Saved harbor")
+        #expect(StepText.human(tool: "history_undo", input: ["version": 4], result: nil, ok: true) == "Took back version 4")
         #expect(StepText.human(tool: "scene_place", input: ["object": "rock", "at": [0, 0, 1]], result: nil, ok: true) == "Placed a rock at 0,0,1")
         #expect(StepText.human(tool: "check", input: [:], result: #"{"target":{"name":"harbor"},"problems":[{}]}"#, ok: true) == "Checked harbor: 1 problem")
         #expect(StepText.human(tool: "scene_layer_new", input: ["items": ["1", "2"]], result: #"{"layer":{"id":"boats","name":"Boats"},"items":2}"#, ok: true) == "Grouped 2 items as Boats")
@@ -211,7 +209,7 @@ import Testing
 
     @Test func R13_theRawCallForDetails() {
         #expect(StepText.raw(tool: "scene_move", input: ["by": [1, 0], "item": "134.0", "name": "harbor"], result: nil) == "scene_move name=harbor item=134.0 by=1,0")
-        #expect(StepText.raw(tool: "doc_save", input: ["doc": "scene:harbor"], result: #"{"number":3}"#) == "doc_save doc=scene:harbor → proposal #3")
+        #expect(StepText.raw(tool: "doc_save", input: ["doc": "scene:harbor"], result: #"{"wrote":true}"#) == "doc_save doc=scene:harbor")
     }
 
     // MARK: Links (D10)
@@ -282,27 +280,24 @@ import Testing
         #expect(tree.everyUse(of: "pine", items: items, inside: "trees", hidden: [], locked: ["trees"]) == ["1", "2"], "a locked layer's contents are reached from inside it")
     }
 
-    @Test func R21_aProposalSaysWhereItCameFrom() {
-        var p = ProposalSummary(id: "x", number: 12, doc: "scene:harbor", summary: ["a"], createdAt: "", agent: "claude-code 2.1.290", chat: ProposalChat(id: "c", title: "Pines"), baseMatches: true)
-        #expect(p.source == "Chat · Pines")
-        #expect(p.bannerTitle == "Previewing proposal #12 from the chat “Pines”")
-        #expect(p.numberLabel == "#12")
-        p.chat = nil
-        p.number = nil
-        #expect(p.source == "claude-code 2.1.290 · terminal")
-        #expect(p.bannerTitle == "Previewing proposal from claude-code 2.1.290")
-        // Older proposals and activity lines decode without the new fields.
-        let old = try? JSONDecoder().decode(ProposalSummary.self, from: Data(#"{"id":"x","doc":"scene:a","summary":[],"createdAt":"","agent":null,"baseMatches":true}"#.utf8))
-        #expect(old?.number == nil && old?.chat == nil)
+    @Test func R21_aVersionSaysWhoMadeItAndActivityWhereItCameFrom() {
+        let agent = VersionAuthor(kind: "agent", name: "claude-code 2.1.290", chat: ProposalChat(id: "c", title: "Pines"))
+        #expect(agent.display == "Claude")
+        #expect(VersionAuthor(kind: "cli").display == "The CLI")
+        #expect(VersionAuthor(kind: "owner").display == "You")
+        #expect(VersionAuthor(kind: "outside").display == "Outside Pixel Lab")
         let line = try? JSONDecoder().decode(ActivityEntry.self, from: Data(#"{"time":"t","tool":"scene_move","ok":true,"agent":"claude-code 2.1.290","chat":{"id":"c","title":"Pines"}}"#.utf8))
         #expect(line?.who == "chat · Pines")
+        // A proposal card from an older chat still decodes, and shows as set aside.
+        let old = try? JSONDecoder().decode(ChatMessage.self, from: Data(#"{"id":"m","time":0,"kind":"proposal","text":"Moved","proposal":"p","number":3}"#.utf8))
+        #expect(old?.kind == .proposal && old?.number == 3)
     }
 
-    @Test func R16_aSavesResultBecomesACardTitledByItsEdits() {
-        let one = ChatModel.proposal(from: #"{"doc":"scene:harbor","proposal":"p1","number":3,"edits":["pine moved to column 4"]}"#)
-        #expect(one?.text == "Pine moved to column 4" && one?.edits == [] && one?.number == 3)
-        let two = ChatModel.proposal(from: #"{"doc":"scene:harbor","proposal":"p2","edits":["a","b"]}"#)
-        #expect(two?.text == "2 edits to harbor" && two?.edits == ["a", "b"])
-        #expect(ChatModel.proposal(from: #"{"doc":"scene:harbor","wrote":true}"#) == nil, "a direct save makes no card")
+    @Test func R18_aToolResultThatChangedTheDocumentMakesAChangeCard() {
+        #expect(ChatModel.edited(#"{"doc":"scene:harbor","changed":true,"summary":"pine moved"}"#))
+        #expect(ChatModel.edited(#"{"version":3,"changed":true,"written":["scene:harbor"]}"#))
+        #expect(!ChatModel.edited(#"{"doc":"scene:harbor","changed":false,"summary":"nothing changed"}"#))
+        #expect(!ChatModel.edited(#"{"scene":"harbor","items":[]}"#))
+        #expect(ChatModel.titled("pine moved to column 4") == "Pine moved to column 4")
     }
 }

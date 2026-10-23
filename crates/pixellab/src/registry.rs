@@ -192,7 +192,8 @@ pub fn registry() -> Registry {
     list.extend(commands::check::commands());
     list.extend(commands::art::commands());
     list.extend(commands::doc::commands());
-    list.extend(commands::proposal::commands());
+    list.extend(commands::history::commands());
+    list.extend(commands::activity::commands());
     list.extend(commands::chat::commands());
     Registry::new(list)
 }

@@ -55,7 +55,7 @@ It's signed ad hoc, so the first launch may ask you to confirm: if macOS says
 it can't check the app, Control-click it in Finder › Open, or allow it under
 System Settings › Privacy & Security.
 
-Connect Claude Code (MCP; agents propose, you approve in Window › Agent):
+Connect Claude Code (MCP; an agent's edits apply as it goes, and File › Revert To › Browse All Versions… takes any back):
   claude mcp add pixellab -- "$program" serve --mcp
 
 Optional: the program as a shell command (add to ~/.zshrc):

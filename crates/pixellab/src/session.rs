@@ -12,16 +12,17 @@
 //! Saving: validate with the engine and refuse a doc with problems unless
 //! forced; write the canonical format-2 text; refuse with a conflict if the
 //! file changed on disk since the doc was opened (by hash) unless forced;
-//! write atomically. In 'propose' mode (MCP) a save writes a proposal to the
-//! state dir instead.
+//! write atomically, and record the write in the version history
+//! (docs/intents/2026-10-autosave/spec.md, D3). Every save is a write: agents'
+//! edits apply as anyone's do (R16). `autosave` saves a doc a while after its
+//! last change (D1).
 //!
 //! Edits since disk (docs/intents/2026-10-mcp-gaps/spec.md, D1): every undo
 //! step has a sequence number, and an entry's base_seq is the number when
-//! the doc last matched its file; a proposal lists only the steps after it.
-//! `sync` (D2) settles an MCP session's proposals once the owner applies or
-//! rejects them, and reloads clean docs whose files changed. `merge` (D4)
-//! brings a change on disk into a dirty working copy, three ways, in the
-//! sources' trailing-comma form (merge.rs).
+//! the doc last matched its file; a version lists the steps after it.
+//! `sync` reloads clean docs whose files changed. `merge` (D4) brings a
+//! change on disk into a dirty working copy, three ways, in the sources'
+//! trailing-comma form (merge.rs).
 //!
 //! Depth order (docs/intents/2026-10-depth-order/spec.md, R4): an edit of a
 //! scene ends by putting every list of its items in depth order, inside the
@@ -36,21 +37,15 @@ use engine::engine::{load_sources, validate};
 use engine::format::{self, stringify, Docs};
 use serde_json::{json, Map, Value};
 
+use crate::author::{Author, AuthorKind};
 use crate::context::{doc_file, DocKind, Found, Loaded};
 use crate::diff::unified_diff;
 use crate::document::{Document, Env};
 use crate::errors::{CommandError, Error, Result};
+use crate::history::{Change, History};
 use crate::merge::{fold_scene, merge3, trailing, untrailing};
-use crate::open_docs::unsaved_in_app;
 use crate::sorting::{path_changes, remap_json, sort_scene, Sorted};
-use crate::state::{create_state, iso_time, new_proposal_id, state_dir, write_atomic, State};
-
-/// How a session saves: the document's files, or proposals (MCP).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Mode {
-    Direct,
-    Propose,
-}
+use crate::state::{create_state, state_dir, write_atomic, State};
 
 pub const UNDO_LIMIT: usize = 200;
 pub const COALESCE_MS: f64 = 1000.0;
@@ -105,6 +100,21 @@ pub struct Step {
     pub before: String,
     pub labels: Vec<String>,
     pub seq: u64,
+    /// Who made it (docs/intents/2026-10-autosave/spec.md, D7).
+    pub author: Author,
+}
+
+impl Step {
+    /// What the Edit menu calls it: its last label, the count when it holds
+    /// several, and whose it is for anyone but the owner ("Place pine (Claude)").
+    pub fn menu_label(&self) -> String {
+        let what = match self.labels.len() {
+            0 => String::new(),
+            1 => self.labels[0].clone(),
+            n => format!("{} ({n} edits)", self.labels.last().expect("a label")),
+        };
+        format!("{what}{}", self.author.label_suffix())
+    }
 }
 
 /// What a doc was when it last matched its file.
@@ -113,14 +123,6 @@ pub struct Base {
     pub exists: bool,
     pub hash: Option<String>,
     pub text: String,
-}
-
-/// A proposal this session wrote for a doc.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Proposed {
-    pub id: String,
-    pub text: String,
-    pub seq: u64,
 }
 
 /// An open doc (`Entry`).
@@ -139,9 +141,21 @@ pub struct Entry {
     pub base_seq: u64,
     pub undone: Vec<String>,
     pub created: Option<String>,
-    pub proposal: Option<String>,
-    pub proposed: Option<Proposed>,
-    pub synced: Option<Value>,
+    /// When the doc last changed, for autosave's pause (docs/intents/2026-10-autosave/spec.md, D1).
+    pub changed_at: Option<f64>,
+    /// Why autosave last couldn't write it, until it changes again.
+    pub blocked: Option<Blocked>,
+    /// Who changed it last: its next write is that author's version, whoever saves it (D3, D8).
+    pub changed_by: Option<Author>,
+}
+
+/// Why autosave couldn't write a doc (D1).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Blocked {
+    /// It has this many problems.
+    Problems(usize),
+    /// Its file changed on disk and the change clashes with the open copy.
+    Conflict,
 }
 
 /// What an edit's function returns: its result's fields, and its message
@@ -185,7 +199,6 @@ impl Edit {
 
 /// How a session starts.
 pub struct Options {
-    pub mode: Mode,
     pub env: Env,
     pub agent: Option<String>,
     pub chat: Option<Value>,
@@ -193,18 +206,20 @@ pub struct Options {
     /// `{ doc, file }` when an open doc with unsaved edits can't take what changed on disk (proposal.apply's conflict).
     pub on_stale: Option<Box<dyn FnMut(Value)>>,
     pub now: Box<dyn Fn() -> f64>,
+    /// Save a doc this long after its last change (the app's server); None: only when asked.
+    pub autosave_ms: Option<f64>,
 }
 
 impl Default for Options {
     fn default() -> Self {
         Options {
-            mode: Mode::Direct,
             env: crate::document::process_env(),
             agent: None,
             chat: None,
             on_change: None,
             on_stale: None,
             now: Box::new(crate::state::now_ms),
+            autosave_ms: None,
         }
     }
 }
@@ -295,20 +310,24 @@ fn placed(doc: &Value) -> Vec<Value> {
 /// The open docs of one door's run.
 pub struct Session {
     pub document: Document,
-    pub mode: Mode,
     pub env: Env,
     pub agent: Option<String>,
     /// The Agent chat this session works for (docs/intents/2026-10-agent-chat/spec.md, D7).
     pub chat: Option<Value>,
+    /// Who the request being run comes from (docs/intents/2026-10-autosave/spec.md, D8).
+    pub author: Author,
+    /// Whether that request came from a client of the owner (D10), not the app itself.
+    pub remote: bool,
     pub on_change: Option<Box<dyn FnMut(Value)>>,
     pub on_stale: Option<Box<dyn FnMut(Value)>>,
     pub now: Box<dyn Fn() -> f64>,
+    pub autosave_ms: Option<f64>,
     pub state: State,
+    /// The document's version history (docs/intents/2026-10-autosave/spec.md, D3).
+    pub history: History,
     /// Open docs by ref, in the order they were opened.
     pub entries: engine::omap::OMap<String, Entry>,
     pub seq: u64,
-    /// The proposals `sync` settled lately, newest last.
-    pub settled: Vec<Value>,
     disk: Option<Rc<Docs>>,
     loaded: Option<Rc<Loaded>>,
 }
@@ -316,19 +335,27 @@ pub struct Session {
 impl Session {
     pub fn new(document: Document, options: Options) -> Session {
         let state = create_state(state_dir(&options.env));
+        // The version history starts at the first write (version 0 is the document before it), so
+        // a session that only reads writes nothing. One that can't be written never stops an edit.
+        let history = History::new(&state.dir, &document.root, &document.source_dir);
+        if let Err(e) = history.thin((options.now)()) {
+            eprintln!("pixellab: can't thin the version history: {}", e.message());
+        }
         Session {
             document,
-            mode: options.mode,
             env: options.env,
             agent: options.agent,
             chat: options.chat,
+            author: Author::owner(),
+            remote: false,
             on_change: options.on_change,
             on_stale: options.on_stale,
             now: options.now,
+            autosave_ms: options.autosave_ms,
             state,
+            history,
             entries: engine::omap::OMap::new(),
             seq: 0,
-            settled: Vec::new(),
             disk: None,
             loaded: None,
         }
@@ -473,9 +500,9 @@ impl Session {
                 base_seq: self.seq,
                 undone: vec![],
                 created: None,
-                proposal: None,
-                proposed: None,
-                synced: None,
+                changed_at: None,
+                blocked: None,
+                changed_by: None,
             };
             self.entries.set(ref_.clone(), entry);
             self.invalidate();
@@ -500,9 +527,9 @@ impl Session {
             base_seq: self.seq,
             undone: vec![],
             created: Some(label.to_string()),
-            proposal: None,
-            proposed: None,
-            synced: None,
+            changed_at: None,
+            blocked: None,
+            changed_by: None,
         };
         self.entries.set(ref_.clone(), entry);
         self.invalidate();
@@ -565,11 +592,11 @@ impl Session {
         if changed {
             let coalesce = key.is_some()
                 && entry.last.as_ref().is_some_and(|(k, t)| Some(k.as_str()) == key && time - t < COALESCE_MS)
-                && !entry.undo.is_empty();
+                && entry.undo.last().is_some_and(|s| s.author.same(&self.author));
             if coalesce {
                 entry.undo.last_mut().expect("a step").labels.push(message.clone());
             } else {
-                entry.undo.push(Step { before, labels: vec![message.clone()], seq: next_seq });
+                entry.undo.push(Step { before, labels: vec![message.clone()], seq: next_seq, author: self.author.clone() });
                 if entry.undo.len() > UNDO_LIMIT {
                     entry.undo.remove(0);
                 }
@@ -607,7 +634,7 @@ impl Session {
     pub fn details(&self, ref_: &str) -> Value {
         let entry = self.entries.get(ref_).expect("an open doc");
         let disk = read_source(&self.document, entry.kind, &entry.name);
-        let mut out = self.status(ref_);
+        let mut out = self.live_status(ref_);
         out.insert("file".into(), Value::String(entry.file.clone()));
         out.insert("exists".into(), Value::Bool(entry.base.exists));
         out.insert("stale".into(), Value::Bool(is_stale(entry, &disk)));
@@ -616,19 +643,120 @@ impl Session {
         redo.reverse();
         out.insert("redo".into(), Value::from(redo));
         out.insert("edits".into(), Value::from(edits(entry)));
-        if let Some(p) = &entry.proposal {
-            out.insert("proposal".into(), Value::String(p.clone()));
-        }
-        if let Some(s) = &entry.synced {
-            out.insert("synced".into(), s.clone());
-        }
         Value::Object(out)
     }
 
-    /// Tells whoever listens that a doc's status changed.
+    /// The status plus what the app shows of it (docs/intents/2026-10-autosave/spec.md, D1, D11):
+    /// the Edit menu's labels and who made the latest change.
+    pub fn live_status(&self, ref_: &str) -> Map<String, Value> {
+        let mut out = self.status(ref_);
+        let entry = self.entries.get(ref_).expect("an open doc");
+        let label = |s: Option<&Step>| s.map_or(Value::Null, |s| Value::String(s.menu_label()));
+        out.insert("undoLabel".into(), label(entry.undo.last()));
+        out.insert("redoLabel".into(), label(entry.redo.last()));
+        out.insert("author".into(), self.author.to_json());
+        let (state, problems) = self.save_state(ref_);
+        out.insert("saveState".into(), json!(state));
+        out.insert("problems".into(), json!(problems));
+        out
+    }
+
+    /// `saved`, `pending` (a save is coming), `problems` or `conflict` (autosave can't write it), and
+    /// how many problems (D1).
+    pub fn save_state(&self, ref_: &str) -> (&'static str, usize) {
+        let Some(entry) = self.entries.get(ref_) else { return ("saved", 0) };
+        match &entry.blocked {
+            Some(Blocked::Problems(n)) => ("problems", *n),
+            Some(Blocked::Conflict) => ("conflict", 0),
+            None if self.is_dirty(ref_) => ("pending", 0),
+            None => ("saved", 0),
+        }
+    }
+
+    /// Saves every doc whose last change is at least `autosave_ms` old (`force_all`: every dirty
+    /// doc now, a blocked one too). A doc with problems stays unsaved and is blocked until it
+    /// changes; one whose file changed on disk is merged, then saved; a clash blocks it and is
+    /// reported stale. Returns each doc tried, with what happened.
+    pub fn autosave(&mut self, now: f64, force_all: bool) -> Vec<Value> {
+        let wait = self.autosave_ms;
+        let due: Vec<String> = self
+            .entries
+            .values()
+            .filter(|e| {
+                let dirty = serialize(&e.doc).as_deref() != Some(e.clean.as_str());
+                dirty && (force_all || (e.blocked.is_none() && wait.is_some_and(|w| e.changed_at.is_none_or(|t| now - t >= w))))
+            })
+            .map(|e| e.ref_.clone())
+            .collect();
+        let mut out = Vec::new();
+        for ref_ in due {
+            out.push(self.save_now(&ref_));
+        }
+        out
+    }
+
+    /// A change on disk clashed with the doc's pending edits: autosave stops until it changes, and
+    /// the status says why (R7).
+    pub fn block_conflict(&mut self, ref_: &str) {
+        if let Some(e) = self.entries.get_mut(ref_) {
+            e.blocked = Some(Blocked::Conflict);
+        }
+        self.notify(ref_);
+    }
+
+    /// One autosave of a doc (D1).
+    pub fn save_now(&mut self, ref_: &str) -> Value {
+        let mut result = self.save(ref_, false);
+        if let Err(Error::Command(e)) = &result {
+            if e.code == "conflict" {
+                result = match self.merge(ref_) {
+                    Ok(_) => self.save(ref_, false),
+                    Err(err) => Err(err),
+                };
+            }
+        }
+        match result {
+            Ok(r) => json!({ "doc": ref_, "saved": true, "wrote": r.get("wrote").cloned().unwrap_or(Value::Bool(false)) }),
+            Err(err) => {
+                let (code, n) = match &err {
+                    Error::Command(e) => (e.code.clone(), e.details.as_ref().and_then(Value::as_array).map_or(1, Vec::len)),
+                    Error::Internal(_) => ("internal".to_string(), 0),
+                };
+                let blocked = if code == "invalid" { Blocked::Problems(n.max(1)) } else { Blocked::Conflict };
+                let stale = blocked == Blocked::Conflict;
+                let file = self.entries.get(ref_).map(|e| e.file.clone()).unwrap_or_default();
+                if let Some(e) = self.entries.get_mut(ref_) {
+                    e.blocked = Some(blocked);
+                }
+                self.notify(ref_);
+                if stale {
+                    if let Some(f) = self.on_stale.as_mut() {
+                        f(json!({ "doc": ref_, "file": file }));
+                    }
+                }
+                json!({ "doc": ref_, "saved": false, "code": code, "message": err.message() })
+            }
+        }
+    }
+
+    /// Tells whoever listens that a doc's status changed, and notes when, for autosave.
     fn changed(&mut self, ref_: &str) {
+        let now = (self.now)();
+        let author = self.author.clone();
+        if let Some(e) = self.entries.get_mut(ref_) {
+            if serialize(&e.doc).as_deref() != Some(e.clean.as_str()) {
+                e.changed_by = Some(author);
+            }
+            e.changed_at = Some(now);
+            e.blocked = None;
+        }
+        self.notify(ref_);
+    }
+
+    /// Sends a doc's live status to whoever listens.
+    fn notify(&mut self, ref_: &str) {
         if self.on_change.is_some() && self.entries.has(ref_) {
-            let status = Value::Object(self.status(ref_));
+            let status = Value::Object(self.live_status(ref_));
             (self.on_change.as_mut().expect("a listener"))(status);
         }
     }
@@ -646,7 +774,7 @@ impl Session {
             ]);
             return Ok(Value::Object(spread(head, self.status(ref_))));
         };
-        to.push(Step { before: stringify(&entry.doc), labels: snap.labels.clone(), seq: snap.seq });
+        to.push(Step { before: stringify(&entry.doc), labels: snap.labels.clone(), seq: snap.seq, author: snap.author.clone() });
         // A step from before the doc last matched its file: undoing it is itself a change from disk.
         if snap.seq <= entry.base_seq {
             if undo {
@@ -690,6 +818,7 @@ impl Session {
         entry.undone.clear();
         entry.last = None;
         entry.created = None;
+        entry.changed_by = None;
     }
 
     /// Replaces the working copy with the file, clearing its history, then
@@ -726,7 +855,7 @@ impl Session {
         let seq = self.seq;
         let entry = self.entries.get_mut(ref_).expect("open");
         entry.doc = doc;
-        entry.undo.push(Step { before, labels: vec![format!("Sorted {name} by depth")], seq });
+        entry.undo.push(Step { before, labels: vec![format!("Sorted {name} by depth")], seq, author: self.author.clone() });
         self.invalidate();
         self.changed(ref_);
         Ok(Some(sorted))
@@ -762,7 +891,76 @@ impl Session {
         Ok(Plan { text, disk, problems, conflict, diff })
     }
 
-    /// Saves a doc: writes its file ('direct') or a proposal ('propose').
+    /// Puts a doc's content to `data` as one undo step labelled `label`, opening it, or adding it
+    /// when it isn't in the document (history.restore and history.undo). Returns its ref.
+    pub fn set_doc(&mut self, kind: DocKind, name: &str, data: Value, label: &str) -> Result<String> {
+        let ref_ = doc_ref(kind.as_str(), name);
+        let exists = self.entries.has(&ref_) || read_source(&self.document, kind, name).exists;
+        if exists {
+            let label = label.to_string();
+            self.edit(kind, name, None, move |doc, _| {
+                *doc = data;
+                Ok(Edit::new(Map::new(), label))
+            })?;
+        } else {
+            self.create(kind, name, data, label);
+        }
+        Ok(ref_)
+    }
+
+    /// Deletes a doc's file and closes it, recording the change (history.restore and history.undo).
+    pub fn delete_doc(&mut self, kind: DocKind, name: &str, label: &str) -> Result<()> {
+        let ref_ = doc_ref(kind.as_str(), name);
+        let disk = read_source(&self.document, kind, name);
+        if disk.exists {
+            std::fs::remove_file(&disk.path)?;
+            self.record(Change { file: disk.file.clone(), before: Some(disk.text.clone()), after: None }, &[label.to_string()]);
+        }
+        self.entries.delete(&ref_);
+        self.invalidate();
+        Ok(())
+    }
+
+    /// A doc's text as the session has it now: its working copy when open, else its file (None: no file).
+    pub fn current_text(&self, kind: DocKind, name: &str) -> Option<String> {
+        let ref_ = doc_ref(kind.as_str(), name);
+        if let Some(e) = self.entries.get(&ref_) {
+            return serialize(&e.doc);
+        }
+        let disk = read_source(&self.document, kind, name);
+        disk.exists.then_some(disk.text)
+    }
+
+    /// Records a write in the version history, by this request's author. A history that can't be
+    /// written doesn't fail the save that's already on disk.
+    pub fn record(&mut self, change: Change, labels: &[String]) {
+        let author = self.author.clone();
+        self.record_as(&author, change, labels);
+    }
+
+    /// Records a write in the version history, by an author.
+    pub fn record_as(&mut self, author: &Author, change: Change, labels: &[String]) {
+        if let Err(e) = self.history.record(&[change], author, labels, (self.now)()) {
+            eprintln!("pixellab: can't record the version: {}", e.message());
+        }
+    }
+
+    /// Records a file that changed on disk without this session, unless the history already has it
+    /// as it is now (another Pixel Lab writer recorded it).
+    fn note_outside(&mut self, file: &str, before: Option<String>, disk: &Disk) {
+        let now_hash = disk.hash.clone();
+        let latest = self.history.latest().map(|n| self.history.files_at(n));
+        if latest.as_ref().and_then(|f| f.get(file)).is_some_and(|h| *h == now_hash) {
+            return;
+        }
+        let change = Change { file: file.to_string(), before, after: disk.exists.then(|| disk.text.clone()) };
+        let author = Author::of(AuthorKind::Outside);
+        if let Err(e) = self.history.record(&[change], &author, &["Changed outside Pixel Lab".to_string()], (self.now)()) {
+            eprintln!("pixellab: can't record the version: {}", e.message());
+        }
+    }
+
+    /// Saves a doc: validates it and writes its file, recording the version.
     pub fn save(&mut self, ref_: &str, force: bool) -> Result<Value> {
         let plan = self.plan(ref_)?;
         let file = self.entry(ref_)?.file.clone();
@@ -780,9 +978,6 @@ impl Session {
             .with_details(Value::from(plan.problems.clone()))
             .into());
         }
-        if self.mode == Mode::Propose {
-            return self.propose(ref_, plan);
-        }
         if let Some(conflict) = plan.conflict.filter(|_| !force) {
             let how = match conflict {
                 "changed" => "changed on disk",
@@ -799,15 +994,15 @@ impl Session {
         let wrote = plan.text != plan.disk.text || !plan.disk.exists;
         if wrote {
             write_atomic(&plan.disk.path, &plan.text)?;
+            let entry = self.entry(ref_)?;
+            let labels = edits(entry);
+            // The version is the last editor's, not whoever runs the save (the app's autosave of an agent's edit).
+            let author = entry.changed_by.clone().unwrap_or_else(|| self.author.clone());
+            let before = plan.disk.exists.then(|| plan.disk.text.clone());
+            self.record_as(&author, Change { file: file.clone(), before, after: Some(plan.text.clone()) }, &labels);
         }
         let hash = hash_text(&plan.text);
         self.match_disk(ref_, Base { exists: true, hash: Some(hash.clone()), text: plan.text.clone() }, plan.text.clone(), None);
-        {
-            let entry = self.entries.get_mut(ref_).expect("open");
-            entry.proposal = None;
-            entry.proposed = None;
-            entry.synced = None;
-        }
         self.invalidate();
         self.changed(ref_);
         let mut out = obj(vec![
@@ -820,64 +1015,6 @@ impl Session {
         ]);
         if !plan.problems.is_empty() {
             out.insert("forcedProblems".into(), Value::from(plan.problems));
-        }
-        Ok(Value::Object(spread(out, self.status(ref_))))
-    }
-
-    /// Writes (or rewrites) this doc's proposal in the state dir (`propose`).
-    fn propose(&mut self, ref_: &str, plan: Plan) -> Result<Value> {
-        let entry = self.entry(ref_)?.clone();
-        let now = (self.now)();
-        let reuse = entry.proposal.as_ref().filter(|p| self.state.has_proposal(p)).cloned();
-        let id = reuse.unwrap_or_else(|| new_proposal_id(now));
-        let summary = edits(&entry);
-        let mut proposal = obj(vec![
-            ("id", Value::String(id.clone())),
-            ("doc", Value::String(entry.ref_.clone())),
-            ("baseHash", if entry.base.exists { entry.base.hash.clone().map_or(Value::Null, Value::String) } else { Value::Null }),
-            ("source", Value::String(plan.text.clone())),
-            ("summary", Value::from(summary.clone())),
-            ("createdAt", Value::String(iso_time(now))),
-            ("agent", self.agent.clone().map_or(Value::Null, Value::String)),
-        ]);
-        if let Some(chat) = &self.chat {
-            proposal.insert("chat".into(), chat.clone());
-        }
-        let written = self.state.write_proposal(&Value::Object(proposal))?;
-        let in_app = unsaved_in_app(&self.state.dir, &self.document.root).contains(&entry.ref_);
-        let seq = self.seq;
-        {
-            let e = self.entries.get_mut(ref_).expect("open");
-            e.proposal = Some(id.clone());
-            e.proposed = Some(Proposed { id: id.clone(), text: plan.text.clone(), seq });
-            e.synced = None;
-        }
-        self.changed(ref_);
-        let number = written.get("number").and_then(Value::as_u64).filter(|n| *n > 0);
-        let mut out = obj(vec![("doc", Value::String(entry.ref_.clone())), ("proposal", Value::String(id.clone()))]);
-        if let Some(n) = number {
-            out.insert("number".into(), Value::from(n));
-        }
-        out.insert("file".into(), Value::String(self.state.proposals_dir.join(format!("{id}.json")).to_string_lossy().into_owned()));
-        out.insert("wrote".into(), Value::Bool(false));
-        let named = match number {
-            Some(n) => format!("#{n} ({id})"),
-            None => id.clone(),
-        };
-        out.insert(
-            "summary".into(),
-            Value::String(format!("Proposed {} as {named} ({} edit{})", entry.ref_, summary.len(), plural(summary.len()))),
-        );
-        out.insert("edits".into(), Value::from(summary));
-        out.insert("diff".into(), Value::String(plan.diff));
-        if in_app {
-            out.insert(
-                "warnings".into(),
-                Value::from(vec![format!(
-                    "{} has unsaved edits in Pixel Lab; approving this proposal will merge it into them, and lines both of you changed will clash. Tell the owner.",
-                    entry.ref_
-                )]),
-            );
         }
         Ok(Value::Object(spread(out, self.status(ref_))))
     }
@@ -906,7 +1043,12 @@ impl Session {
             let e = self.entries.get_mut(ref_).expect("open");
             e.doc = data;
             if changed {
-                e.undo.push(Step { before, labels: vec![format!("Reverted {ref_} to the file on disk")], seq });
+                e.undo.push(Step {
+                    before,
+                    labels: vec![format!("Reverted {ref_} to the file on disk")],
+                    seq,
+                    author: self.author.clone(),
+                });
                 if e.undo.len() > UNDO_LIMIT {
                     e.undo.remove(0);
                 }
@@ -914,11 +1056,6 @@ impl Session {
             }
         }
         self.match_disk(ref_, base_of(&disk), clean, None);
-        {
-            let e = self.entries.get_mut(ref_).expect("open");
-            e.proposal = None;
-            e.proposed = None;
-        }
         self.invalidate();
         self.changed(ref_);
         let head = obj(vec![
@@ -937,6 +1074,8 @@ impl Session {
         if !disk.exists || disk.hash == entry.base.hash || self.is_dirty(ref_) {
             return false;
         }
+        let (file, before) = (entry.file.clone(), entry.base.exists.then(|| entry.base.text.clone()));
+        self.note_outside(&file, before, &disk);
         if self.load_from_disk(ref_, &disk).is_err() {
             return false;
         }
@@ -944,7 +1083,8 @@ impl Session {
         true
     }
 
-    /// Brings every open doc in line with disk where nothing is lost (`sync`).
+    /// Brings every open doc in line with disk where nothing is lost (`sync`): a clean doc whose
+    /// file changed reloads, and a dirty one that now matches its file is clean.
     pub fn sync(&mut self) {
         let refs: Vec<String> = self.entries.keys().cloned().collect();
         for ref_ in refs {
@@ -957,53 +1097,6 @@ impl Session {
         let Some(entry) = self.entries.get(ref_).cloned() else { return Ok(()) };
         let disk = read_source(&self.document, entry.kind, &entry.name);
         let text = serialize(&entry.doc);
-        if let Some(id) = entry.proposal.clone() {
-            if self.state.has_proposal(&id) {
-                return Ok(());
-            }
-            let proposed = entry.proposed.clone();
-            let outcome = if disk.exists && proposed.as_ref().is_some_and(|p| p.text == disk.text) { "applied" } else { "rejected" };
-            {
-                let e = self.entries.get_mut(ref_).expect("open");
-                e.proposal = None;
-                e.proposed = None;
-            }
-            let canon = if disk.exists { canonical(&disk.text) } else { None };
-            let action;
-            if canon.is_some() && text == canon {
-                self.match_disk(ref_, base_of(&disk), canon.expect("checked"), None);
-                action = "clean";
-            } else if proposed.as_ref().is_some_and(|p| text.as_deref() == Some(p.text.as_str())) {
-                // Nothing since the proposal: the file is all there is to keep.
-                if disk.exists && canon.is_some() {
-                    self.load_from_disk(ref_, &disk)?;
-                    action = "reloaded";
-                } else {
-                    self.entries.delete(ref_);
-                    self.invalidate();
-                    action = "discarded";
-                }
-            } else if outcome == "applied" && canon.is_some() && proposed.is_some() {
-                // Later edits on top of the applied proposal: they stay, now over the file.
-                self.match_disk(ref_, base_of(&disk), canon.expect("checked"), Some(proposed.expect("checked").seq));
-                action = "rebased";
-            } else {
-                action = "kept";
-            }
-            let settled = json!({ "doc": ref_, "proposal": id, "outcome": outcome, "action": action });
-            if action != "discarded" {
-                self.entries.get_mut(ref_).expect("open").synced = Some(settled.clone());
-            }
-            self.settled.push(settled);
-            if self.settled.len() > 20 {
-                let extra = self.settled.len() - 20;
-                self.settled.drain(..extra);
-            }
-            if action != "discarded" {
-                self.changed(ref_);
-            }
-            return Ok(());
-        }
         if !disk.exists || !is_stale(&entry, &disk) {
             return Ok(());
         }
@@ -1022,14 +1115,6 @@ impl Session {
     /// Loads a doc from disk, but only if no unsaved work is lost (`reload`).
     pub fn reload(&mut self, ref_: &str) -> Result<Value> {
         let entry = self.entry(ref_)?.clone();
-        if let Some(p) = entry.proposal.as_ref().filter(|p| self.state.has_proposal(p)) {
-            return Err(CommandError::new(
-                format!("{ref_}'s edits are in proposal {p}, which is waiting for the owner; reloading would start over without them. Keep editing on top of it (doc.save updates the proposal), or wait until it's approved or rejected."),
-                "proposed",
-            )
-            .with_details(json!({ "proposal": p }))
-            .into());
-        }
         let disk = read_source(&self.document, entry.kind, &entry.name);
         let text = serialize(&entry.doc);
         let dirty = text.as_deref() != Some(entry.clean.as_str());
@@ -1070,12 +1155,8 @@ impl Session {
             return Ok(Value::Object(spread(head, self.status(ref_))));
         }
         let before = stringify(&entry.doc);
+        self.note_outside(&entry.file, entry.base.exists.then(|| entry.base.text.clone()), &disk);
         let sorted = self.load_from_disk(ref_, &disk)?;
-        {
-            let e = self.entries.get_mut(ref_).expect("open");
-            e.proposal = None;
-            e.proposed = None;
-        }
         self.invalidate();
         self.changed(ref_);
         let now_text = stringify(&self.entries.get(ref_).expect("open").doc);
@@ -1152,6 +1233,7 @@ impl Session {
             )
             .into());
         };
+        self.note_outside(&entry.file, entry.base.exists.then(|| entry.base.text.clone()), &disk);
         if ours == entry.clean {
             let sorted = self.load_from_disk(ref_, &disk)?;
             self.invalidate();
@@ -1282,7 +1364,12 @@ impl Session {
         {
             let e = self.entries.get_mut(ref_).expect("open");
             e.doc = data;
-            e.undo.push(Step { before, labels: vec![format!("Merged the changes to {} from disk", entry.file)], seq: keep });
+            e.undo.push(Step {
+                before,
+                labels: vec![format!("Merged the changes to {} from disk", entry.file)],
+                seq: keep,
+                author: Author::of(crate::author::AuthorKind::Outside),
+            });
             if e.undo.len() > UNDO_LIMIT {
                 e.undo.remove(0);
             }

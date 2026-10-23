@@ -560,7 +560,7 @@ fn r24_d8_over_stdio_each_command_edits_notifies_doc_changed_and_undoes() {
 }
 
 #[test]
-fn r24_d8_over_mcp_the_four_edits_are_tools_and_saving_them_is_a_proposal() {
+fn r24_d8_over_mcp_the_four_edits_are_tools_and_they_apply() {
     let doc = doc_with_dot();
     let state = temp_dir("pixellab-state-");
     let mut server = start(&["--mcp"], &doc, &state);
@@ -588,16 +588,16 @@ fn r24_d8_over_mcp_the_four_edits_are_tools_and_saving_them_is_a_proposal() {
     assert_eq!(r["structuredContent"]["changed"], false);
     let r = server.call("scene_ambient", json!({ "name": "meadow", "item": "0", "duration": 100, "keys": keys(DRIFT) }));
     assert_eq!(r["isError"], true, "{r}");
-    let saved = server.call("doc_save", json!({ "doc": "scene:meadow" }));
-    assert!(saved.get("isError").is_none(), "{saved}");
-    let id = saved["structuredContent"]["proposal"].as_str().unwrap().to_string();
-    let proposal: Value = serde_json::from_str(&fs::read_to_string(state.join("proposals").join(format!("{id}.json"))).unwrap()).unwrap();
-    assert_eq!(proposal["doc"], "scene:meadow");
-    assert_eq!(proposal["summary"], json!(["Set dot's ambient loop: 16000 ms", "Added hop to dot"]));
-    let source: Value = serde_json::from_str(proposal["source"].as_str().unwrap()).unwrap();
+    // Each edit applied and saved as the agent's (autosave spec, R16).
+    let source: Value = serde_json::from_str(&fs::read_to_string(doc.root.join("scenes/meadow.json")).unwrap()).unwrap();
+    assert_ne!(fs::read_to_string(doc.root.join("scenes/meadow.json")).unwrap(), scene_before);
     assert_eq!(source["items"][0]["ambient"]["duration"], 16000);
     assert_eq!(source["items"][0]["actions"]["hop"]["duration"], 400);
-    assert_eq!(fs::read_to_string(doc.root.join("scenes/meadow.json")).unwrap(), scene_before, "the document is untouched");
-    let saved = server.call("doc_save", json!({ "doc": "object:dot" }));
-    assert!(saved["structuredContent"]["proposal"].is_string(), "{saved}");
+    // One version: the agent's run of edits, the scene's and the object's.
+    let history = server.call("history_list", json!({ "doc": "scene:meadow" }));
+    let v = &history["structuredContent"]["versions"][0];
+    assert_eq!(v["edits"], json!(["Set dot's ambient loop: 16000 ms", "Added hop to dot", "Added hop to dot's layer 0"]));
+    assert_eq!(v["files"], json!(["scenes/meadow.json", "objects/dot.json"]));
+    let dot: Value = serde_json::from_str(&fs::read_to_string(doc.root.join("objects/dot.json")).unwrap()).unwrap();
+    assert!(dot.to_string().contains("hop"), "{dot}");
 }

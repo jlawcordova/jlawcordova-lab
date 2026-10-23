@@ -1,7 +1,7 @@
 //! The two servers as child processes (ports cli/test/servers.test.mjs):
 //! `pixellab serve --stdio` (the app's JSON-RPC session server, with its
-//! notifications) and `pixellab serve --mcp` (MCP for agents, whose saves
-//! become proposals). Every stdout line must be JSON: the reader thread
+//! notifications) and `pixellab serve --mcp` (MCP for agents, whose edits
+//! apply and save). Every stdout line must be JSON: the reader thread
 //! records anything else and the test fails on it. Every wait has a deadline,
 //! so a hang fails instead of blocking.
 
@@ -20,7 +20,6 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 use common::{make_document, make_site, temp_dir};
-use pixellab::state::create_state;
 
 const TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -266,6 +265,11 @@ fn serve_stdio_a_render_png_scale_view_box_size_and_item_bounds() {
     assert_eq!(k, ["at", "bounds", "object", "path"]);
 }
 
+/// A doc.changed's status fields, without the labels and author the app shows (autosave spec, D11).
+fn status_core(v: &Value) -> Value {
+    json!({ "doc": v["doc"], "dirty": v["dirty"], "canUndo": v["canUndo"], "canRedo": v["canRedo"] })
+}
+
 #[test]
 fn serve_stdio_place_undo_redo_save_with_doc_changed_after_each() {
     let mut f = stdio_fixture();
@@ -276,7 +280,7 @@ fn serve_stdio_place_undo_redo_save_with_doc_changed_after_each() {
     let placed = f.server.request("scene.place", json!({ "name": "sample", "object": "pebble", "at": [1, 0, 0] }));
     assert_eq!(placed["result"]["changed"], true);
     assert_eq!(
-        f.server.wait_for(since, "doc.changed", changed)["params"],
+        status_core(&f.server.wait_for(since, "doc.changed", changed)["params"]),
         json!({ "doc": "scene:sample", "dirty": true, "canUndo": true, "canRedo": false })
     );
     assert_eq!(fs::read_to_string(&file).unwrap(), disk, "nothing written before doc.save");
@@ -285,14 +289,14 @@ fn serve_stdio_place_undo_redo_save_with_doc_changed_after_each() {
     let undo = f.server.request("doc.undo", json!({ "doc": "scene:sample" }));
     assert!(str_of(&undo["result"]["summary"]).starts_with("Undid: pebble placed"), "{undo}");
     assert_eq!(
-        f.server.wait_for(since, "doc.changed", changed)["params"],
+        status_core(&f.server.wait_for(since, "doc.changed", changed)["params"]),
         json!({ "doc": "scene:sample", "dirty": false, "canUndo": false, "canRedo": true })
     );
 
     since = f.server.notifications().len();
     f.server.request("doc.redo", json!({ "doc": "scene:sample" }));
     assert_eq!(
-        f.server.wait_for(since, "doc.changed", changed)["params"],
+        status_core(&f.server.wait_for(since, "doc.changed", changed)["params"]),
         json!({ "doc": "scene:sample", "dirty": true, "canUndo": true, "canRedo": false })
     );
 
@@ -302,8 +306,11 @@ fn serve_stdio_place_undo_redo_save_with_doc_changed_after_each() {
     assert_eq!(
         summary,
         json!({
-            "doc": "scene:sample", "dirty": true, "canUndo": true, "canRedo": false, "file": "scenes/sample.json", "exists": true, "stale": false,
-            "undo": 1, "redo": [], "edits": ["pebble placed at column 1, row 0, level 0"], "unsavedInApp": false,
+            "doc": "scene:sample", "dirty": true, "canUndo": true, "canRedo": false,
+            "undoLabel": "pebble placed at column 1, row 0, level 0", "redoLabel": null, "author": { "kind": "owner" },
+            "saveState": "pending", "problems": 0,
+            "file": "scenes/sample.json", "exists": true, "stale": false,
+            "undo": 1, "redo": [], "edits": ["pebble placed at column 1, row 0, level 0"],
         })
     );
 
@@ -311,7 +318,7 @@ fn serve_stdio_place_undo_redo_save_with_doc_changed_after_each() {
     let saved = f.server.request("doc.save", json!({ "doc": "scene:sample" }));
     assert_eq!(saved["result"]["wrote"], true);
     assert_eq!(
-        f.server.wait_for(since, "doc.changed", changed)["params"],
+        status_core(&f.server.wait_for(since, "doc.changed", changed)["params"]),
         json!({ "doc": "scene:sample", "dirty": false, "canUndo": true, "canRedo": false })
     );
     // The session sorted the scene as part of the edit, so the pebble is where it stands, not last.
@@ -376,22 +383,15 @@ fn serve_stdio_files_changed_when_a_source_changes_on_disk_and_a_clean_open_doc_
 }
 
 #[test]
-fn serve_stdio_proposals_changed_and_activity_appended_when_the_state_dir_changes() {
+fn serve_stdio_history_changed_and_activity_appended_when_the_state_dir_changes() {
     let mut f = stdio_fixture();
-    // Same as the other tests: the server is up once it answers.
     f.server.request("session.info", json!({}));
     let since = f.server.notifications().len();
-    let store = create_state(&f.state);
-    let disk = fs::read_to_string(f.site.document.join("scenes/sample-preview.json")).unwrap();
-    store
-        .write_proposal(&json!({
-            "id": "20261019-120000-abcdef", "doc": "scene:sample-preview", "baseHash": null, "source": disk, "summary": ["nothing"],
-            "createdAt": pixellab::state::iso_time(pixellab::state::now_ms()), "agent": "test",
-        }))
-        .unwrap();
-    let p = f.server.wait_for(since, "proposals.changed", |m| m["method"] == "proposals.changed");
-    let ids: Vec<&Value> = p["params"]["proposals"].as_array().unwrap().iter().map(|x| &x["id"]).collect();
-    assert_eq!(ids, [&json!("20261019-120000-abcdef")]);
+    f.server.request("scene.place", json!({ "name": "sample", "object": "pebble", "at": [2, 0, 0] }));
+    f.server.request("doc.flush", json!({}));
+    let h = f.server.wait_for(since, "history.changed", |m| m["method"] == "history.changed");
+    assert_eq!(h["params"]["versions"][0]["author"], json!({ "kind": "owner" }));
+    assert_eq!(h["params"]["versions"][0]["files"], json!(["scenes/sample.json"]));
     let entry = json!({ "time": "t", "tool": "scene_list", "args": {}, "ok": true, "summary": "s" });
     let mut log = fs::OpenOptions::new().create(true).append(true).open(f.state.join("activity.jsonl")).unwrap();
     writeln!(log, "{entry}").unwrap();
@@ -400,19 +400,20 @@ fn serve_stdio_proposals_changed_and_activity_appended_when_the_state_dir_change
 }
 
 #[test]
-fn r25_d11_serve_stdio_proposal_list_does_not_list_retired_proposals() {
+fn r21_serve_stdio_sets_waiting_proposals_aside_and_the_activity_says_so() {
     let site = make_site();
     let state = temp_dir("pixellab-state-");
     let id = "20261019-112830-aaaaaa";
     fs::create_dir_all(state.join("proposals")).unwrap();
-    let old = json!({ "id": id, "doc": "scene:sample-preview", "baseHash": null, "source": "{}", "summary": [], "createdAt": "2026-10-19T11:28:30.100Z", "agent": null });
+    let old = json!({ "id": id, "format": 2, "doc": "scene:sample-preview", "baseHash": null, "source": "{}", "summary": [], "createdAt": "2026-10-19T11:28:30.100Z", "agent": null });
     fs::write(state.join("proposals").join(format!("{id}.json")), old.to_string()).unwrap();
     let mut server = start_server(&["--stdio", "--site", site.root.to_str().unwrap()], &site.env(), &state);
-    let listed = server.request("proposal.list", json!({}))["result"]["proposals"].clone();
-    assert_eq!(listed, json!([]));
-    assert!(state.join("retired-proposals").join(format!("{id}.json")).is_file());
     let activity = server.request("activity.list", json!({}));
-    assert!(activity.to_string().contains("retired 1 proposal from before the format change"), "{activity}");
+    assert!(activity.to_string().contains("retired 1 waiting proposal: edits apply now"), "{activity}");
+    assert!(state.join("retired-proposals/notice.json").is_file());
+    assert!(!state.join("proposals").exists());
+    let unknown = server.request("proposal.list", json!({}));
+    assert_eq!(unknown["error"]["data"]["code"], "not_found", "proposal commands are gone");
 }
 
 #[test]
@@ -490,8 +491,9 @@ fn serve_mcp_a_tool_that_panics_on_a_malformed_object_is_an_internal_error_and_t
     let failed = call(&mut m.server, "object_layer_add", json!({ "name": "broken" }));
     assert_eq!(failed["isError"], true, "{failed}");
     assert_eq!(failed["structuredContent"]["error"]["code"], "internal");
+    // The server still answers; the place before it applied and was saved.
     let status = call(&mut m.server, "doc_status", json!({ "doc": "scene:sample" }));
-    assert_eq!(status["structuredContent"]["dirty"], true, "{status}");
+    assert_eq!(status["structuredContent"]["dirty"], false, "{status}");
 }
 
 #[test]
@@ -500,12 +502,21 @@ fn serve_mcp_tools_list_the_commands_as_tools_with_input_schemas() {
     let tools = m.server.request("tools/list", json!({}))["result"]["tools"].clone();
     let tools = tools.as_array().unwrap();
     let names: Vec<&str> = tools.iter().map(|t| str_of(&t["name"])).collect();
-    for name in
-        ["scene_place", "scene_frame", "scene_render", "object_paint", "object_layer_add", "doc_save", "doc_undo", "proposal_list", "check"]
-    {
+    for name in [
+        "scene_place",
+        "scene_frame",
+        "scene_render",
+        "object_paint",
+        "object_layer_add",
+        "doc_save",
+        "doc_undo",
+        "history_list",
+        "history_undo",
+        "check",
+    ] {
         assert!(names.contains(&name), "{name}");
     }
-    for name in ["proposal_apply", "proposal_reject", "art_build"] {
+    for name in ["proposal_apply", "proposal_list", "art_build", "document_copy", "document_migrate"] {
         assert!(!names.contains(&name), "{name}");
     }
     for t in tools {
@@ -516,7 +527,8 @@ fn serve_mcp_tools_list_the_commands_as_tools_with_input_schemas() {
     let place = tools.iter().find(|t| t["name"] == "scene_place").unwrap();
     assert_eq!(place["inputSchema"]["required"], json!(["name", "object"]));
     assert_eq!(place["inputSchema"]["properties"]["at"]["items"], json!({ "type": "integer" }));
-    assert!(str_of(&tools.iter().find(|t| t["name"] == "doc_save").unwrap()["description"]).contains("writes a proposal"));
+    assert!(str_of(&tools.iter().find(|t| t["name"] == "doc_save").unwrap()["description"]).contains("close its version"));
+    assert!(str_of(&place["description"]).contains("The edit applies and saves when the call is done."));
 }
 
 #[test]
@@ -532,7 +544,7 @@ fn serve_mcp_tools_call_a_render_comes_back_as_an_image() {
     assert_eq!(r["structuredContent"]["scale"], 2);
 }
 
-/// Places a pebble and saves: the proposal's id.
+/// Places a pebble and saves.
 fn place_and_save(server: &mut Server) -> (Value, Value) {
     let placed = call(server, "scene_place", json!({ "name": "sample", "object": "pebble", "at": [1, 0, 0] }));
     let saved = call(server, "doc_save", json!({ "doc": "scene:sample" }));
@@ -540,31 +552,27 @@ fn place_and_save(server: &mut Server) -> (Value, Value) {
 }
 
 #[test]
-fn serve_mcp_tools_call_edit_then_doc_save_writes_a_proposal_and_leaves_the_site_alone() {
+fn r16_serve_mcp_an_edit_applies_and_saves_with_the_agent_as_its_author() {
     let mut m = mcp_initialized();
-    let (state, scene_before) = (m.state.clone(), m.scene_before.clone());
+    let state = m.state.clone();
     let (placed, saved) = place_and_save(&mut m.server);
     assert!(placed.get("isError").is_none(), "{placed}");
     assert_eq!(placed["structuredContent"]["changed"], true);
+    assert_eq!(placed["structuredContent"]["saved"], json!([{ "doc": "scene:sample", "wrote": true }]));
     assert_eq!(serde_json::from_str::<Value>(str_of(&placed["content"][0]["text"])).unwrap(), placed["structuredContent"]);
     assert!(saved.get("isError").is_none(), "{}", saved["content"][0]["text"]);
-    let proposal = str_of(&saved["structuredContent"]["proposal"]).to_string();
-    let files: Vec<String> =
-        fs::read_dir(state.join("proposals")).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
-    assert_eq!(files, [format!("{proposal}.json")]);
-    let p = read_json(&state.join("proposals").join(&files[0]));
-    // A number (#n) too (docs/intents/2026-10-agent-chat/spec.md, R24); no chat from a terminal.
-    assert_eq!(keys(&p), ["id", "number", "format", "doc", "baseHash", "source", "summary", "createdAt", "agent"]);
-    assert_eq!(p["doc"], "scene:sample");
-    assert_eq!(p["agent"], "test-agent 9.9");
-    assert_eq!(p["summary"], json!(["pebble placed at column 1, row 0, level 0"]));
-    let proposed: Value = serde_json::from_str(str_of(&p["source"])).unwrap();
-    assert_eq!(pebble_at(&proposed, json!([1, 0, 0])), Some(json!({ "object": "pebble", "at": { "tile": [1, 0, 0] } })));
-    assert_eq!(fs::read_to_string(m.site.document.join("scenes/sample.json")).unwrap(), scene_before, "the site is untouched");
+    assert_eq!(
+        pebble_at(&read_json(&m.site.document.join("scenes/sample.json")), json!([1, 0, 0])),
+        Some(json!({ "object": "pebble", "at": { "tile": [1, 0, 0] } }))
+    );
+    assert!(!state.join("proposals").exists(), "no proposal is written");
+    let history = call(&mut m.server, "history_list", json!({}))["structuredContent"].clone();
+    assert_eq!(history["versions"][0]["author"], json!({ "kind": "agent", "name": "test-agent 9.9" }));
+    assert_eq!(history["versions"][0]["edits"], json!(["pebble placed at column 1, row 0, level 0"]));
 }
 
 #[test]
-fn r19_agents_can_place_on_top_and_drop_over_mcp_as_proposals() {
+fn r19_agents_can_place_on_top_and_drop_over_mcp() {
     let mut m = mcp_initialized();
     let tools = m.server.request("tools/list", json!({}))["result"]["tools"].clone();
     let tools = tools.as_array().unwrap();
@@ -580,20 +588,18 @@ fn r19_agents_can_place_on_top_and_drop_over_mcp_as_proposals() {
     assert!(str_of(&dropped["structuredContent"]["summary"]).contains("dropped to level 0, on top of block"), "{dropped}");
     let placed = call(&mut m.server, "scene_place", json!({ "name": "sample", "object": "block", "at": [0, 0], "onTop": true }));
     assert!(placed.get("isError").is_none(), "{placed}");
-    let saved = call(&mut m.server, "doc_save", json!({ "doc": "scene:sample" }));
-    let proposal = read_json(&m.state.join("proposals").join(format!("{}.json", str_of(&saved["structuredContent"]["proposal"]))));
-    let source: Value = serde_json::from_str(str_of(&proposal["source"])).unwrap();
+    let source = read_json(&m.site.document.join("scenes/sample.json"));
     assert_eq!(pebble_at(&source, json!([0, 0, 0])).map(|p| p["object"].clone()), Some(json!("pebble")));
     let stacked =
         source["items"].as_array().unwrap().iter().filter(|i| i["object"] == "block").any(|i| i["at"]["tile"] == json!([0, 0, 1]));
     assert!(stacked, "{source}");
-    assert_eq!(fs::read_to_string(m.site.document.join("scenes/sample.json")).unwrap(), m.scene_before, "the site is untouched");
+    assert_ne!(fs::read_to_string(m.site.document.join("scenes/sample.json")).unwrap(), m.scene_before, "the edits applied");
 }
 
 fn failing_calls(server: &mut Server) -> (Value, Value, Value) {
     let failed = call(server, "scene_place", json!({ "name": "sample", "object": "no-such-object" }));
     let bad = call(server, "scene_place", json!({ "name": "sample", "object": "pebble", "at": "here" }));
-    let unknown = server.request("tools/call", json!({ "name": "proposal_apply", "arguments": {} }));
+    let unknown = server.request("tools/call", json!({ "name": "art_build", "arguments": {} }));
     (failed, bad, unknown)
 }
 
@@ -626,7 +632,7 @@ fn serve_mcp_every_tools_call_is_in_activity_jsonl() {
         ("doc_save", true),
         ("scene_place", false),
         ("scene_place", false),
-        ("proposal_apply", false),
+        ("art_build", false),
     ]
     .iter()
     .map(|(t, ok)| (t.to_string(), *ok))
@@ -648,23 +654,19 @@ fn serve_mcp_the_server_exits_when_its_input_ends() {
 }
 
 #[test]
-fn serve_mcp_direct_doc_save_writes_the_site_and_art_build_is_a_tool() {
+fn r16_serve_mcp_direct_is_accepted_and_ignored_and_publishing_stays_a_persons() {
     let mut m = mcp_fixture(true);
     let server = &mut m.server;
     initialize(server, "t", "1");
     let tools = server.request("tools/list", json!({}))["result"]["tools"].clone();
     let names: Vec<&str> = tools.as_array().unwrap().iter().map(|t| str_of(&t["name"])).collect();
-    assert!(names.contains(&"art_build"));
-    assert!(!names.contains(&"proposal_apply"));
+    assert!(!names.contains(&"art_build"));
     call(server, "scene_place", json!({ "name": "sample", "object": "pebble", "at": [1, 0, 0] }));
-    let saved = call(server, "doc_save", json!({ "doc": "scene:sample" }));
-    assert_eq!(saved["structuredContent"]["wrote"], true);
     assert_eq!(
         pebble_at(&read_json(&m.site.document.join("scenes/sample.json")), json!([1, 0, 0])),
         Some(json!({ "object": "pebble", "at": { "tile": [1, 0, 0] } }))
     );
-    let proposals: Vec<_> = fs::read_dir(m.state.join("proposals")).map(|d| d.flatten().collect()).unwrap_or_default();
-    assert!(proposals.is_empty());
+    assert!(server.stderr().contains("--direct is no longer needed"), "{}", server.stderr());
 }
 
 // ----------------------------------------------------------------- servers and disk
@@ -683,36 +685,37 @@ fn run_cli(args: &[&str], env: &HashMap<String, String>, state: &Path) -> (i32, 
 }
 
 #[test]
-fn r5_r7_the_stdio_server_sends_doc_stale_for_a_dirty_doc_whose_file_changed_and_keeps_open_pid_json() {
+fn r7_r22_the_stdio_server_owns_its_document_and_merges_a_change_on_disk_into_a_dirty_doc() {
     let doc = make_document();
     let state = temp_dir("pixellab-state-");
-    let mut server = start_server(&["--stdio", "--document", doc.root.to_str().unwrap()], &doc.env(), &state);
+    let mut env = doc.env();
+    // Long enough that the place is still pending when the file changes (autosave spec, R7).
+    env.insert("PIXELLAB_AUTOSAVE_MS".into(), "3000".into());
+    let mut server = start_server(&["--stdio", "--document", doc.root.to_str().unwrap()], &env, &state);
     let info = server.request("session.info", json!({}))["result"].clone();
-    let open_file = state.join("open").join(format!("{}.json", info["pid"]));
+    // It holds the document's lock (autosave spec, D9).
+    let holder = pixellab::owner::holder(&state, &doc.root).expect("an owner");
+    assert_eq!(holder["pid"], info["pid"]);
+    assert_eq!(holder["document"], json!(fs::canonicalize(&doc.root).unwrap().to_str().unwrap()));
+    assert_eq!(info["owner"]["pid"], info["pid"]);
     server.request("scene.place", json!({ "name": "sample", "object": "pebble", "at": [3, 3, 0] }));
-    let listed = read_json(&open_file);
-    assert_eq!(
-        [listed["pid"].clone(), listed["document"].clone(), listed["docs"].clone()],
-        [info["pid"].clone(), json!(doc.root.to_str().unwrap()), json!([{ "doc": "scene:sample", "dirty": true }])]
-    );
     let since = server.notifications().len();
     let file = doc.root.join("scenes/sample.json");
     let text = fs::read_to_string(&file).unwrap().replace("\"tile\": [0, 0, 1]", "\"tile\": [0, 0, 2]");
     assert!(text.contains("[0, 0, 2]"));
     fs::write(&file, text).unwrap();
-    let stale = server.wait_for(since, "doc.stale", |m| m["method"] == "doc.stale");
-    assert_eq!(stale["params"], json!({ "doc": "scene:sample", "file": "scenes/sample.json" }));
-    let merged = server.request("doc.merge", json!({ "doc": "scene:sample" }));
-    assert_eq!([merged["result"]["merged"].clone(), merged["result"]["dirty"].clone()], [json!(true), json!(true)]);
-    server.request("doc.close", json!({ "doc": "scene:sample", "force": true }));
-    assert_eq!(read_json(&open_file)["docs"], json!([]), "closing updates the list");
+    server.wait_for(since, "the merged doc saved", |m| m["method"] == "doc.changed" && m["params"]["saveState"] == "saved");
+    assert!(!server.notifications().iter().skip(since).any(|m| m["method"] == "doc.stale"), "a merge that works isn't stale");
+    let now = read_json(&file);
+    assert!(pebble_at(&now, json!([0, 0, 2])).is_some(), "theirs kept: {now}");
+    assert!(pebble_at(&now, json!([3, 3, 0])).is_some(), "ours kept: {now}");
     server.request("shutdown", json!({}));
     assert_eq!(server.exited(), 0);
-    assert!(!open_file.exists(), "removed when the server stops");
+    assert!(pixellab::owner::holder(&state, &doc.root).is_none(), "the document is free once the server stops");
 }
 
 #[test]
-fn r1_r3_an_mcp_session_settles_its_applied_proposal_before_the_next_call_doc_reload_and_doc_revert_annotations() {
+fn r23_an_mcp_session_follows_a_write_by_the_cli_before_the_next_call_doc_reload_and_doc_revert_annotations() {
     let doc = make_document();
     let state = temp_dir("pixellab-state-");
     let mut server = start_server(&["--mcp", "--document", doc.root.to_str().unwrap()], &doc.env(), &state);
@@ -727,18 +730,15 @@ fn r1_r3_an_mcp_session_settles_its_applied_proposal_before_the_next_call_doc_re
     assert!(tool("doc_merge").is_object());
     let structured = |server: &mut Server, name: &str, args: Value| call(server, name, args)["structuredContent"].clone();
     structured(&mut server, "scene_place", json!({ "name": "sample", "object": "pebble", "at": [3, 3, 0] }));
-    let saved = structured(&mut server, "doc_save", json!({ "doc": "scene:sample" }));
-    let applied = run_cli(&["proposal", "apply", str_of(&saved["proposal"]), "--document", doc.root.to_str().unwrap()], &doc.env(), &state);
-    assert_eq!(applied.0, 0, "{}", applied.2);
+    let placed =
+        run_cli(&["scene", "place", "sample", "pebble", "--at", "4,4,0", "--document", doc.root.to_str().unwrap()], &doc.env(), &state);
+    assert_eq!(placed.0, 0, "{}", placed.2);
     let status = structured(&mut server, "doc_status", json!({ "doc": "scene:sample" }));
-    assert_eq!(
-        [status["dirty"].clone(), status["stale"].clone(), status["synced"]["action"].clone(), status["unsavedInApp"].clone()],
-        [json!(false), json!(false), json!("clean"), json!(false)]
-    );
+    assert_eq!([status["dirty"].clone(), status["stale"].clone()], [json!(false), json!(false)]);
+    let items = structured(&mut server, "scene_items", json!({ "name": "sample" }));
+    assert!(items.to_string().contains("[4,4,0]") || items.to_string().contains("4, 4, 0"), "the CLI's pebble is there: {items}");
     assert_eq!(structured(&mut server, "doc_reload", json!({ "doc": "scene:sample" }))["reloaded"], false);
 }
-
-// ----------------------------------------------------------------- serve usage
 
 #[test]
 fn serve_usage_serve_needs_stdio_or_mcp() {

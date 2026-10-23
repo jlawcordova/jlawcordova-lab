@@ -15,7 +15,7 @@ use pixellab::document::{open_document, OpenOptions};
 use pixellab::errors::{CommandError, Error};
 use pixellab::motion_ops::{self, KeyValues, PathTiming};
 use pixellab::registry::registry;
-use pixellab::session::{Mode, Options, Session};
+use pixellab::session::{Options, Session};
 use serde_json::{json, Value};
 
 fn moving() -> Value {
@@ -439,7 +439,7 @@ impl Fx {
             cwd: self.doc.root.clone(),
         })
         .unwrap();
-        Session::new(document, Options { mode: Mode::Direct, env, agent: Some("test".into()), ..Options::default() })
+        Session::new(document, Options { env, agent: Some("test".into()), ..Options::default() })
     }
 }
 

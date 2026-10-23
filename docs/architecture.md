@@ -14,9 +14,9 @@ an agent ─────── MCP (stdio) ──────▶ server_mcp.rs �
                                                         save) and the engine (crates/engine)
 ```
 
-- **The command line** (`pixellab scene place hero-island pine --at 14,6,1`): `argv.rs` turns words and flags into a command and params from the command's schema; `cli.rs` runs it in a fresh session and saves right away (one-shot edits), or prints a diff with `--dry-run`.
-- **The app's server** (`pixellab serve --stdio`): newline-delimited JSON-RPC 2.0, method names are the command names. It holds one long-lived session, so edits are instant and stay in memory until `doc.save`. It pushes notifications: `doc.changed`, `files.changed`, `proposals.changed`, `activity.appended`.
-- **MCP** (`pixellab serve --mcp`): the same commands as MCP tools (`scene.place` → `scene_place`), hand-written on `serde_json`, with no MCP library. Its session saves to **proposals**, not the document.
+- **The command line** (`pixellab scene place hero-island pine --at 14,6,1`): `argv.rs` turns words and flags into a command and params from the command's schema; `cli.rs` runs it in a fresh session and saves right away (one-shot edits), or prints a diff with `--dry-run`. While the app owns the document, it sends the command to the app instead (below).
+- **The app's server** (`pixellab serve --stdio`): newline-delimited JSON-RPC 2.0, method names are the command names. It holds one long-lived session, so edits are instant, and it saves them itself a second after the last one (autosave). It pushes notifications: `doc.changed`, `files.changed`, `history.changed`, `activity.appended`. It owns its document, and the CLI and MCP servers send it their commands over a socket.
+- **MCP** (`pixellab serve --mcp`): the same commands as MCP tools (`scene.place` → `scene_place`), hand-written on `serde_json`, with no MCP library. An agent's edits apply: through the app while it owns the document, else saved by the MCP server after each call.
 
 All three check params with the same `check_params` (`crates/pixellab/src/params.rs`) and return the same JSON, so a command added once works everywhere. The full list of commands, the wire formats and the error codes are in the generated reference, [docs/cli.md](cli.md).
 
@@ -53,34 +53,38 @@ StageInputView (a click)                   pixellab serve --stdio
      └▶ connection.call("scene.place") ───▶ scene.place run(ctx)
                                              └▶ ctx.edit: snapshot for undo, then
                                                 scene_ops place on the working copy
-AppModel.handle(.docChanged) ◀────────────── doc.changed { dirty, canUndo, … }
+AppModel.handle(.docChanged) ◀────────────── doc.changed { dirty, canUndo, saveState, undoLabel, author, … }
  └▶ requestRender, requestCheck ──────────▶ scene.render (PNG + item bounds), check
 StageView draws the PNG, nearest-neighbor, at a whole zoom
 
-⌘S → AppModel.save ───────────────────────▶ doc.save: validate, serialize, compare the
-                                             file's hash on disk, write atomically
+a second later, the server's tick ─────────▶ autosave: validate, serialize, compare the
+                                             file's hash on disk, write atomically, and
+                                             record the version (history.rs)
+⌘S → AppModel.save ───────────────────────▶ doc.save: the same, now, and close the version
 ```
 
 The app never reads or writes the art itself. It renders what the server sends (a transparent PNG at scale 1, with each item's bounds for hit-testing) and keeps view state (selection, zoom, tool) in its model.
 
-## An agent's edit: proposals
+## An agent's edit, the CLI's, and one writer
+
+`2026-10-autosave`. While the app has a document open, its server is the only process that writes it:
 
 ```
-agent ── tools/call scene_place ──▶ serve --mcp (a session in 'propose' mode)
-agent ── tools/call doc_save ────▶ validate, then write proposals/<id>.json
-                                   { id, number, doc, baseHash, source, summary, createdAt, agent, chat? }
-                                   (nothing in the document changes)
-       every tools/call ─────────▶ a line in activity.jsonl
+serve --stdio ── File::try_lock owners/<key>.lock ─▶ held for its life; the OS lets go when it ends
+             └── binds owners/<key>.sock (0600)   ─▶ a listener thread feeds its event loop
 
-Pixel Lab's serve --stdio watches the state dir ─▶ proposals.changed, activity.appended
-  Agent window: the list, a diff (proposal.show), a ghost on the stage (proposal.render)
-  Approve → proposal.apply: the file must still hash to baseHash (else it asks),
-            validate, write; an open copy with unsaved edits gets it merged in
-  Reject  → proposal.reject: delete the proposal
+agent ── tools/call scene_place ──▶ serve --mcp ── finds the lock held (owner.rs, client.rs)
+                                         └── client.hello { kind: mcp, name, chat } ─▶ the app's server
+                                         └── scene.place ────────────────────────────▶ runs in the app's session,
+                                                                                         author: the agent
+                                    doc.changed { author: agent, undoLabel: "… (Claude)" } ─▶ the stage redraws
+                                    the app's autosave ─▶ the file, and a version by the agent
+a terminal ── pixellab scene place ─▶ the same, kind: cli; the app saves before it answers
 
-agent's next tools/call ─▶ session.sync(): its proposal is gone, so the doc is
-                           settled against the file (clean, reloaded or rebased)
+no app owns it ─▶ serve --mcp and the CLI open it themselves and save after each command
 ```
+
+A client undoes only its own latest step (`not-yours`), can't revert the app's copy, and a call cut off by the app quitting fails with `owner-gone` and isn't retried. A second `serve --stdio` on an owned document answers `owned` with the owner's app pid, and the app brings that copy forward. Every write is recorded in the document's **version history** in the state dir (`history.rs`: a version per stretch of one author's writes, blobs by hash, thinned with age), which `history.*` lists, renders, restores and undoes, and which the app's Versions panel shows.
 
 ## The Agent chat: Claude Code in the app
 
@@ -95,18 +99,17 @@ app ── claude -p --input-format stream-json --output-format stream-json --ve
     stdout: system/init, assistant text and tool_use, user tool_result, result ─▶ the transcript
 ```
 
-The child runs in `<state dir>/chats/` (so `--resume` finds the session) with no `CLAUDE*` or `ANTHROPIC_*` variables, so it uses the CLI's own login. Its `serve --mcp` is in propose mode, so its saves are proposals like any agent's, with `chat: { id, title }` and a number (`proposal-numbers.log`); its activity lines carry `agent` and `chat`. Questions are a tool, `chat_ask`, that returns at once; the app shows its `tool_use` as buttons and sends the answer as the next message. Chats are `<state dir>/chats/<id>.json`. The tests run a fake `claude` (`scripts/fake-claude/`) that does its tool calls through the real MCP server.
+The child runs in `<state dir>/chats/` (so `--resume` finds the session) with no `CLAUDE*` or `ANTHROPIC_*` variables, so it uses the CLI's own login. Its `serve --mcp` sends its edits through the app, as any agent's are, and they're versions by the agent with `chat: { id, title }`; its activity lines carry `agent` and `chat`. A turn that changed something ends with a change card in the chat: the app closes the version (`history.mark`) and lists the chat's versions since the turn began. Questions are a tool, `chat_ask`, that returns at once; the app shows its `tool_use` as buttons and sends the answer as the next message. Chats are `<state dir>/chats/<id>.json`. The tests run a fake `claude` (`scripts/fake-claude/`) that does its tool calls through the real MCP server.
 
-Agents can't approve, reject, publish or save a copy: those commands are left out of the MCP tools (`LEFT_OUT` in `crates/pixellab/src/server_mcp.rs`). `serve --mcp --direct` lets an agent write the document directly; it's off by default.
+Agents can't publish or save a copy: those commands are left out of the MCP tools (`LEFT_OUT` in `crates/pixellab/src/server_mcp.rs`). `serve --mcp --direct` is accepted and ignored.
 
 ## Keeping working copies in step with disk
 
-Two processes hold working copies of the same files: the app's `serve --stdio` and each agent's `serve --mcp`. The design is in [`2026-10-mcp-gaps/spec.md`](intents/2026-10-mcp-gaps/spec.md):
+With one writer per document there's one working copy of an open document, the app's. What remains is changes from outside Pixel Lab (git, an editor) and two MCP servers with no app (`2026-10-mcp-gaps/spec.md`, `2026-10-autosave/spec.md`, R7):
 
-- **Edits since disk.** Every undo step has a sequence number, and each open doc remembers the number when it last matched its file (`base_seq` in `session.rs`). A proposal lists only the steps after it, so a second proposal doesn't repeat the first one's edits.
-- **The MCP session settles.** The MCP server doesn't watch files; before each `tools/call` it runs `session.sync()`: a doc whose proposal is gone is marked clean, reloaded or rebased onto the file, and a clean doc whose file changed reloads. `doc.reload` does the same on request, refusing when it would drop unsaved edits.
-- **The app's server watches** (`watch.rs`, by polling the document's files and the state dir every 250 ms from the server's event loop, no extra thread). A clean open doc reloads when its file changes; a dirty one gets a `doc.stale` notification, and the app shows Merge, Reload and Keep Mine. Merge is `doc.merge`: a three-way line merge (`merge.rs`) of the file as the doc was opened, the file now and the working copy, refused when both changed the same lines. `proposal.apply` merges into a dirty open copy the same way.
-- **What the app has open.** The app's server keeps `open/<pid>.json` in the state dir (`open_docs.rs`); an MCP session's `doc.status` lists the docs there with unsaved edits as `unsavedInApp`.
+- **Edits since disk.** Every undo step has a sequence number, and each open doc remembers the number when it last matched its file (`base_seq` in `session.rs`). A version lists the steps after it.
+- **The MCP session follows the file.** With no owner, before each `tools/call` the MCP server runs `session.sync()`: a clean doc whose file changed reloads. `doc.reload` does the same on request, refusing when it would drop unsaved edits.
+- **The app's server watches** (`watch.rs`, by polling the document's files and the state dir every 250 ms from the server's event loop, no extra thread). A clean open doc reloads when its file changes (recorded as a version from outside Pixel Lab); one with a save pending gets the change merged in (`doc.merge`: a three-way line merge, `merge.rs`, of the file as the doc was opened, the file now and the working copy) and saves. When both changed the same lines, the doc is blocked and a `doc.stale` notification brings up Reload and Keep Mine.
 
 The **state dir** is `$PIXELLAB_STATE`, else `~/Library/Application Support/Pixel Lab/` (`state.rs`). Tests and the script hook always point it at a temp folder.
 

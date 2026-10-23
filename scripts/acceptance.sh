@@ -1,11 +1,11 @@
 #!/bin/zsh
 # The acceptance pass of docs/intents/2026-10-mac-app/plan.md ("What ready to use means"), end to end
 # on a temp copy of the site: scene edits → save → publish, object paint →
-# save (scripts/acceptance/scene-object.txt), then an agent over MCP saves two
-# proposals (mcp-agent.mjs, through the app bundle's program) and the Agent window
-# ghosts, approves and rejects them (agent.txt); a doc with unsaved edits changes on
-# disk and is merged, reloaded and kept, and another agent's proposal is approved into an
-# unsaved copy (stale-agent.mjs, stale.txt); the document is saved as a
+# save (scripts/acceptance/scene-object.txt), then an agent over MCP edits with no app open
+# (mcp-agent.mjs, through the app bundle's program: its edits apply, docs/intents/2026-10-autosave/) and the
+# app's Versions panel ghosts the version before the agent's and takes the agent's back (agent.txt); a change
+# on disk merges into a doc with a save pending, and a clash is reloaded and kept, and another agent's edit
+# is there as its version (stale-agent.mjs, stale.txt); the document is saved as a
 # copy, reopened and published into a folder (document.txt); and scene layers are
 # made, picked, gone inside, hidden, locked, moved, placed into and ungrouped, with
 # the hero island's SVG byte-identical before and after they're saved (layers.txt); the canvas-first window (window.txt: pinch, the floating
@@ -21,6 +21,10 @@
 # The app runs the pixellab program in its bundle (Contents/Helpers/pixellab) and reads format 2 only (docs/intents/2026-10-rust-engine/):
 # the temp site, the example copies and the unsorted document are migrated with the program before their scripts run, and
 # migrate.txt starts the app on a copy left in format 1: R9's problem, Migrate…, Cancel leaves it, Migrate converts it.
+# Autosave and versions (versions.txt) and one writer per document (owner.txt: a second copy refused, the CLI
+# and an MCP client editing through the app, then the CLI writing itself once the app quits) run on temp harbor
+# copies with a short autosave pause; every other stage runs with a long one (PIXELLAB_AUTOSAVE_MS), so its
+# edits wait for the saves it makes itself, as before autosave.
 # The real checkout is only read (copied). Exits 0 if every step passed.
 #
 #   scripts/acceptance.sh [--only <name>[,<name>...]] [out-dir]      (default: a new temp dir)
@@ -75,11 +79,15 @@ app="$root/build/Pixel Lab.app"
 
 site="$out/site" state="$out/state" shots="$out/shots"
 rm -rf "$site" "$state" "$shots" && mkdir -p "$site" "$state" "$shots"
+# Temp copies of examples/ go here (a stage run alone with --only needs it too).
+mkdir -p "$out/examples"
 cp -R "$real/src" "$real/scripts" "$real/package.json" "$real/package-lock.json" "$site/"
 [[ -d "$real/node_modules" ]] && ln -s "$real/node_modules" "$site/node_modules"
 program="$app/Contents/Helpers/pixellab"
 [[ -x $program ]] || { echo "no $program: run scripts/build-app.sh" >&2; exit 1; }
 export PIXELLAB_PROGRAM="$program"
+# The stages written before autosave save explicitly: a long pause keeps their edits waiting for those saves.
+export PIXELLAB_AUTOSAVE_MS=${PIXELLAB_AUTOSAVE_MS:-600000}
 # The program reads format 2 only: a copy of a format-1 document is migrated (in place) before the app opens it.
 migrate_doc() { # migrate_doc <doc.pixellab>: no-op when it is already format 2
   [[ -f "$1/palette.mjs" ]] && PIXELLAB_STATE="$state" "$program" document migrate --document "$1" | tail -1
@@ -119,9 +127,10 @@ run_chat() { # run_chat <script> <log> [<example>]: on the temp site, or a temp 
   grep -q 'all steps passed' "$out/$2"
 }
 
-run_example() { # run_example <script> <log> <example>: on a temp copy of examples/<example>.pixellab
-  local doc="$out/examples/$3.pixellab"
-  rm -rf "$doc" && mkdir -p "$out/examples" && cp -R "$root/examples/$3.pixellab" "$doc" && migrate_doc "$doc" > /dev/null
+run_example() { # run_example <script> <log> <example>: on a temp copy of examples/<example>.pixellab, its own per script
+  # (a folder per script, so each starts with no version history: history follows the document's path)
+  local doc="$out/examples/${1:r}/$3.pixellab"
+  rm -rf "$doc" && mkdir -p "${doc:h}" && cp -R "$root/examples/$3.pixellab" "$doc" && migrate_doc "$doc" > /dev/null
   sed "s#@OUT@#$shots#g" "$root/scripts/acceptance/$1" > "$out/$1"
   PIXELLAB_SCRIPT="$out/$1" PIXELLAB_DOC="$doc" PIXELLAB_STATE="$state" "$app/Contents/MacOS/PixelLab" 2>&1 | grep '^script:' > "$out/$2" || true
   tail -1 "$out/$2"
@@ -137,25 +146,25 @@ if stage scene-object; then
   git -C "$site" add -A && git -C "$site" -c user.email=t@t -c user.name=t commit -qm "after scene-object"
 fi
 if stage mcp-agent; then
-  echo "==> an agent over MCP proposes"
+  echo "==> an agent over MCP edits, with no app open"
   node "$root/scripts/acceptance/mcp-agent.mjs" "$site" "$state"
 fi
 if stage agent; then
-  echo "==> the Agent window: ghost, approve, reject"
+  echo "==> the Agent window and the Versions panel: the agent's version ghosted and taken back"
   run agent.txt agent.log
 fi
 if stage stale-agent; then
-  echo "==> a doc changed on disk under unsaved edits: merge, reload, keep; an approve merged in"
+  echo "==> a change on disk merged into a pending save; a clash reloaded and kept; an agent's version"
   node "$root/scripts/acceptance/stale-agent.mjs" "$site" "$state"
 fi
 if stage stale; then
-  (( ${ran[(Ie)stale-agent]} )) || echo "==> a doc changed on disk under unsaved edits: merge, reload, keep; an approve merged in"
+  (( ${ran[(Ie)stale-agent]} )) || echo "==> a change on disk merged into a pending save; a clash reloaded and kept; an agent's version"
   run stale.txt stale.log
 fi
 if stage chat; then
-  echo "==> the Agent chat on the site: a chat's proposal ghosted, approved and rejected from its card; the Agent window"
+  echo "==> the Agent chat on the site: a chat's edits applied, a change card undone, Show in Versions; the Agent window"
   run_chat chat.txt chat.log
-  grep -q 'closeup-front-trees' <(git -C "$site" diff --stat) || { echo "approving the chat's proposal didn't change closeup-front-trees" >&2; exit 1; }
+  grep -q 'closeup-front-trees' <(git -C "$site" diff --stat) || { echo "the chat's edits didn't change closeup-front-trees" >&2; exit 1; }
   git -C "$site" add -A && git -C "$site" -c user.email=t@t -c user.name=t commit -qm "after chat"
 fi
 if stage document; then
@@ -203,6 +212,25 @@ if stage actions; then
   cmp -s "$shots/actions-mid-play-light.png" "$shots/actions-rest-light.png" && { echo "the boat looks the same mid-hop as at rest" >&2; exit 1; }
   echo "the hop played: mid-play differs from the rest frame"
 fi
+if stage versions; then
+  echo "==> autosave and versions: edits save themselves, Save starts a version, the panel ghosts, undoes and restores"
+  saved_pause=$PIXELLAB_AUTOSAVE_MS; export PIXELLAB_AUTOSAVE_MS=100
+  run_example versions.txt versions.log harbor
+  export PIXELLAB_AUTOSAVE_MS=$saved_pause
+  for shot in versions-dark versions-light versions-problems-dark; do [[ -s "$shots/$shot.png" ]] || { echo "versions.txt didn't snapshot $shot" >&2; exit 1; }; done
+fi
+if stage owner; then
+  echo "==> one writer: the app owns the document; the CLI and an MCP client edit through it; once it quits, the CLI writes"
+  saved_pause=$PIXELLAB_AUTOSAVE_MS; export PIXELLAB_AUTOSAVE_MS=100
+  run_example owner.txt owner.log harbor
+  export PIXELLAB_AUTOSAVE_MS=$saved_pause
+  doc="$out/examples/owner/harbor.pixellab"
+  wrote=$(PIXELLAB_STATE="$state" "$program" scene place harbor pine --at 4,4,0 --document "$doc")
+  grep -q 'wrote scenes/harbor.json' <<< "$wrote" || { echo "with the app closed the CLI didn't write the file: $wrote" >&2; exit 1; }
+  newest=$(PIXELLAB_STATE="$state" "$program" history list --limit 1 --json --document "$doc")
+  grep -q '"kind": "cli"' <<< "$newest" || { echo "the CLI's write isn't its version: $newest" >&2; exit 1; }
+  echo "the CLI wrote the file itself once the app quit, as its own version"
+fi
 if stage chat-setup; then
   echo "==> the Agent chat: Claude Code's setup (the fake), chats, steps, a question, Stop"
   claude_home="$out/claude-home" chat_state="$out/chat-state"
@@ -214,8 +242,9 @@ if stage chat-setup; then
     PIXELLAB_SCRIPT="$out/chat-setup.txt" PIXELLAB_DOC="$doc" PIXELLAB_STATE="$chat_state" "$app/Contents/MacOS/PixelLab" -rightTab inspector 2>&1 | grep '^script:' > "$out/chat-setup.log" || true
   tail -1 "$out/chat-setup.log"
   grep -q 'all steps passed' "$out/chat-setup.log"
-  proposal=$(ls "$chat_state"/proposals/*.json | head -1)
-  grep -q '"chat": {' "$proposal" && grep -q '"number": 1' "$proposal" || { echo "the chat's proposal doesn't name its chat and number" >&2; exit 1; }
+  # The chat's edits are versions by the agent in that chat (autosave spec, D8).
+  grep -q '"chat":{"id"' "$chat_state"/history/*/versions.jsonl || { echo "the chat's versions don't name their chat" >&2; exit 1; }
+  [[ ! -d "$chat_state/proposals" ]] || { echo "a proposal was written" >&2; exit 1; }
   grep -q '"chat":{"id"' "$chat_state/activity.jsonl" || { echo "no chat lines in the activity log" >&2; exit 1; }
   [[ $(ls "$chat_state"/chats/*.json | wc -l | tr -d ' ') == 2 ]] || { echo "expected 2 chats in the state dir" >&2; exit 1; }
   [[ -z $(find "$doc" -name '*.json' ! -name manifest.json ! -name palette.json ! -path "$doc/scenes/*" ! -path "$doc/objects/*") ]] || { echo "chat state went into the document" >&2; exit 1; }
@@ -223,10 +252,10 @@ if stage chat-setup; then
   sessions=("$claude_home"/.local/share/claude/fake/fake-claude-state/sessions/*.json)
   [[ ${#sessions[@]} == 2 ]] || { echo "expected 2 Claude sessions for 2 chats, found ${#sessions[@]}: follow-ups didn't resume (R3)" >&2; exit 1; }
   grep -q '"turns":4' "${sessions[@]}" || { echo "the first chat's four turns weren't one resumed session (R3)" >&2; exit 1; }
-  echo "the chat's proposals name their chat and number; 2 chats kept in the state dir, none in the document; one Claude session per chat"
+  echo "the chat's versions name their chat; 2 chats kept in the state dir, none in the document; one Claude session per chat"
 fi
 if stage chat-harbor; then
-  echo "==> the Agent chat on the harbor example: layers as chips, Option-click, pins, unsaved items, a question, ghosts per chat"
+  echo "==> the Agent chat on the harbor example: layers as chips, Option-click, pins, unsaved items, a question, cards per chat"
   run_chat chat-harbor.txt chat-harbor.log harbor
 fi
 relaunch_doc="$out/examples/relaunch.pixellab" relaunch_state="$out/state-relaunch" relaunch_fake="$out/fake-relaunch"
@@ -238,14 +267,14 @@ relaunch() { # relaunch <part>
   grep -q 'all steps passed' "$out/chat-relaunch-$1.log"
 }
 if stage chat-relaunch-1; then
-  echo "==> the Agent chat across launches: the session resumed, a proposal settled while closed, a lost session"
+  echo "==> the Agent chat across launches: the session resumed, a version undone while closed, a lost session"
   rm -rf "$relaunch_doc" "$relaunch_state" "$relaunch_fake" && cp -R "$root/examples/harbor.pixellab" "$relaunch_doc" && migrate_doc "$relaunch_doc" > /dev/null && mkdir -p "$relaunch_state"
   relaunch 1
 fi
 if stage chat-relaunch-2; then
-  # Pixel Lab is closed: the chat's proposal is rejected from a terminal.
-  proposal=$(basename "$(ls "$relaunch_state"/proposals/*.json | head -1)" .json)
-  PIXELLAB_STATE="$relaunch_state" "$program" proposal reject "$proposal" --document "$relaunch_doc"
+  # Pixel Lab is closed: the chat's version is taken back from a terminal.
+  newest=$(PIXELLAB_STATE="$relaunch_state" "$program" history list --limit 1 --json --document "$relaunch_doc" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).versions[0].number))')
+  PIXELLAB_STATE="$relaunch_state" "$program" history undo "$newest" --document "$relaunch_doc"
   relaunch 2
 fi
 if stage chat-relaunch-3; then

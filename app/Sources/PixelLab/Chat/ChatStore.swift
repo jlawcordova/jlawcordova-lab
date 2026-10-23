@@ -25,8 +25,9 @@ struct Chat: Codable, Identifiable, Hashable, Sendable {
     }
 
     /// The proposals made in it that wait for the owner.
-    func waiting(in pending: Set<String>) -> Int {
-        messages.filter { $0.kind == .proposal && $0.outcome == nil && pending.contains($0.proposal ?? "") }.count
+    /// The change cards still standing (not undone).
+    var changeCount: Int {
+        messages.filter { $0.kind == .change && $0.outcome == nil }.count
     }
 }
 
@@ -41,7 +42,8 @@ struct ChatPin: Codable, Hashable, Sendable {
 }
 
 struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
-    enum Kind: String, Codable, Sendable { case user, claude, step, question, proposal, note }
+    /// `proposal` is a card from before edits applied (kept, never made now); `change` is what a turn changed.
+    enum Kind: String, Codable, Sendable { case user, claude, step, question, proposal, change, note }
 
     var id: String
     var time: Date
@@ -65,13 +67,17 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     var options: [String]?
     var chosen: String?
 
-    // A proposal card.
+    // A proposal card (from before edits applied) or a change card.
     var proposal: String?
     var number: Int?
     var doc: String?
     var edits: [String]?
-    /// `applied`, `rejected`, or `elsewhere` once it's no longer waiting.
+    /// A proposal: `applied`, `rejected`, or `elsewhere` once it's no longer waiting. A change: `undone`.
     var outcome: String?
+    /// A change card: the versions the turn made, oldest first (docs/intents/2026-10-autosave/spec.md, R18).
+    var versions: [Int]?
+    /// A change card: the docs the turn changed ("scene:harbor").
+    var docs: [String]?
 
     init(kind: Kind, text: String? = nil, time: Date = Date()) {
         id = UUID().uuidString

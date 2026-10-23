@@ -1,27 +1,22 @@
-//! The state dir: proposals, the activity log and proposal numbers (ports cli/lib/state.mjs).
-//!
-//! The state dir is where MCP saves become proposals and every MCP tool call
-//! is logged, for the app's Agent window to show. `PIXELLAB_STATE` overrides
-//! the default, `~/Library/Application Support/Pixel Lab/`.
+//! The state dir (ports cli/lib/state.mjs): Pixel Lab's own files, never the document's.
+//! `PIXELLAB_STATE` overrides the default, `~/Library/Application Support/Pixel Lab/`.
 //!
 //! ```text
-//! proposals/<id>.json   { id, number, format, doc, baseHash, source, summary, createdAt, agent, chat? }
-//! retired-proposals/    proposals from before format 2, moved here when the state dir is opened (R25, D11)
-//! proposal-numbers.log  one proposal id per line, appended when a proposal is first written
-//! activity.jsonl        one { time, tool, args, ok, summary, agent?, chat? } per line
+//! activity.jsonl        one { time, tool, args, ok, summary, agent?, chat? } per MCP tool call
+//! history/<key>/        a document's version history (history.rs)
+//! owners/<key>.lock     the app's server that owns a document, and its socket (owner.rs)
+//! retired-proposals/    proposals left from before edits applied, set aside with a notice (R21)
 //! ```
-//!
-//! A proposal is a JSON object (`serde_json::Value`), as in the Node CLI.
 
 use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
-use engine::format::{stringify, stringify_pretty};
+use engine::format::stringify;
 use serde_json::{Map, Value};
 
-use crate::errors::{CommandError, Error, Result};
+use crate::errors::Result;
 
 // ------------------------------------------------------------ time and ids
 
@@ -163,28 +158,6 @@ pub fn parse_iso_time(text: &str) -> Option<f64> {
     Some((days * 86_400_000 + h * 3_600_000 + mi * 60_000 + s * 1000 + ms - offset * 60_000) as f64)
 }
 
-/// The proposal format this program writes (`"format": 2`). A proposal file without it is retired.
-pub const PROPOSAL_FORMAT: u64 = 2;
-
-const ID_LEN: usize = 22;
-
-/// `ID`: `/^[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$/`.
-fn is_proposal_id(id: &str) -> bool {
-    let b = id.as_bytes();
-    b.len() == ID_LEN
-        && b.iter().enumerate().all(|(i, c)| match i {
-            8 | 15 => *c == b'-',
-            0..=14 => c.is_ascii_digit(),
-            _ => c.is_ascii_digit() || (b'a'..=b'f').contains(c),
-        })
-}
-
-/// A sortable, file-safe proposal id: `20261019-142301-a1b2c3` (UTC).
-pub fn new_proposal_id(now_ms: f64) -> String {
-    let stamp: String = iso_time(now_ms).replace(['-', ':'], "").replacen('T', "-", 1).chars().take(15).collect();
-    format!("{stamp}-{}", random_hex(3))
-}
-
 // ----------------------------------------------------------------- paths
 
 /// `path.resolve(p)`: absolute against the working directory, `.` and `..` folded.
@@ -203,6 +176,17 @@ fn resolve(p: &str) -> PathBuf {
         }
     }
     out
+}
+
+/// `path.resolve`: an absolute path, `.` and `..` folded, without touching the disk.
+pub fn resolve_path(path: &Path) -> PathBuf {
+    resolve(&path.to_string_lossy())
+}
+
+/// A document's path as every process names it: its real path when it exists (symlinks and
+/// `/private` folded), else `path.resolve`. History and owner keys hash it.
+pub fn real_path(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| resolve(&path.to_string_lossy()))
 }
 
 /// The state dir for an environment.
@@ -235,13 +219,11 @@ fn append(path: &Path, text: &str) -> Result<()> {
 
 // ----------------------------------------------------------------- state
 
-/// Proposals and activity in one state dir (`createState`).
+/// The activity log in one state dir (`createState`).
 #[derive(Clone, Debug)]
 pub struct State {
     pub dir: PathBuf,
-    pub proposals_dir: PathBuf,
     pub activity_file: PathBuf,
-    pub numbers_file: PathBuf,
 }
 
 /// `createState(dir)`.
@@ -249,178 +231,61 @@ pub fn create_state(dir: impl Into<PathBuf>) -> State {
     State::new(dir)
 }
 
-fn js_string(v: Option<&Value>) -> String {
-    match v {
-        None => "undefined".into(),
-        Some(Value::String(s)) => s.clone(),
-        Some(other) => stringify(other),
-    }
-}
-
 impl State {
-    /// Opens a state dir, first retiring any proposal from before format 2 (R25, D11).
+    /// Opens a state dir, first setting aside any proposal left from before edits applied (R21).
     pub fn new(dir: impl Into<PathBuf>) -> State {
         let dir = dir.into();
-        let state = State {
-            proposals_dir: dir.join("proposals"),
-            activity_file: dir.join("activity.jsonl"),
-            numbers_file: dir.join("proposal-numbers.log"),
-            dir,
-        };
-        state.retire_old_proposals();
+        let state = State { activity_file: dir.join("activity.jsonl"), dir };
+        state.retire_proposals();
         state
     }
 
-    /// Moves every proposal file without `"format": 2` to `retired-proposals/<id>.json` and logs one
-    /// activity line. Nothing is logged when there is nothing to retire. The numbers log, the
-    /// activity log and everything else in the dir are left alone.
-    fn retire_old_proposals(&self) {
-        let Ok(entries) = fs::read_dir(&self.proposals_dir) else {
-            return;
-        };
-        let old: Vec<String> = entries
+    /// Moves every file in `proposals/` to `retired-proposals/<date>/`, writes
+    /// `retired-proposals/notice.json` ({ count, dir, at }) for the Agent window to show once, and
+    /// logs one activity line (docs/intents/2026-10-autosave/spec.md, R21, D6). Nothing is
+    /// deleted, and nothing happens when there's nothing to retire.
+    fn retire_proposals(&self) {
+        let from = self.dir.join("proposals");
+        let Ok(entries) = fs::read_dir(&from) else { return };
+        let files: Vec<String> = entries
             .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
             .filter_map(|e| e.file_name().into_string().ok())
-            .filter(|f| f.ends_with(".json") && is_proposal_id(&f[..f.len() - 5]))
-            .filter(|f| {
-                let current = fs::read(self.proposals_dir.join(f))
-                    .ok()
-                    .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-                    .is_some_and(|v| v.get("format").and_then(Value::as_u64) == Some(PROPOSAL_FORMAT));
-                !current
-            })
+            .filter(|f| f.ends_with(".json"))
             .collect();
-        let retired_dir = self.dir.join("retired-proposals");
+        if files.is_empty() {
+            let _ = fs::remove_dir(&from);
+            return;
+        }
+        let now = now_ms();
+        let day: String = iso_time(now).chars().take(10).collect();
+        let to = self.dir.join("retired-proposals").join(&day);
         let mut moved = 0;
-        for f in old {
-            if fs::create_dir_all(&retired_dir).is_ok() && fs::rename(self.proposals_dir.join(&f), retired_dir.join(&f)).is_ok() {
+        for f in &files {
+            if fs::create_dir_all(&to).is_ok() && fs::rename(from.join(f), to.join(f)).is_ok() {
                 moved += 1;
             }
         }
-        if moved > 0 {
-            let summary = format!("retired {moved} proposal{} from before the format change", if moved == 1 { "" } else { "s" });
-            let mut entry = Map::new();
-            entry.insert("time".into(), Value::String(iso_time(now_ms())));
-            entry.insert("tool".into(), Value::String("proposal_retire".into()));
-            entry.insert("args".into(), Value::Object(Map::new()));
-            entry.insert("ok".into(), Value::Bool(true));
-            entry.insert("summary".into(), Value::String(summary));
-            let _ = self.append_activity(&Value::Object(entry));
+        let _ = fs::remove_dir(&from);
+        if moved == 0 {
+            return;
         }
-    }
-
-    /// The ids in proposal-numbers.log, in order (line n is proposal #n).
-    fn numbered(&self) -> Vec<String> {
-        match fs::read(&self.numbers_file) {
-            Ok(bytes) => String::from_utf8_lossy(&bytes).split('\n').filter(|l| !l.trim().is_empty()).map(String::from).collect(),
-            Err(_) => Vec::new(),
-        }
-    }
-
-    /// A proposal's number (#n), or `None` if it was never numbered.
-    pub fn number_of(&self, id: &str) -> Option<u64> {
-        self.numbered().iter().position(|l| l == id).map(|i| i as u64 + 1)
-    }
-
-    fn proposal_file(&self, id: &str) -> Result<PathBuf> {
-        if !is_proposal_id(id) {
-            return Err(CommandError::not_found(format!(
-                "no proposal {id}; ids look like 20261019-142301-a1b2c3 (pixellab proposal list)"
-            ))
-            .into());
-        }
-        Ok(self.proposals_dir.join(format!("{id}.json")))
-    }
-
-    /// Writes a proposal. The first time an id is written it gets the next
-    /// number: its id is appended to proposal-numbers.log (an append is
-    /// atomic, so two servers proposing at once each get their own line) and
-    /// the number is its line. A rewritten proposal keeps its number.
-    pub fn write_proposal(&self, proposal: &Value) -> Result<Value> {
-        let id = js_string(proposal.get("id"));
-        let file = self.proposal_file(&id)?;
-        let given = proposal.get("number").filter(|n| !n.is_null()).and_then(engine::jsnum::as_f64);
-        let mut number = match (proposal.get("number"), given) {
-            (Some(n), None) if !n.is_null() => Some(f64::NAN),
-            (_, Some(n)) => Some(n),
-            _ => self.number_of(&id).map(|n| n as f64),
-        };
-        if number.is_none() {
-            fs::create_dir_all(&self.proposals_dir)?;
-            append(&self.numbers_file, &format!("{id}\n"))?;
-            number = self.number_of(&id).map(|n| n as f64);
-        }
-        let mut out = Map::new();
-        out.insert("id".into(), Value::String(id));
-        if let Some(n) = number.filter(|n| *n != 0.0 && !n.is_nan()) {
-            out.insert("number".into(), engine::jsnum::num(n));
-        }
-        out.insert("format".into(), Value::from(PROPOSAL_FORMAT));
-        if let Some(map) = proposal.as_object() {
-            for (k, v) in map {
-                if k == "format" {
-                    continue;
-                }
-                out.insert(k.clone(), v.clone());
-            }
-        }
-        let out = Value::Object(out);
-        write_atomic(&file, &format!("{}\n", stringify_pretty(&out)))?;
-        Ok(out)
-    }
-
-    /// Reads one proposal.
-    pub fn read_proposal(&self, id: &str) -> Result<Value> {
-        let file = self.proposal_file(id)?;
-        let text = fs::read(&file).map(|b| String::from_utf8_lossy(&b).into_owned());
-        let Ok(text) = text else {
-            return Err(CommandError::not_found(format!("no proposal {id} (pixellab proposal list)")).into());
-        };
-        serde_json::from_str::<Value>(&text)
-            .map_err(|e| Error::Command(CommandError::new(format!("proposal {id} is not valid JSON: {e}"), "bad_proposal")))
-    }
-
-    pub fn has_proposal(&self, id: &str) -> bool {
-        match self.proposal_file(id) {
-            Ok(file) => fs::metadata(file).is_ok(),
-            Err(_) => false,
-        }
-    }
-
-    /// Every proposal, oldest first. Unreadable files are skipped.
-    pub fn list_proposals(&self) -> Vec<Value> {
-        let Ok(entries) = fs::read_dir(&self.proposals_dir) else {
-            return Vec::new();
-        };
-        let mut names: Vec<String> = entries
-            .filter_map(|e| e.ok())
-            .filter_map(|e| e.file_name().into_string().ok())
-            .filter(|f| f.ends_with(".json") && is_proposal_id(&f[..f.len() - 5]))
-            .collect();
-        names.sort();
-        let mut out: Vec<Value> = Vec::new();
-        for f in names {
-            // a half-written or hand-edited file: not listed
-            if let Ok(bytes) = fs::read(self.proposals_dir.join(&f)) {
-                if let Ok(v) = serde_json::from_str::<Value>(&String::from_utf8_lossy(&bytes)) {
-                    out.push(v);
-                }
-            }
-        }
-        // Ids sort by second only (two saves in one second get random suffixes): order by createdAt (ms), then id.
-        let at = |p: &Value| p.get("createdAt").and_then(Value::as_str).and_then(parse_iso_time).unwrap_or(0.0);
-        let id = |p: &Value| p.get("id").and_then(Value::as_str).map(String::from);
-        out.sort_by(|a, b| at(a).partial_cmp(&at(b)).unwrap_or(std::cmp::Ordering::Equal).then_with(|| id(a).cmp(&id(b))));
-        out
-    }
-
-    pub fn remove_proposal(&self, id: &str) -> Result<()> {
-        let file = self.proposal_file(id)?;
-        if fs::metadata(&file).is_err() {
-            return Err(CommandError::not_found(format!("no proposal {id} (pixellab proposal list)")).into());
-        }
-        let _ = fs::remove_file(&file);
-        Ok(())
+        let notice_file = self.dir.join("retired-proposals").join("notice.json");
+        let earlier = fs::read(&notice_file)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .and_then(|v| v.get("count").and_then(Value::as_u64))
+            .unwrap_or(0);
+        let notice = serde_json::json!({ "count": earlier + moved, "dir": to.to_string_lossy(), "at": iso_time(now) });
+        let _ = write_atomic(&notice_file, &stringify(&notice));
+        let summary = format!("retired {moved} waiting proposal{}: edits apply now", if moved == 1 { "" } else { "s" });
+        let mut entry = Map::new();
+        entry.insert("time".into(), Value::String(iso_time(now)));
+        entry.insert("tool".into(), Value::String("proposal_retire".into()));
+        entry.insert("args".into(), Value::Object(Map::new()));
+        entry.insert("ok".into(), Value::Bool(true));
+        entry.insert("summary".into(), Value::String(summary));
+        let _ = self.append_activity(&Value::Object(entry));
     }
 
     /// Appends one activity entry.

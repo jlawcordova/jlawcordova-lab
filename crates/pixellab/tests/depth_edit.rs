@@ -16,12 +16,13 @@ use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 use engine::engine::{composite, is_in_depth_order, render_scene, CompositeOptions, Order};
+use pixellab::author::Author;
 use pixellab::cli::{main, Io};
 use pixellab::context::Ctx;
 use pixellab::document::{open_document, OpenOptions};
 use pixellab::errors::Error;
 use pixellab::registry::registry;
-use pixellab::session::{Mode, Options, Session};
+use pixellab::session::{Options, Session};
 use serde_json::{json, Value};
 
 // Four blocks side by side, listed back to front, and a pebble nothing overlaps.
@@ -102,7 +103,7 @@ impl Lab {
         env
     }
 
-    fn session(&self, mode: Mode, agent: Option<&str>) -> Session {
+    fn session(&self, agent: Option<&str>) -> Session {
         let env = self.env();
         let document = open_document(&OpenOptions {
             doc: Some(self.doc.root.to_string_lossy().into_owned()),
@@ -111,15 +112,19 @@ impl Lab {
             cwd: self.doc.root.clone(),
         })
         .unwrap();
-        Session::new(document, Options { mode, env, agent: agent.map(String::from), ..Options::default() })
+        let mut s = Session::new(document, Options { env, agent: agent.map(String::from), ..Options::default() });
+        if agent.is_some() {
+            s.author = Author::agent(agent.map(String::from), None);
+        }
+        s
     }
 
     fn owner(&self) -> Session {
-        self.session(Mode::Direct, None)
+        self.session(None)
     }
 
     fn agent(&self) -> Session {
-        self.session(Mode::Propose, Some("test"))
+        self.session(Some("test"))
     }
 
     fn file(&self, name: &str) -> PathBuf {
@@ -459,23 +464,24 @@ fn r4_a_sorted_file_reloads_as_it_is_with_no_extra_step() {
 }
 
 #[test]
-fn r4_a_proposal_approved_into_a_copy_with_unsaved_edits_merges_and_leaves_it_sorted() {
+fn r4_an_agents_edit_saved_under_the_owners_unsaved_one_merges_and_leaves_it_sorted() {
     let lab = Lab::new();
     let mut a = lab.agent();
     let mut o = lab.owner();
-    // The owner has an unsaved edit; the agent proposes a different one, and the owner approves it.
+    // The owner has an unsaved edit; the agent's edit applies and is saved; the owner's copy takes it.
     ok(call(&mut o, "scene.move", json!({ "item": "c", "by": [0, -2] })));
     a.sync();
     ok(call(&mut a, "scene.place", json!({ "object": "block", "at": [-1, -1, 0], "id": "e" })));
-    let proposed = ok(run(&mut a, "doc.save", json!({ "doc": "scene:stand" })));
-    let applied = ok(run(&mut o, "proposal.apply", json!({ "id": proposed["proposal"] })));
-    assert_eq!(applied["merged"], true);
+    ok(run(&mut a, "doc.save", json!({ "doc": "scene:stand" })));
+    let merged = ok(run(&mut o, "doc.merge", json!({ "doc": "scene:stand" })));
+    assert_eq!(merged["merged"], true);
     assert!(in_order(&mut o));
     let list = order(&mut o);
     let at = |id: &str| list.iter().position(|x| x == id).unwrap();
-    assert!(at("e") < at("a"), "the proposed block stands behind a");
+    assert!(at("e") < at("a"), "the agent's block stands behind a");
+    ok(run(&mut o, "doc.save", json!({ "doc": "scene:stand" })));
     let text = lab.text("stand");
-    assert!(text.find("\"id\": \"e\"").unwrap() < text.find("\"id\": \"a\"").unwrap(), "and the file the proposal wrote lists it so");
+    assert!(text.find("\"id\": \"e\"").unwrap() < text.find("\"id\": \"a\"").unwrap(), "and the file lists it so");
     let doc: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(doc["items"].as_array().unwrap().len(), 6);
 }
@@ -812,7 +818,7 @@ fn r13_through_serve_stdio_what_the_app_uses() {
 }
 
 #[test]
-fn r13_through_mcp_the_tools_exist_raise_and_lower_do_not_and_an_edit_becomes_a_proposal() {
+fn r13_through_mcp_the_tools_exist_raise_and_lower_do_not_and_an_edit_applies() {
     let lab = Lab::new();
     let mut server = Server::start(&lab, "--mcp");
     let init = server.request(
@@ -835,18 +841,13 @@ fn r13_through_mcp_the_tools_exist_raise_and_lower_do_not_and_an_edit_becomes_a_
     let sorted = tool("scene_sort", json!({ "name": "tangled" }));
     assert!(sorted.get("isError").is_none(), "{sorted}");
     assert_eq!(sorted["structuredContent"]["moved"].as_array().unwrap().len(), 1);
-    let before = lab.text("tangled");
-    let saved = tool("doc_save", json!({ "doc": "scene:tangled" }));
-    assert!(saved.get("isError").is_none(), "{saved}");
-    assert_eq!(lab.text("tangled"), before, "the document is untouched until the owner approves");
-    let file = lab.state.join("proposals").join(format!("{}.json", saved["structuredContent"]["proposal"].as_str().unwrap()));
-    let p: Value = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
-    assert_eq!(p["summary"], json!(["Sorted tangled by depth: 1 item moved"]));
-    let source = p["source"].as_str().unwrap();
+    // The sort applied and was saved, with the agent as its author (autosave spec, R16).
+    assert_eq!(sorted["structuredContent"]["saved"][0]["doc"], "scene:tangled", "{sorted}");
+    let source = lab.text("tangled");
     let d_line = source.find("\"id\": \"d\"").unwrap();
     let after = &source[d_line..];
     let next = &after[after.find('\n').unwrap() + 1..];
-    assert!(next.starts_with("    { \"object\": \"pebble\""), "the proposal lists d after c, before the pebble: {source}");
+    assert!(next.starts_with("    { \"object\": \"pebble\""), "the file lists d after c, before the pebble: {source}");
     let footprint = tool("object_footprint", json!({ "name": "pebble", "to": [2, 1] }));
     assert_eq!(footprint["structuredContent"]["footprint"], json!([2, 1]));
     let depth = tool("scene_set", json!({ "name": "stand", "item": "a", "depth": "back" }));

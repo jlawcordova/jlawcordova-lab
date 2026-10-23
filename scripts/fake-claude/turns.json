@@ -16,7 +16,7 @@
       { "tool": "object_show", "input": { "name": "{{first}}" } },
       { "tool": "object_resize", "input": { "name": "{{first}}", "height": "{{object_show.size.1+4}}" } },
       { "tool": "doc_save", "input": { "doc": "object:{{first}}" } },
-      { "say": "Made {{first}} 4 px taller, so all {{uses}} uses change, since they share the object. It's proposal {{proposal}}." }
+      { "say": "Made {{first}} 4 px taller, so all {{uses}} uses change, since they share the object. It's saved; the card below takes it back." }
     ]
   },
   {
@@ -25,7 +25,7 @@
       { "tool": "scene_items", "input": { "name": "{{scene}}" } },
       { "tool": "scene_move", "each": "items", "input": { "name": "{{scene}}", "item": "{{item}}", "by": [0, 0, 1] } },
       { "tool": "doc_save", "input": { "doc": "scene:{{scene}}" } },
-      { "say": "Raised {{names}} a level, so they stand taller than the rest. It's proposal {{proposal}}, so the document hasn't changed yet." }
+      { "say": "Raised {{names}} a level, so they stand taller than the rest. It's saved; the card below takes it back." }
     ]
   },
   {
@@ -45,7 +45,7 @@
       { "tool": "scene_move", "each": "items", "input": { "name": "{{scene}}", "item": "{{item}}", "by": [0, 0, 1] } },
       { "tool": "scene_render", "input": { "name": "{{scene}}", "scale": 1 } },
       { "tool": "doc_save", "input": { "doc": "scene:{{scene}}" } },
-      { "say": "Raised {{names}} one level. It's proposal {{proposal}}: the gold shapes on the stage show where they'd go." }
+      { "say": "Raised {{names}} one level. You can see them on the stage now." }
     ]
   },
   {
@@ -56,7 +56,7 @@
       { "tool": "scene_move", "each": "items", "input": { "name": "{{scene}}", "item": "{{item}}", "by": [1, 0] } },
       { "tool": "scene_render", "input": { "name": "{{scene}}", "scale": 1 } },
       { "tool": "doc_save", "input": { "doc": "scene:{{scene}}" } },
-      { "say": "Moved {{names}} one tile down-right. Nothing new overlaps. It's proposal {{proposal}}, so the document hasn't changed yet." }
+      { "say": "Moved {{names}} one tile down-right. Nothing new overlaps. It's saved; the card below takes it back." }
     ]
   },
   {

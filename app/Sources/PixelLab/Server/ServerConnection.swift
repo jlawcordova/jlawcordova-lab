@@ -115,6 +115,8 @@ actor ServerConnection {
         p.arguments = ["serve", "--stdio"] + launch.location.arguments
         var env = ProcessInfo.processInfo.environment
         for (k, v) in launch.environment { env[k] = v }
+        // A second copy of the app opening this document brings this one forward (docs/intents/2026-10-autosave/spec.md, R26).
+        env["PIXELLAB_APP_PID"] = String(ProcessInfo.processInfo.processIdentifier)
         p.environment = env
         p.currentDirectoryURL = URL(fileURLWithPath: Locator.path(of: launch.location), isDirectory: true)
 
@@ -253,7 +255,7 @@ actor ServerConnection {
             else { note = .other(method: method, params: params) }
         case "files.changed":
             note = .filesChanged((params["files"]?.arrayValue ?? []).compactMap(\.stringValue))
-        case "proposals.changed": note = .proposalsChanged(params["proposals"] ?? .null)
+        case "history.changed": note = .historyChanged(params["versions"] ?? .null)
         case "activity.appended": note = .activityAppended(params["entries"] ?? .null)
         default: note = .other(method: method, params: params)
         }

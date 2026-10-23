@@ -3,6 +3,8 @@
 //! copies the real site checkout.
 #![allow(dead_code)]
 
+pub mod server;
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -1,7 +1,7 @@
 //! The Agent chat's CLI side (ports cli/test/chat.test.mjs;
 //! docs/intents/2026-10-agent-chat/spec.md): the selection block
-//! (chat.context, D5), questions (chat.ask, D8), and proposals and activity
-//! that know where they came from (D7). Everything runs on temp copies of
+//! (chat.context, D5), questions (chat.ask, D8), and versions and activity
+//! that know where they came from (D7; docs/intents/2026-10-autosave/spec.md, D8). Everything runs on temp copies of
 //! examples/harbor.pixellab (format 2), copied once per run.
 
 #![allow(clippy::result_large_err)]
@@ -129,7 +129,7 @@ fn mcp(h: &Harbor, env_extra: &[(&str, &str)], requests: &[(&str, Value)]) -> Ve
     let sink = Arc::new(Mutex::new(Vec::new()));
     let reg = registry();
     let document = open(&h.root, &env);
-    pixellab::server_mcp::start(document, env, &reg, false, Box::new(Cursor::new(input.into_bytes())), Box::new(Sink(sink.clone())));
+    pixellab::server_mcp::start(document, env, &reg, Box::new(Cursor::new(input.into_bytes())), Box::new(Sink(sink.clone())));
     let text = String::from_utf8(sink.lock().unwrap().clone()).unwrap();
     text.lines().map(|l| serde_json::from_str::<Value>(l).unwrap()["result"].clone()).collect()
 }
@@ -346,98 +346,30 @@ fn r23_over_mcp_with_pixellab_chat_chat_ask_and_chat_context_are_tools_the_quest
     assert_eq!(last["chat"], json!({ "id": "chat-7", "title": "Forest by the house" }));
 }
 
-// --- proposals and activity know where they came from (R24) ---
+// --- versions and activity know where they came from (R24; autosave spec, D8) ---
 
 #[test]
-fn r24_a_chats_proposal_records_the_chat_and_a_number_the_activity_lines_record_the_agent_and_the_chat() {
+fn r24_a_chats_edit_is_a_version_by_the_agent_in_that_chat_and_the_activity_lines_record_the_agent_and_the_chat() {
     let mut h = harbor();
     let out = mcp(
         &h,
         &[("PIXELLAB_CHAT", "chat-1"), ("PIXELLAB_CHAT_TITLE", "Move the pines")],
-        &[
-            init(),
-            ("tools/call", json!({ "name": "scene_move", "arguments": { "name": "harbor", "item": "14.0", "by": [1, 0] } })),
-            ("tools/call", json!({ "name": "doc_save", "arguments": { "doc": "scene:harbor" } })),
-        ],
+        &[init(), ("tools/call", json!({ "name": "scene_move", "arguments": { "name": "harbor", "item": "14.0", "by": [1, 0] } }))],
     );
     assert!(out[1].get("isError").is_none(), "{}", out[1]);
-    let saved = out[2]["structuredContent"].clone();
-    assert_eq!(saved["number"], 1);
-    let summary = saved["summary"].as_str().unwrap();
-    let pre = "Proposed scene:harbor as #1 (";
-    assert!(summary.starts_with(pre) && summary.ends_with(") (1 edit)"), "{summary}");
-    let id = saved["proposal"].as_str().unwrap().to_string();
-    assert_eq!(&summary[pre.len()..summary.len() - ") (1 edit)".len()], id);
-    let p: Value = serde_json::from_str(&std::fs::read_to_string(h.state.join("proposals").join(format!("{id}.json"))).unwrap()).unwrap();
-    assert_eq!(p["number"], 1);
-    assert_eq!(p["chat"], json!({ "id": "chat-1", "title": "Move the pines" }));
-    assert_eq!(p["agent"], "claude-code 2.1.290");
-    let listed = h.ok("proposal.list", json!({}))["proposals"][0].clone();
-    assert_eq!(listed["number"], 1);
-    assert_eq!(listed["chat"], json!({ "id": "chat-1", "title": "Move the pines" }));
-    let shown = h.ok("proposal.show", json!({ "id": id }));
-    assert_eq!(shown["number"], 1);
-    assert_eq!(shown["chat"], listed["chat"]);
+    assert_eq!(out[1]["structuredContent"]["saved"][0]["doc"], "scene:harbor", "the edit applied and saved");
+    let history = h.ok("history.list", json!({}));
+    let v = &history["versions"][0];
+    assert_eq!(
+        v["author"],
+        json!({ "kind": "agent", "name": "claude-code 2.1.290", "chat": { "id": "chat-1", "title": "Move the pines" } })
+    );
+    assert_eq!(v["files"], json!(["scenes/harbor.json"]));
     for line in activity(&h) {
         assert_eq!(line["agent"], "claude-code 2.1.290");
         assert_eq!(line["chat"], json!({ "id": "chat-1", "title": "Move the pines" }));
     }
     let root = h.root.to_str().unwrap().to_string();
-    let r = run_cli(&h, &["proposal", "list", "--document", &root]);
-    let want_tail = "  scene:harbor  chat \"Move the pines\"  1 edit";
-    assert!(
-        r.1.lines().any(|l| {
-            l.strip_prefix("#1  ").is_some_and(|rest| {
-                let (pid, tail) = rest.split_at(rest.find("  ").unwrap_or(0));
-                pid == id && tail == want_tail
-            })
-        }),
-        "{}",
-        r.1
-    );
-}
-
-#[test]
-fn r24_numbers_count_up_a_rewrite_keeps_its_number_and_servers_proposing_at_once_get_their_own() {
-    let dir = common::temp_dir("pixellab-chat-numbers-");
-    let state = Arc::new(pixellab::state::create_state(dir.clone()));
-    let base = |id: &str| json!({ "id": id, "doc": "scene:a", "baseHash": null, "source": "", "summary": [], "createdAt": "2026-10-21T00:00:00.000Z", "agent": null });
-    let ids: Vec<String> = (0..8).map(|i| format!("20261021-000000-00000{i}")).collect();
-    let threads: Vec<_> = ids
-        .iter()
-        .map(|id| {
-            let (dir, p) = (dir.clone(), base(id));
-            std::thread::spawn(move || pixellab::state::create_state(dir).write_proposal(&p).unwrap())
-        })
-        .collect();
-    let written: Vec<Value> = threads.into_iter().map(|t| t.join().unwrap()).collect();
-    let mut numbers: Vec<u64> = written.iter().map(|p| p["number"].as_u64().unwrap()).collect();
-    numbers.sort();
-    assert_eq!(numbers, [1, 2, 3, 4, 5, 6, 7, 8], "eight at once, eight numbers");
-    let mut rewrite = base(&ids[3]);
-    rewrite["summary"] = json!(["rewritten"]);
-    let again = state.write_proposal(&rewrite).unwrap();
-    assert_eq!(again["number"], written[3]["number"]);
-    let next = state.write_proposal(&base("20261021-000001-aaaaaa")).unwrap();
-    assert_eq!(next["number"], 9);
-    assert_eq!(std::fs::read_to_string(dir.join("proposal-numbers.log")).unwrap().trim().split('\n').count(), 9);
-    assert_eq!(std::fs::read_dir(dir.join("proposals")).unwrap().count(), 9, "numbers.log is beside the proposals, not among them");
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn r24_an_older_proposal_without_a_number_or_a_chat_still_lists_shows_and_is_rejected() {
-    let mut h = harbor();
-    std::fs::create_dir_all(h.state.join("proposals")).unwrap();
-    let id = "20261019-120000-abcdef";
-    let source = std::fs::read_to_string(h.root.join("scenes/harbor.json")).unwrap();
-    let old = json!({ "id": id, "doc": "scene:harbor", "baseHash": null, "source": source, "summary": ["old"], "createdAt": "2026-10-19T12:00:00.000Z", "agent": "old-agent" });
-    std::fs::write(h.state.join("proposals").join(format!("{id}.json")), engine::format::stringify(&old)).unwrap();
-    let listed = h.ok("proposal.list", json!({}))["proposals"].clone();
-    assert_eq!(listed.as_array().unwrap().len(), 1);
-    assert!(listed[0].get("number").is_none());
-    assert!(listed[0].get("chat").is_none());
-    assert_eq!(h.ok("proposal.show", json!({ "id": id }))["agent"], "old-agent");
-    h.ok("proposal.reject", json!({ "id": id }));
-    assert_eq!(h.ok("proposal.list", json!({}))["proposals"], json!([]));
+    let r = run_cli(&h, &["history", "list", "--document", &root]);
+    assert!(r.1.lines().next().is_some_and(|l| l.starts_with("#1  ") && l.contains("Claude")), "{}", r.1);
 }

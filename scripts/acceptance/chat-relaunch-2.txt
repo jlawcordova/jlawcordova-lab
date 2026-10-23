@@ -1,14 +1,13 @@
-# Part 2 of 3: relaunched. The chat is still there with its session (R3); its proposal was rejected
-# while Pixel Lab was closed, so the card says Settled elsewhere, and its buttons say so (R16).
+# Part 2 of 3: relaunched. The chat is still there with its session (R3), and its change card still knows its
+# version: the CLI took it back while Pixel Lab was closed, and Undo These Changes on the card finds nothing left to undo.
 open scene:harbor
 righttab agent
 expect setup ready
 expect chats 1
 expect chattitle What is this
-expect proposals 0
-expect cardstatus Settled elsewhere
-card approve
-expect lastnote #1 isn't waiting any more: it was approved or rejected outside Pixel Lab.
+expect cardstatus Applied
+card undo
+expect cardstatus Undone
 chat remember
 select 51
 chat send What is this

@@ -1,0 +1,60 @@
+# Autosave and the Versions panel (docs/intents/2026-10-autosave/spec.md, R1–R6, R9, R12–R14), on a temp
+# harbor copy with a short autosave pause (PIXELLAB_AUTOSAVE_MS=100): edits save themselves, ⌘S starts a
+# version, the panel lists them and ghosts one, and Undo These Changes and Restore go back as one step each.
+appearance dark
+open scene:harbor
+expect subtitle Saved
+select 14.0
+move 1 0
+wait saved
+expect subtitle Saved
+save
+move 0 1
+wait saved
+# R6: undo works across autosaves
+undo
+wait saved
+redo
+wait saved
+versions open
+expect versions 3
+expect version newest author owner
+expect version 1 edits pine moved
+version select 1
+expect ghost on
+expect ghostchanges 1
+snapshot @OUT@/versions-dark.png
+appearance light
+snapshot @OUT@/versions-light.png
+appearance dark
+# R13: Undo These Changes takes back one version, keeping the rest
+version select newest
+version undo
+expect versionresult Undid version 2
+expect version newest author restore
+# Restore puts the whole document back, after asking; it is one undo step
+version select 0
+version answer yes
+version restore
+expect versionresult Restored to version 0
+undo
+wait saved
+versions close
+# Revert To › Last Opened
+revertto lastopened
+wait saved
+# R2: autosave never writes a doc with problems, and says so without an alert
+outside scenes/harbor.json items.0.items.0.object "no-such-object"
+select 51
+move 1 0
+expect savestate problems
+expect subtitle Not saved: 1 problem
+snapshot @OUT@/versions-problems-dark.png
+appearance light
+snapshot @OUT@/versions-problems-light.png
+appearance dark
+undo
+select 0.0
+remove
+wait saved
+expect savestate saved

@@ -1,35 +1,36 @@
-# Acceptance 5: Window > Agent, proposals as ghosts, approve and reject
+# Acceptance 5 (docs/intents/2026-10-autosave/spec.md, R12–R16, R19): an agent's edits applied with no app
+# open (mcp-agent.mjs); the app opens on them, the Agent window shows the activity, and the Versions panel
+# shows the agent's version, ghosts the one before it, and takes the agent's version back.
 appearance dark
 open scene:hero-island
 menus
-expect proposals 2
-expect badge 2
 expect activity 10
+# after a1-4 placed one pine: 281 + the agent's 2, applied
+expect items 283
 agent open
-proposal select 1
-expect proposal scene:hero-island
-expect base matches
+snapshot agent @OUT@/a5-agent-dark.png
+agent close
+versions open
+# The agent's doc_save closed each version: the trees, then the house's pixels
+expect version newest author agent
+expect version newest files objects/house.json
+# the agent's trees, then the owner's last version before them
+version select next
+version select next
 expect ghost on
 expect ghostchanges 2
-# the ghost follows the timeline
-time 9400
-expect ghosttime 9400
-time 0
-expect ghosttime 0
-snapshot agent @OUT@/a5-agent-dark.png
 snapshot @OUT@/a5-ghost-dark.png
-approve
-expect proposals 1
-expect badge 1
-expect dirty false
-# after a1-4 placed one pine: 281 + the 2 proposed
+appearance light
+snapshot @OUT@/a5-ghost-light.png
+appearance dark
+# Undo These Changes on the agent's trees
+version select prev
+version undo
+expect versionresult Undid version
+expect items 281
+expect version newest author restore
+undo
 expect items 283
-proposal select 1
-expect proposal object:house
-proposal open
-expect doc object:house
-expect ghost on
-answer proceed
-reject
-expect proposals 0
-expect badge none
+redo
+expect items 281
+versions close

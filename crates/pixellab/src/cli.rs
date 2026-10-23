@@ -202,75 +202,139 @@ fn run(argv: &[String], io: &mut Io) -> Result<i32, Error> {
         env: io.env.clone(),
         cwd: io.cwd.clone(),
     })?;
-    let mut session = Session::new(document, Options { env: io.env.clone(), ..Options::default() });
-    let mut result = {
-        let mut ctx = Ctx::new(&mut session);
-        registry.call(&mut ctx, command.name, Value::Object(checked.clone()), false)?
-    };
     let mut notes: Vec<String> = Vec::new();
-    if command.mutates && !command.writes_direct {
-        let touched = session.dirty_refs();
-        let mut files: Vec<String> = Vec::new();
-        for r in &touched {
-            files.push(session.entry(r)?.file.clone());
-        }
-        let extra = if dry_run {
-            let mut plans: Vec<Value> = Vec::new();
-            for (r, file) in touched.iter().zip(&files) {
-                let plan = session.plan(r)?;
-                plans.push(json!({
-                    "doc": r,
-                    "file": file,
-                    "diff": plan.diff,
-                    "problems": plan.problems,
-                    "conflict": plan.conflict,
-                }));
-                notes.push(plan.diff.trim_end().to_string());
-                if !plan.problems.is_empty() {
-                    let n = plan.problems.len();
-                    notes.push(format!("{file} has {n} problem{}; saving it would be refused (--force writes anyway):", plural(n)));
-                    notes.extend(plan.problems.iter().cloned());
-                }
-                if plan.conflict.is_some() {
-                    notes.push(format!("{file} changed on disk; saving would be refused as a conflict"));
-                }
+    // While Pixel Lab has the document open, the command runs there (docs/intents/2026-10-autosave/spec.md, D10).
+    let state_dir = crate::state::state_dir(&io.env);
+    let mut through: Option<Value> = None;
+    if let Some(found) = crate::client::Owner::connect(&state_dir, &document.root, json!({ "kind": "cli" })) {
+        let mut owner = found?;
+        let edit = command.mutates && !command.writes_direct;
+        if dry_run || !owner.accepted {
+            // Reads and dry runs see the files once Pixel Lab has saved; edits need the same protocol (R28).
+            if edit && !dry_run {
+                return Err(owner.version_error());
             }
-            notes.push(if touched.is_empty() {
-                "dry run: nothing would change".to_string()
-            } else {
-                format!("dry run: nothing written ({} would change)", files.join(", "))
-            });
-            ("dryRun", Value::Array(plans))
+            let _ = owner.call("doc.flush", json!({}));
         } else {
-            let mut saved: Vec<Value> = Vec::new();
-            for r in &touched {
-                let saved_one = session.save(r, force)?;
-                let get = |k: &str| saved_one.get(k).cloned().unwrap_or(Value::Null);
-                let file = js_str(saved_one.get("file"));
-                let wrote = saved_one.get("wrote").and_then(Value::as_bool).unwrap_or(false);
-                let mut entry = Map::new();
-                entry.insert("doc".into(), get("doc"));
-                entry.insert("file".into(), get("file"));
-                entry.insert("wrote".into(), get("wrote"));
-                entry.insert("hash".into(), get("hash"));
-                notes.push(if wrote { format!("wrote {file}") } else { format!("{file} unchanged") });
-                if let Some(forced) = saved_one.get("forcedProblems").and_then(Value::as_array) {
-                    entry.insert("forcedProblems".into(), Value::Array(forced.clone()));
-                    notes.push(format!("(forced: {} problem{} written)", forced.len(), plural(forced.len())));
+            let gone = |f| crate::client::failure(f, &command_words(command.name));
+            let mut result = owner.call(command.name, Value::Object(checked.clone())).map_err(gone)?;
+            if edit {
+                let doc = result.get("doc").and_then(Value::as_str).map(str::to_string);
+                let saved = if force {
+                    let target = doc.clone().map_or(json!({}), |d| json!({ "doc": d, "force": true }));
+                    owner.call(if doc.is_some() { "doc.save" } else { "doc.flush" }, target).map_err(gone)?
+                } else {
+                    owner.call("doc.flush", doc.clone().map_or(json!({}), |d| json!({ "doc": d }))).map_err(gone)?
+                };
+                let docs: Vec<Value> = match saved.get("docs").and_then(Value::as_array) {
+                    Some(list) => list.clone(),
+                    None => vec![
+                        json!({ "doc": saved["doc"], "saveState": if saved["dirty"] == json!(false) { "saved" } else { "pending" }, "problems": 0 }),
+                    ],
+                };
+                let mut listed = Vec::new();
+                for d in docs {
+                    let r = js_str(d.get("doc"));
+                    let file = r
+                        .split_once(':')
+                        .and_then(|(k, n)| crate::context::DocKind::parse(k).map(|k| crate::context::doc_file(k, n)))
+                        .unwrap_or(r.clone());
+                    match d["saveState"].as_str() {
+                        Some("saved") => notes.push(format!("saved by Pixel Lab: {file}")),
+                        Some("problems") => notes.push(format!(
+                            "Pixel Lab can't save {file} yet: {} problem{}",
+                            js_str(d.get("problems")),
+                            plural(d["problems"].as_u64().unwrap_or(0) as usize)
+                        )),
+                        Some("conflict") => notes.push(format!("Pixel Lab can't save {file}: it changed on disk and clashes")),
+                        _ => notes.push(format!("Pixel Lab will save {file}")),
+                    }
+                    listed.push(json!({ "doc": r, "file": file, "saveState": d["saveState"] }));
                 }
-                saved.push(Value::Object(entry));
+                if let Value::Object(map) = result {
+                    let mut add = Map::new();
+                    add.insert("saved".into(), Value::Array(listed));
+                    result = Value::Object(spread(map, add));
+                }
             }
-            if touched.is_empty() {
-                notes.push("nothing written".into());
-            }
-            ("saved", Value::Array(saved))
-        };
-        if let Value::Object(map) = result {
-            let mut add = Map::new();
-            add.insert(extra.0.into(), extra.1);
-            result = Value::Object(spread(map, add));
+            through = Some(result);
         }
     }
+    let result = match through {
+        Some(r) => r,
+        None => {
+            let mut session = Session::new(document, Options { env: io.env.clone(), ..Options::default() });
+            session.author = crate::author::Author::cli();
+            let mut result = {
+                let mut ctx = Ctx::new(&mut session);
+                registry.call(&mut ctx, command.name, Value::Object(checked.clone()), false)?
+            };
+            if command.mutates && !command.writes_direct {
+                let touched = session.dirty_refs();
+                let mut files: Vec<String> = Vec::new();
+                for r in &touched {
+                    files.push(session.entry(r)?.file.clone());
+                }
+                let extra = if dry_run {
+                    let mut plans: Vec<Value> = Vec::new();
+                    for (r, file) in touched.iter().zip(&files) {
+                        let plan = session.plan(r)?;
+                        plans.push(json!({
+                            "doc": r,
+                            "file": file,
+                            "diff": plan.diff,
+                            "problems": plan.problems,
+                            "conflict": plan.conflict,
+                        }));
+                        notes.push(plan.diff.trim_end().to_string());
+                        if !plan.problems.is_empty() {
+                            let n = plan.problems.len();
+                            notes.push(format!("{file} has {n} problem{}; saving it would be refused (--force writes anyway):", plural(n)));
+                            notes.extend(plan.problems.iter().cloned());
+                        }
+                        if plan.conflict.is_some() {
+                            notes.push(format!("{file} changed on disk; saving would be refused as a conflict"));
+                        }
+                    }
+                    notes.push(if touched.is_empty() {
+                        "dry run: nothing would change".to_string()
+                    } else {
+                        format!("dry run: nothing written ({} would change)", files.join(", "))
+                    });
+                    ("dryRun", Value::Array(plans))
+                } else {
+                    let mut saved: Vec<Value> = Vec::new();
+                    for r in &touched {
+                        let saved_one = session.save(r, force)?;
+                        let get = |k: &str| saved_one.get(k).cloned().unwrap_or(Value::Null);
+                        let file = js_str(saved_one.get("file"));
+                        let wrote = saved_one.get("wrote").and_then(Value::as_bool).unwrap_or(false);
+                        let mut entry = Map::new();
+                        entry.insert("doc".into(), get("doc"));
+                        entry.insert("file".into(), get("file"));
+                        entry.insert("wrote".into(), get("wrote"));
+                        entry.insert("hash".into(), get("hash"));
+                        notes.push(if wrote { format!("wrote {file}") } else { format!("{file} unchanged") });
+                        if let Some(forced) = saved_one.get("forcedProblems").and_then(Value::as_array) {
+                            entry.insert("forcedProblems".into(), Value::Array(forced.clone()));
+                            notes.push(format!("(forced: {} problem{} written)", forced.len(), plural(forced.len())));
+                        }
+                        saved.push(Value::Object(entry));
+                    }
+                    if touched.is_empty() {
+                        notes.push("nothing written".into());
+                    }
+                    ("saved", Value::Array(saved))
+                };
+                if let Value::Object(map) = result {
+                    let mut add = Map::new();
+                    add.insert(extra.0.into(), extra.1);
+                    result = Value::Object(spread(map, add));
+                }
+            }
+            result
+        }
+    };
     let mut wrote: Option<String> = None;
     if let Some(out) = &globals.out {
         let file = resolve_path(&io.cwd, out);

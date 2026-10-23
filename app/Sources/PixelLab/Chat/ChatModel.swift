@@ -54,7 +54,10 @@ final class ChatModel {
 
     struct Running: Equatable {
         var chatID: String
-        var proposals = 0
+        /// How many of the turn's tool calls changed the document (R18).
+        var edits = 0
+        /// The newest version before the turn: its change card lists the chat's versions after it.
+        var startVersion: Int?
         var started = false
         var stopped = false
         var authFailed = false
@@ -63,8 +66,6 @@ final class ChatModel {
         var stderr: [String] = []
         var text: String
         var block: String
-        /// Proposal cards wait for Claude's next words, so the card follows the reply about it (as in the prototype).
-        var cards: [ChatMessage] = []
     }
 
     var running: Running?
@@ -111,7 +112,6 @@ final class ChatModel {
 
     func loadChats() {
         chats = store.load()
-        defer { if let agent = app?.agent, agent.listed { proposalsListed(agent.proposals.map(\.id)) } }
         draftChat = nil
         if let first = documentChats.first { currentID = first.id } else { newChat() }
         showingList = false
@@ -358,10 +358,9 @@ final class ChatModel {
         chatSwitched()
     }
 
-    /// Ghosts show only for the chat you're in (D7): another chat's ghost goes when you switch.
+    /// Another chat, or the list: the input forgets the context it fetched for the last one.
     func chatSwitched() {
-        guard let agent = app?.agent, let p = agent.selected, let from = p.chat else { return }
-        if showingList || from.id != currentID { agent.setGhostShown(false) }
+        contextKey = nil
     }
 
     /// Changes a chat (the draft or a saved one) and saves it; a draft with a message becomes a saved chat.
@@ -417,6 +416,8 @@ final class ChatModel {
         sending = true
         defer { sending = false }
         if override == nil { draft = "" }
+        // What's sent is what's saved (R1): Claude reads the files, through Pixel Lab's tools.
+        await app?.flush()
         let context = await messageContext()
         var m = ChatMessage(kind: .user, text: text)
         m.chips = context.chips
@@ -568,7 +569,7 @@ final class ChatModel {
         do {
             let p = try LineProcess(executable: install.url, arguments: args, environment: env, directory: cwd, input: ClaudeTurn.input(block: block, text: text))
             turn = p
-            running = Running(chatID: chatID, retried: retried, text: text, block: block)
+            running = Running(chatID: chatID, startVersion: app.versions.versions.first?.number, retried: retried, text: text, block: block)
             Task {
                 for await o in p.output { handle(o) }
             }
@@ -616,7 +617,6 @@ final class ChatModel {
                 stop()
             }
         case .text(let t):
-            defer { flushCards() }
             update(id) { c in
                 if let last = c.messages.last, last.kind == .claude, last.time.timeIntervalSinceNow > -600, c.messages.last?.id == lastClaudeID {
                     c.messages[c.messages.count - 1].text = (last.text ?? "") + "\n\n" + t
@@ -647,7 +647,7 @@ final class ChatModel {
             m.raw = StepText.raw(tool: tool, input: input, result: nil)
             append(m, to: id)
         case .toolResult(let toolID, let ok, let text):
-            var proposal: ChatMessage?
+            var edited = false
             update(id) { c in
                 guard let i = c.messages.lastIndex(where: { $0.toolID == toolID }) else { return }
                 if c.messages[i].kind == .question {
@@ -662,11 +662,10 @@ final class ChatModel {
                 m.human = StepText.human(tool: tool, input: m.input ?? [:], result: text, ok: ok, objectAt: objectAt)
                 m.raw = StepText.raw(tool: tool, input: m.input ?? [:], result: text)
                 c.messages[i] = m
-                if ok, tool == "doc_save", let p = Self.proposal(from: text) { proposal = p }
+                if ok, Self.edited(text) { edited = true }
             }
-            if let p = proposal {
-                r.cards.append(p)
-                r.proposals += 1
+            if edited {
+                r.edits += 1
                 running = r
             }
         case .authFailed(let text):
@@ -684,156 +683,83 @@ final class ChatModel {
 
     @ObservationIgnored private var lastClaudeID: String?
 
-    /// The turn's proposal cards that wait, after the words that came.
-    private func flushCards() {
-        guard var r = running, !r.cards.isEmpty else { return }
-        let cards = r.cards
-        r.cards = []
-        running = r
-        lastClaudeID = nil
-        for p in cards {
-            append(p, to: r.chatID)
-            proposalMade(p, chatID: r.chatID)
-        }
+    /// Whether a tool's result says it changed the document: an edit that changed something, or a
+    /// restore or undo of a version that wrote it.
+    nonisolated static func edited(_ text: String) -> Bool {
+        guard let data = text.data(using: .utf8), let r = try? JSONDecoder().decode(JSONValue.self, from: data) else { return false }
+        if r["changed"] == .bool(true) { return true }
+        if let saved = r["saved"]?.arrayValue, !saved.isEmpty { return true }
+        if let written = r["written"]?.arrayValue, !written.isEmpty { return true }
+        return false
     }
 
-    /// A `doc_save` result that made a proposal, as a card.
-    nonisolated static func proposal(from text: String) -> ChatMessage? {
-        guard let data = text.data(using: .utf8), let r = try? JSONDecoder().decode(JSONValue.self, from: data), let id = r["proposal"]?.stringValue else { return nil }
-        let edits = r["edits"]?.arrayValue?.compactMap(\.stringValue) ?? []
-        let doc = r["doc"]?.stringValue
-        let name = doc.flatMap { DocRef(id: $0)?.name } ?? "the document"
-        // The one edit, else how many: "pine moved to column 4, row 0…", "2 edits to harbor".
-        let title = edits.count == 1 ? edits[0].prefix(1).uppercased() + edits[0].dropFirst() : "\(edits.count) edits to \(name)"
-        var m = ChatMessage(kind: .proposal, text: title)
-        m.proposal = id
-        m.number = r["number"]?.doubleValue.map { Int($0) }
-        m.doc = doc
+    /// The end of a turn that edited: its version closes (`history.mark`), and a change card lists
+    /// what the chat's versions since the turn began changed (R18).
+    func makeChangeCard(chatID: String, after start: Int?) async {
+        guard let app, let connection = app.connection else { return }
+        // The turn's edits are saved first, so they're in its version.
+        await app.flush()
+        _ = try? await connection.call("history.mark", [:])
+        await app.versions.load()
+        let mine = app.versions.versions.filter { v in
+            v.number > (start ?? -1) && v.author.kind == "agent" && v.author.chat?.id == chatID
+        }.sorted { $0.number < $1.number }
+        guard !mine.isEmpty else { return }
+        let edits = mine.flatMap(\.edits)
+        let docs = Array(Set(mine.flatMap { $0.refs.map(\.id) })).sorted()
+        let names = docs.compactMap { DocRef(id: $0)?.name }
+        // The one edit, else how many: "Moved pine to column 4", "3 edits to harbor".
+        let title = edits.count == 1 ? Self.titled(edits[0]) : "\(edits.count) edits to \(names.count == 1 ? names[0] : "\(names.count) docs")"
+        var m = ChatMessage(kind: .change, text: title)
+        m.versions = mine.map(\.number)
+        m.number = mine.last?.number
+        m.docs = docs
         m.edits = edits.count == 1 ? [] : edits
-        return m
+        append(m, to: chatID)
     }
 
-    /// A turn made a proposal: in the open chat, it's selected with its ghost on (D7).
-    func proposalMade(_ m: ChatMessage, chatID: String) {
-        guard let id = m.proposal, let agent = app?.agent else { return }
-        madeThisLaunch.insert(id)
-        Task {
-            await agent.refreshList()
-            guard chatID == currentID, !showingList, agent.proposals.contains(where: { $0.id == id }) else { return }
-            agent.select(id)
-            agent.setGhostShown(true)
-        }
+    nonisolated static func titled(_ s: String) -> String { s.prefix(1).uppercased() + s.dropFirst() }
+
+    /// The versions now listed: a card whose versions have all been thinned away can't show them.
+    func versionsListed(_ list: [VersionSummary]) {
+        knownVersions = Set(list.map(\.number))
     }
 
-    /// The proposals listed now: a card whose proposal was listed and is gone was settled elsewhere.
-    @ObservationIgnored private var seenProposals = Set<String>()
+    /// The version numbers `history.list` has now.
+    @ObservationIgnored private(set) var knownVersions = Set<Int>()
 
-    func proposalsListed(_ ids: [String]) {
-        let now = Set(ids)
-        // Gone: listed earlier in this launch and not now, or a card from an earlier launch (or a turn's
-        // card not made in this launch) whose proposal isn't listed: settled while Pixel Lab was closed.
-        // A card made in this launch waits until its proposal has been listed once (the list can lag the save).
-        let waitingCards = Set(chats.flatMap(\.messages).filter { $0.kind == .proposal && $0.outcome == nil }.compactMap(\.proposal))
-        let gone = seenProposals.subtracting(now).union(waitingCards.subtracting(madeThisLaunch).subtracting(now))
-        seenProposals.formUnion(now)
-        guard !gone.isEmpty else { return }
-        for c in chats where c.messages.contains(where: { $0.kind == .proposal && $0.outcome == nil && gone.contains($0.proposal ?? "") }) {
-            update(c.id) { chat in
-                for i in chat.messages.indices where chat.messages[i].kind == .proposal && chat.messages[i].outcome == nil && gone.contains(chat.messages[i].proposal ?? "") {
-                    chat.messages[i].outcome = "elsewhere"
+    // MARK: Card actions (R18)
+
+    /// Undo These Changes: the card's versions, newest first. A clash stops and says so.
+    func undoChanges(_ m: ChatMessage) async {
+        guard let app, m.outcome == nil, let list = m.versions, !list.isEmpty else { return }
+        for n in list.reversed() {
+            guard await app.versions.undoChanges(n) else {
+                for c in chats where c.messages.contains(where: { $0.id == m.id }) {
+                    note(app.versions.lastResult ?? "Couldn't undo these changes", in: c.id)
                 }
+                return
             }
         }
-        seenProposals.subtract(gone)
-    }
-
-    /// Proposals whose cards this launch's turns made.
-    @ObservationIgnored private var madeThisLaunch = Set<String>()
-
-    /// Approved or rejected here (a card, the banner or the Agent window): the card says so, with a note.
-    func proposalSettled(_ id: String, applied: Bool, detail: String) {
-        seenProposals.remove(id)
-        for c in chats {
-            guard let m = c.messages.first(where: { $0.kind == .proposal && $0.proposal == id }) else { continue }
+        for c in chats where c.messages.contains(where: { $0.id == m.id }) {
             update(c.id) { chat in
-                if let i = chat.messages.firstIndex(where: { $0.id == m.id }) { chat.messages[i].outcome = applied ? "applied" : "rejected" }
+                if let i = chat.messages.firstIndex(where: { $0.id == m.id }) { chat.messages[i].outcome = "undone" }
             }
-            note("You \(applied ? "approved" : "rejected") \(m.number.map { "#\($0)" } ?? "the proposal") · \(detail)", in: c.id)
+            note("You undid these changes", in: c.id)
         }
     }
 
-    // MARK: Card actions (R16)
-
-    /// Whether a card's proposal is the one ghosted on the stage.
-    func ghostOn(_ m: ChatMessage) -> Bool { app?.agent.visibleGhost?.proposalID == m.proposal && m.proposal != nil }
-
-    /// Selects a card's proposal in the Agent model (as the Agent window would).
-    private func selectProposal(_ m: ChatMessage) async -> Bool {
-        guard let id = m.proposal, let agent = app?.agent else { return false }
-        if !agent.proposals.contains(where: { $0.id == id }) { await agent.refreshList() }
-        guard agent.proposals.contains(where: { $0.id == id }) else {
-            // It isn't waiting any more: say so on the card, rather than a button that does nothing.
-            for c in chats where c.messages.contains(where: { $0.id == m.id }) {
-                update(c.id) { chat in
-                    if let i = chat.messages.firstIndex(where: { $0.id == m.id }), chat.messages[i].outcome == nil { chat.messages[i].outcome = "elsewhere" }
-                }
-                note("\(m.number.map { "#\($0)" } ?? "That proposal") isn't waiting any more: it was approved or rejected outside Pixel Lab.", in: c.id)
-            }
-            return false
-        }
-        agent.select(id)
-        return true
-    }
-
-    func approve(_ m: ChatMessage) async {
-        guard await selectProposal(m) else { return }
-        await app?.agent.approve()
-    }
-
-    func reject(_ m: ChatMessage) async {
-        guard await selectProposal(m) else { return }
-        await app?.agent.reject()
-    }
-
-    /// Show on stage / Hide on stage.
-    func toggleGhost(_ m: ChatMessage) async {
-        guard let agent = app?.agent else { return }
-        if ghostOn(m) {
-            agent.setGhostShown(false)
-            return
-        }
-        guard await selectProposal(m) else { return }
-        if let ref = agent.selected?.ref, app?.document?.ref != ref { await agent.openInEditor() } else { agent.setGhostShown(true) }
-    }
-
-    /// Diff in the Agent window.
-    func showDiff(_ m: ChatMessage) async {
-        _ = await selectProposal(m)
-        app?.agent.showWindow()
-    }
-
-    /// The Agent window's Open the chat: the chat a proposal came from, in the Agent tab.
-    func openChat(forProposal p: ProposalSummary) {
-        guard let id = p.chat?.id, chats.contains(where: { $0.id == id }) else { return }
-        app?.showAgentTab()
-        open(id)
-        app?.mainWindow?.makeKeyAndOrderFront(nil)
-    }
-
-    /// What the owner had selected when they asked for a proposal: the chips of the message before its card.
-    func askedAbout(_ proposalID: String) -> String? {
-        for c in chats {
-            guard let i = c.messages.firstIndex(where: { $0.kind == .proposal && $0.proposal == proposalID }) else { continue }
-            let chips = c.messages[..<i].last(where: { $0.kind == .user })?.chips ?? []
-            guard !chips.isEmpty else { return nil }
-            return chips.count <= 2 ? chips.joined(separator: " and ") : chips.prefix(2).joined(separator: ", ") + " and \(chips.count - 2) more"
-        }
-        return nil
+    /// Show in Versions: the sheet, on the card's newest version.
+    func showInVersions(_ m: ChatMessage) async {
+        await app?.versions.open(selecting: m.versions?.last)
     }
 
     private func finish(status: Int32) {
-        flushCards()
         guard let r = running else { return }
+        if r.edits > 0 {
+            let (chat, start) = (r.chatID, r.startVersion)
+            Task { await makeChangeCard(chatID: chat, after: start) }
+        }
         turn = nil
         running = nil
         lastClaudeID = nil
@@ -843,7 +769,7 @@ final class ChatModel {
             for i in c.messages.indices where c.messages[i].kind == .step && c.messages[i].done == false { c.messages[i].done = true }
         }
         if r.stopped {
-            note(r.proposals == 0 ? "Stopped · nothing was proposed" : "Stopped", in: id)
+            note(r.edits == 0 ? "Stopped · nothing was changed" : "Stopped", in: id)
             return
         }
         if ClaudeTurn.resumeFailed(stderr: r.stderr.joined(separator: "\n"), started: r.started), !r.retried {
@@ -913,6 +839,7 @@ final class ChatModel {
         switch m.kind {
         case .user: return "You: \(m.text ?? "")"
         case .proposal: return "Proposal \(m.number.map { "#\($0)" } ?? ""): \(m.text ?? "")"
+        case .change: return "Changed: \(m.text ?? "")"
         case .step: return m.human ?? ""
         default: return m.text ?? ""
         }
@@ -929,13 +856,14 @@ final class ChatModel {
         }
     }
 
-    /// A card's status: Waiting for you, Applied, Rejected, Settled elsewhere.
+    /// A card's status: a change is Applied or Undone; a proposal from before edits applied says what became of it.
     func statusText(_ m: ChatMessage) -> String {
+        if m.kind == .change { return m.outcome == "undone" ? "Undone" : "Applied" }
         switch m.outcome {
         case "applied": return "Applied"
         case "rejected": return "Rejected"
         case "elsewhere": return "Settled elsewhere"
-        default: return "Waiting for you"
+        default: return "Set aside"
         }
     }
 

@@ -1,5 +1,5 @@
 //! Line diffs (ports cli/lib/diff.mjs): Myers' O(ND) algorithm, for dry runs
-//! and proposals. Sources are canonical (one map row or item per line), so a
+//! and versions. Sources are canonical (one map row or item per line), so a
 //! line diff is the diff a person reads in a pull request.
 
 /// The edit script from `a` to `b` (`diffLines`): (op, line) with op ' ',

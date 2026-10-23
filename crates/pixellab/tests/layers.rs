@@ -28,7 +28,7 @@ use pixellab::layer_ops as ops;
 use pixellab::layer_ops::NewLayer;
 use pixellab::registry::registry;
 use pixellab::scene_ops;
-use pixellab::session::{Mode, Options, Session};
+use pixellab::session::{Options, Session};
 
 // Two ground cubes in entrance wrappers whose data-* point at them, two
 // pebbles on top, an animated pebble and one placed by pixel.
@@ -654,7 +654,7 @@ fn r5_the_cli_runs_the_layer_commands_and_writes_the_scene() {
 }
 
 #[test]
-fn r5_over_mcp_the_layer_commands_are_tools_and_their_edits_become_a_proposal() {
+fn r5_over_mcp_the_layer_commands_are_tools_and_their_edits_apply() {
     use std::io::{BufRead, BufReader, Write};
     let fx = Fx::bare();
     fx.write_scene("yard", &yard());
@@ -689,14 +689,11 @@ fn r5_over_mcp_the_layer_commands_are_tools_and_their_edits_become_a_proposal() 
     );
     assert!(made.get("isError").is_none(), "{made}");
     request("tools/call", json!({ "name": "scene_layer_move", "arguments": { "name": "yard", "layer": "ground", "by": [1, 0] } }));
-    let saved = request("tools/call", json!({ "name": "doc_save", "arguments": { "doc": "scene:yard" } }))["structuredContent"].clone();
-    assert!(saved.get("proposal").is_some(), "a proposal");
-    assert_eq!(saved["edits"], json!(["Grouped 2 items as Ground", "Moved Ground +1 col, 0 row; 2 groups followed"]));
-    assert_eq!(
-        std::fs::read_to_string(fx.doc.root.join("scenes/yard.json")).unwrap(),
-        before,
-        "the document is untouched until the owner approves"
-    );
+    // Each edit applied and saved, with the agent as the version's author (autosave spec, R16).
+    assert_ne!(std::fs::read_to_string(fx.doc.root.join("scenes/yard.json")).unwrap(), before, "the edits applied");
+    let history = request("tools/call", json!({ "name": "history_list", "arguments": {} }))["structuredContent"].clone();
+    assert_eq!(history["versions"][0]["author"]["kind"], "agent");
+    assert_eq!(history["versions"][0]["edits"], json!(["Grouped 2 items as Ground", "Moved Ground +1 col, 0 row; 2 groups followed"]));
     let _ = child.kill();
     let _ = child.wait();
 }
@@ -736,7 +733,7 @@ impl Fx {
             cwd: self.doc.root.clone(),
         })
         .unwrap();
-        Session::new(document, Options { mode: Mode::Direct, env, agent: Some("test".into()), ..Options::default() })
+        Session::new(document, Options { env, agent: Some("test".into()), ..Options::default() })
     }
 }
 

@@ -11,7 +11,7 @@ use pixellab::context::{Ctx, DocKind};
 use pixellab::document::{open_document, OpenOptions};
 use pixellab::errors::Error;
 use pixellab::registry::registry;
-use pixellab::session::{Mode, Options, Session};
+use pixellab::session::{Options, Session};
 use serde_json::{json, Map, Value};
 
 fn yard() -> Value {
@@ -79,7 +79,7 @@ impl Fx {
             cwd: self.doc.root.clone(),
         })
         .unwrap();
-        Session::new(document, Options { mode: Mode::Direct, env, agent: Some("test".into()), ..Options::default() })
+        Session::new(document, Options { env, agent: Some("test".into()), ..Options::default() })
     }
 }
 

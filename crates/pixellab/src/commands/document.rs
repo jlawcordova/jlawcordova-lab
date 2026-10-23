@@ -17,7 +17,7 @@ use crate::registry::{Command, Params};
 
 /// JS `path.resolve(dir, p)` without touching the disk.
 fn resolve_in(dir: &Path, p: &str) -> PathBuf {
-    crate::open_docs::resolve(&dir.join(p))
+    crate::state::resolve_path(&dir.join(p))
 }
 
 /// The checked-out branch, read from .git/HEAD (no git process, nothing written) (`gitBranch`).
