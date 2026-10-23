@@ -1,16 +1,17 @@
-//! The session (U14): working copies with undo and redo, saving, proposals,
+//! The session (U14): working copies with undo and redo, saving, versions,
 //! reloading, merging and settling, called directly. The command-level
 //! suites (sync.test.mjs and the edit commands' tests) run once the
 //! commands are ported.
 
 mod common;
 
+use pixellab::author::Author;
 use pixellab::context::{Ctx, DocKind};
 use pixellab::document::{open_document, OpenOptions};
-use pixellab::session::{hash_text, Edit, Mode, Options, Session};
+use pixellab::session::{hash_text, Edit, Options, Session};
 use serde_json::{json, Map, Value};
 
-fn session(doc: &common::TempDocument, state: &std::path::Path, mode: Mode) -> Session {
+fn session(doc: &common::TempDocument, state: &std::path::Path) -> Session {
     let mut env = doc.env();
     env.insert("PIXELLAB_STATE".into(), state.to_string_lossy().into_owned());
     let document = open_document(&OpenOptions {
@@ -20,7 +21,7 @@ fn session(doc: &common::TempDocument, state: &std::path::Path, mode: Mode) -> S
         cwd: doc.root.clone(),
     })
     .unwrap();
-    Session::new(document, Options { mode, env, agent: Some("test".into()), ..Options::default() })
+    Session::new(document, Options { env, agent: Some("test".into()), ..Options::default() })
 }
 
 /// Adds an item to the sample scene, as scene.place would.
@@ -42,7 +43,7 @@ fn read(doc: &common::TempDocument, file: &str) -> String {
 fn an_edit_is_one_undo_step_and_undo_and_redo_swap_it() {
     let doc = common::make_document();
     let state = common::temp_dir("pixellab-state-");
-    let mut s = session(&doc, &state, Mode::Direct);
+    let mut s = session(&doc, &state);
     let r = place(&mut s, 1);
     assert_eq!(r["doc"], "scene:sample");
     assert_eq!(r["changed"], true);
@@ -60,7 +61,7 @@ fn an_edit_is_one_undo_step_and_undo_and_redo_swap_it() {
 fn an_edit_that_changes_nothing_is_no_step_and_says_so() {
     let doc = common::make_document();
     let state = common::temp_dir("pixellab-state-");
-    let mut s = session(&doc, &state, Mode::Direct);
+    let mut s = session(&doc, &state);
     let r = Ctx::new(&mut s).edit(DocKind::Scene, "sample", None, |_, _| Ok(Edit::new(Map::new(), "moved nothing"))).unwrap();
     assert_eq!(r["changed"], false);
     assert_eq!(r["summary"], "nothing changed (moved nothing)");
@@ -71,7 +72,7 @@ fn an_edit_that_changes_nothing_is_no_step_and_says_so() {
 fn a_failed_edit_leaves_the_doc_as_it_was() {
     let doc = common::make_document();
     let state = common::temp_dir("pixellab-state-");
-    let mut s = session(&doc, &state, Mode::Direct);
+    let mut s = session(&doc, &state);
     let before = s.doc(DocKind::Scene, "sample").unwrap();
     let err = Ctx::new(&mut s).edit(DocKind::Scene, "sample", None, |doc, _| {
         doc["items"] = json!([]);
@@ -85,7 +86,7 @@ fn a_failed_edit_leaves_the_doc_as_it_was() {
 fn rapid_repeats_with_one_key_coalesce() {
     let doc = common::make_document();
     let state = common::temp_dir("pixellab-state-");
-    let mut s = session(&doc, &state, Mode::Direct);
+    let mut s = session(&doc, &state);
     for n in 0..3 {
         Ctx::new(&mut s)
             .edit(DocKind::Object, "pebble", Some("paint"), move |doc, _| {
@@ -106,7 +107,7 @@ fn rapid_repeats_with_one_key_coalesce() {
 fn save_writes_the_canonical_text_and_refuses_problems_and_conflicts() {
     let doc = common::make_document();
     let state = common::temp_dir("pixellab-state-");
-    let mut s = session(&doc, &state, Mode::Direct);
+    let mut s = session(&doc, &state);
     place(&mut s, 3);
     let saved = s.save("scene:sample", false).unwrap();
     assert_eq!(saved["wrote"], true);
@@ -133,61 +134,49 @@ fn save_writes_the_canonical_text_and_refuses_problems_and_conflicts() {
 }
 
 #[test]
-fn propose_writes_a_proposal_and_leaves_the_document_alone() {
+fn r16_an_agents_save_writes_the_document_and_its_version_lists_the_edits() {
     let doc = common::make_document();
     let state = common::temp_dir("pixellab-state-");
-    let mut s = session(&doc, &state, Mode::Propose);
+    let mut s = session(&doc, &state);
+    s.author = Author::agent(Some("test".into()), None);
     let original = read(&doc, "scenes/sample.json");
     place(&mut s, 1);
     let r = s.save("scene:sample", false).unwrap();
-    assert_eq!(r["wrote"], false);
-    assert_eq!(r["number"], 1);
-    assert_eq!(r["edits"], json!(["pebble placed at column 1"]));
-    assert!(r["summary"].as_str().unwrap().starts_with("Proposed scene:sample as #1 ("));
-    assert_eq!(read(&doc, "scenes/sample.json"), original);
-    let p = s.state.read_proposal(r["proposal"].as_str().unwrap()).unwrap();
-    assert_eq!(p["baseHash"], hash_text(&original));
-    assert_eq!(p["agent"], "test");
-    // Saving again rewrites the same proposal.
+    assert_eq!(r["wrote"], true);
+    assert_ne!(read(&doc, "scenes/sample.json"), original);
     place(&mut s, 2);
-    let again = s.save("scene:sample", false).unwrap();
-    assert_eq!(again["proposal"], r["proposal"]);
-    assert_eq!(again["edits"], json!(["pebble placed at column 1", "pebble placed at column 2"]));
+    s.save("scene:sample", false).unwrap();
+    let v = s.history.versions().last().cloned().unwrap();
+    assert_eq!(v["author"], json!({ "kind": "agent", "name": "test" }));
+    assert_eq!(v["edits"], json!(["pebble placed at column 1", "pebble placed at column 2"]));
 }
 
 #[test]
-fn settling_an_applied_proposal_makes_the_doc_clean_and_a_rejected_one_reloads() {
+fn sync_reloads_a_clean_doc_whose_file_changed_and_marks_a_matching_dirty_one_clean() {
     let doc = common::make_document();
     let state = common::temp_dir("pixellab-state-");
-    let mut s = session(&doc, &state, Mode::Propose);
-    place(&mut s, 1);
-    let r = s.save("scene:sample", false).unwrap();
-    let id = r["proposal"].as_str().unwrap().to_string();
-    // The owner applies it: the file gets the proposal's source, the proposal goes.
-    let p = s.state.read_proposal(&id).unwrap();
-    doc.write("scenes/sample.json", p["source"].as_str().unwrap());
-    s.state.remove_proposal(&id).unwrap();
+    let mut s = session(&doc, &state);
+    s.open(pixellab::context::DocKind::Scene, "sample").unwrap();
+    // Another writer adds a pebble: the clean doc follows the file.
+    let mut other = session(&doc, &state);
+    place(&mut other, 4);
+    other.save("scene:sample", false).unwrap();
     s.sync();
-    let d = s.details("scene:sample");
-    assert_eq!((d["dirty"].clone(), d["stale"].clone()), (json!(false), json!(false)));
-    assert_eq!(d["synced"], json!({ "doc": "scene:sample", "proposal": id, "outcome": "applied", "action": "clean" }));
-    // A second one, rejected: the doc reloads from the file.
-    place(&mut s, 4);
-    let r = s.save("scene:sample", false).unwrap();
-    let id = r["proposal"].as_str().unwrap().to_string();
-    s.state.remove_proposal(&id).unwrap();
-    s.sync();
-    let d = s.details("scene:sample");
-    assert_eq!(d["synced"]["action"], "reloaded");
-    assert_eq!(d["dirty"], false);
     assert_eq!(s.entries.get("scene:sample").unwrap().doc["items"].as_array().unwrap().len(), 3);
+    assert_eq!(s.details("scene:sample")["dirty"], false);
+    // The same edit made here and on disk: the doc is clean.
+    place(&mut s, 5);
+    place(&mut other, 5);
+    other.save("scene:sample", false).unwrap();
+    s.sync();
+    assert_eq!(s.details("scene:sample")["dirty"], false);
 }
 
 #[test]
 fn reload_refuses_to_drop_edits_and_revert_drops_them_as_a_step() {
     let doc = common::make_document();
     let state = common::temp_dir("pixellab-state-");
-    let mut s = session(&doc, &state, Mode::Direct);
+    let mut s = session(&doc, &state);
     place(&mut s, 1);
     let err = s.reload("scene:sample").unwrap_err();
     assert!(err.message().starts_with("scene:sample has 1 unsaved edit the file doesn't have; reloading would drop it."), "{err}");
@@ -203,7 +192,7 @@ fn reload_refuses_to_drop_edits_and_revert_drops_them_as_a_step() {
 fn merge_brings_a_change_on_disk_into_a_dirty_copy() {
     let doc = common::make_document();
     let state = common::temp_dir("pixellab-state-");
-    let mut s = session(&doc, &state, Mode::Direct);
+    let mut s = session(&doc, &state);
     let original = read(&doc, "scenes/sample.json");
     // The working copy adds an item; the file moves another.
     place(&mut s, 3);
@@ -216,7 +205,7 @@ fn merge_brings_a_change_on_disk_into_a_dirty_copy() {
     assert!(text.contains("[1,0,1]") && text.contains("[3,2,0]"), "{text}");
     assert_eq!(r["dirty"], true);
     // Both sides changing one line is a conflict.
-    let mut s = session(&doc, &state, Mode::Direct);
+    let mut s = session(&doc, &state);
     Ctx::new(&mut s)
         .edit(DocKind::Scene, "sample", None, |doc, _| {
             doc["viewBox"] = json!([0, 0, 10, 10]);
@@ -233,7 +222,7 @@ fn merge_brings_a_change_on_disk_into_a_dirty_copy() {
 fn a_scene_edit_ends_in_depth_order_and_its_paths_follow_the_sort() {
     let doc = common::make_document();
     let state = common::temp_dir("pixellab-state-");
-    let mut s = session(&doc, &state, Mode::Direct);
+    let mut s = session(&doc, &state);
     // A pebble listed last that draws before the pebble on the block: the sort moves it, and says where things went.
     let r = Ctx::new(&mut s)
         .edit(DocKind::Scene, "sample", None, |doc, _| {
@@ -258,7 +247,7 @@ fn a_scene_edit_ends_in_depth_order_and_its_paths_follow_the_sort() {
 fn find_names_objects_and_scenes_and_says_what_is_missing() {
     let doc = common::make_document();
     let state = common::temp_dir("pixellab-state-");
-    let mut s = session(&doc, &state, Mode::Direct);
+    let mut s = session(&doc, &state);
     let mut ctx = Ctx::new(&mut s);
     assert_eq!(ctx.find("pebble", None).unwrap().file, "objects/pebble.json");
     assert_eq!(ctx.find("scenes/sample.json", None).unwrap().name, "sample");

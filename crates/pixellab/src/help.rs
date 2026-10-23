@@ -129,8 +129,8 @@ pub fn overview_help(registry: &Registry) -> String {
     lines.extend([
         String::new(),
         "Servers (pixellab serve --help):".into(),
-        "  serve --stdio            the Mac app's JSON-RPC server: a session with undo, saved by doc.save".into(),
-        "  serve --mcp [--direct]   an MCP server for agents; doc_save writes a proposal (--direct: the document)".into(),
+        "  serve --stdio            the Mac app's JSON-RPC server: a session with undo that saves itself".into(),
+        "  serve --mcp              an MCP server for agents: each edit applies and saves".into(),
         String::new(),
         "Edit commands save as soon as they run, after validating (--force writes despite problems or a".into(),
         "changed file); --dry-run shows the diff instead. doc.* commands need a session (pixellab serve).".into(),
@@ -481,7 +481,7 @@ const TEMPLATE: &str = r####"# pixellab: commands, the stdio protocol and MCP
 - [The command line](#the-command-line)
 - [The stdio protocol](#the-stdio-protocol) (`serve --stdio`, for the Mac app)
 - [MCP](#mcp) (`serve --mcp`, for agents) and [setup for Claude Code](#setup-for-claude-code)
-- [Proposals and activity](#proposals-and-activity)
+- [The state dir: history, owners and activity](#the-state-dir-history-owners-and-activity)
 - [Command reference](#command-reference)
 
 ## Commands
@@ -502,7 +502,9 @@ The leading words name the command (`scene place` is `scene.place`; the longest 
 | --- | --- |
 @@GLOBALS@@
 
-**Edits are one-shot.** A command that edits a doc loads it, applies the edit, validates the doc with the engine, serializes it with the engine and writes it atomically (temp file and rename), then prints what changed and `wrote <file>`. It refuses, writing nothing, when the doc has validation problems (code `invalid`, the problems in `details`) or the file changed on disk while it ran (code `conflict`); `--force` writes anyway. `--dry-run` prints the unified diff it would write, any problems, and writes nothing. With `--json` the result gains `saved: [{ doc, file, wrote, hash }]` or `dryRun: [{ doc, file, diff, problems, conflict }]`. The `doc.*` commands (undo, redo, save…) only make sense in a session, so they run through `pixellab serve`.
+**Edits are one-shot.** A command that edits a doc loads it, applies the edit, validates the doc with the engine, serializes it with the engine and writes it atomically (temp file and rename), then prints what changed and `wrote <file>`. It refuses, writing nothing, when the doc has validation problems (code `invalid`, the problems in `details`) or the file changed on disk while it ran (code `conflict`); `--force` writes anyway. `--dry-run` prints the unified diff it would write, any problems, and writes nothing. With `--json` the result gains `saved: [{ doc, file, wrote, hash }]` or `dryRun: [{ doc, file, diff, problems, conflict }]`. The `doc.*` commands (undo, redo, save…) only make sense in a session, so they run through `pixellab serve`. Every write is a version in the document's history, by `the CLI` (see `history list`).
+
+**One writer per document.** While Pixel Lab has the document open, its server owns it: an edit command sends itself to the app (the edit shows on its stage, and the app saves it before answering), and a read reads the app's open copy. Without the app, the command writes the files itself. `--dry-run` asks the app to save first, then shows the diff against the files. `document migrate` refuses while the app has the document open.
 
 The document comes from `--document`, else `PIXELLAB_DOC`, else `~/.config/pixellab/config.json` (`{"document": "…"}`), else `--site <checkout>` / `PIXELLAB_SITE` / `{"site": "…"}` (the `*.pixellab` under the site's `src/assets/pixel-art/`, or its legacy `source/` folder), else `~/Projects/jlawcordova.github.io`.
 
@@ -510,7 +512,7 @@ The document comes from `--document`, else `PIXELLAB_DOC`, else `~/.config/pixel
 
 `pixellab serve --stdio [--document <path> | --site <checkout>]` is the Mac app's server: newline-delimited [JSON-RPC 2.0](https://www.jsonrpc.org/specification) on stdin and stdout, one message per line. stdout carries nothing but JSON-RPC; logs go to stderr. Requests are answered one at a time, in order. Batches are not supported. Protocol version: @@STDIO_VERSION@@ (`session.info` reports it).
 
-The server holds a **session**: docs open as in-memory working copies with undo and redo (at most 200 steps; rapid repeats of the same edit within a second, such as a held arrow key or one paint stroke sent as many `object.paint` calls, merge into one step). Every command reads the working copies, so `scene.render` shows unsaved edits. Nothing is written until `doc.save`.
+The server holds a **session**: docs open as in-memory working copies with undo and redo (at most 200 steps; rapid repeats of the same edit within a second, such as a held arrow key or one paint stroke sent as many `object.paint` calls, merge into one step). Every command reads the working copies, so `scene.render` shows unsaved edits. **Edits save themselves:** a doc is written about a second after its last change (`PIXELLAB_AUTOSAVE_MS` changes the pause), and everything is saved when the server stops. A doc with validation problems is not written until they're fixed (`saveState: problems`); one whose file changed on disk is merged, three ways, then written (`saveState: conflict` and `doc.stale` when that clashes). `doc.flush` saves now; `doc.save` saves and closes the version. Undo works across saves.
 
 **Methods** are the command names (`scene.place`, `doc.undo`, … see the reference), plus:
 
@@ -529,10 +531,10 @@ The server holds a **session**: docs open as in-memory working copies with undo 
 
 - `scene.render` / `object.render`: `{ png, scale, viewBox: [x, y, w, h], frame?, width, height, time | frame, items: [{ path, object, at, id?, pose?, bounds: [x, y, w, h] }] }`. `png` is a base64 PNG with a transparent background at an integer `scale`; `bounds` are in output pixels (scale included), for hit-testing; `path` is the item's dotted path (`"5.2"`). An object render's item has `path: null` and the result has its `anchor`. A scene render's `viewBox` is the box the scene publishes at (its own, or the fit to what it paints: `frame` says `"fixed"` or `"fit"`), or the `view` window asked for; a scene without a `viewBox` has no edge, so the app asks for the window it shows. `scene.show` and `scene.list` give the resolved `viewBox` and `frame` too.
 - Edits: `{ doc: "scene:<name>" | "object:<name>", changed, summary, ... }`; scene item edits add `path` (the item's path after the edit) and `item`; paint edits add `pixels` (how many changed).
-- `DocStatus` (in `doc.changed`, `session.info` and `doc.status` without a doc): `{ doc, dirty, canUndo, canRedo }`. `doc.status` with a doc adds `file, exists, stale` (the file changed on disk since the doc was opened or last matched it), `undo: [edit summaries]`, `redo: [...]`, `edits` (the edits since the doc last matched its file: what a proposal would list), `proposal?`, `synced?` and `unsavedInApp` (see MCP).
+- `DocStatus` (in `session.info` and `doc.status` without a doc): `{ doc, dirty, canUndo, canRedo }`. `doc.changed` adds `undoLabel`, `redoLabel` (the Edit menu's words, with whose step it is for anyone but the owner: `"Place pine (Claude)"`), `author` (who made the change), `saveState` (`saved`, `pending`, `problems`, `conflict`) and `problems`; `doc.status` with a doc adds those and `file, exists, stale` (the file changed on disk since the doc was opened or last matched it), `undo: [edit summaries]`, `redo: [...]` and `edits` (the edits since the doc last matched its file).
 - `doc.save`: `{ doc, file, wrote, hash, bytes, diff, dirty, canUndo, canRedo }` (`wrote` is false when the file already held exactly this text).
 - `doc.undo` / `doc.redo` / `doc.revert`: `{ doc, changed, summary, dirty, canUndo, canRedo }`; `doc.reload` adds `reloaded`, `doc.merge` adds `merged`.
-- `proposal.apply`: `{ id, doc, file, wrote, reloaded, merged?, conflict?, diff, summary }`: an open copy with no unsaved edits reloads; one with unsaved edits has the proposal merged in (`merged`), or, when both changed the same lines, is left as it is and reported with `doc.stale` (`conflict`).
+- `history.list`: `{ versions: [{ number, startedAt, endedAt, author, edits, files, open }], total }`, newest first; `history.render` is `scene.render`'s or `object.render`'s shape plus `{ version, doc, kind }`, for the Versions sheet's ghost.
 
 **Errors** are JSON-RPC errors with a stable `data.code`:
 
@@ -553,23 +555,23 @@ The server holds a **session**: docs open as in-memory working copies with undo 
 
 | method | params | when |
 | --- | --- | --- |
-| `doc.changed` | `{ doc, dirty, canUndo, canRedo }` | after each edit, undo, redo, save, revert, merge or reload, and when a clean open doc reloads because its file changed. Sent before the request's response. |
-| `doc.stale` | `{ doc, file }` | an open doc with unsaved edits whose file changed on disk (the app shows Merge, Reload, Keep Mine), and after an applied proposal whose merge into the open copy clashed |
-| `files.changed` | `{ files: ["scenes/hero-island.json", …] }` | sources changed on disk (another editor, git, an applied proposal, a save), debounced 150 ms |
-| `proposals.changed` | `{ proposals: [ProposalSummary] }` (as `proposal.list`) | a proposal was written, applied or rejected |
+| `doc.changed` | `{ doc, dirty, canUndo, canRedo, undoLabel, redoLabel, author, saveState, problems }` | after each edit, undo, redo, save, revert, merge or reload, whoever made it (the app, or a client through the socket), and when a clean open doc reloads because its file changed. Sent before the request's response. |
+| `doc.stale` | `{ doc, file }` | an open doc with a save pending whose file changed on disk and whose merge clashed (the app shows Reload and Keep Mine) |
+| `files.changed` | `{ files: ["scenes/hero-island.json", …] }` | sources changed on disk (another editor, git, a save), debounced 150 ms |
+| `history.changed` | `{ versions: [the latest, as history.list lists it] }` | the document's version history changed |
 | `activity.appended` | `{ entries: [{ time, tool, args, ok, summary }] }` | an MCP server logged tool calls |
 
-An open doc without unsaved changes reloads from disk when its file changes; one with unsaved changes stays as it is, the server sends `doc.stale`, `doc.status` reports it `stale`, and its `doc.save` fails with `conflict` until it's merged (`doc.merge`: a three-way line merge of the file into the working copy, keeping its edits; it refuses with `merge_conflict` when both changed the same lines), reverted, or saved with `force`. The server also keeps `open/<pid>.json` in the state dir (see below), so agents can see what the app has open with unsaved edits.
+An open doc without unsaved changes reloads from disk when its file changes; one with a save pending gets the change merged in (`doc.merge`: a three-way line merge of the file into the working copy, keeping its edits) and saves. When both changed the same lines the merge refuses (`merge_conflict`), the server sends `doc.stale`, and the doc stays unsaved until it's reverted or saved with `force`.
+
+**The owner.** The server takes `owners/<key>.lock` in the state dir for its document with an OS file lock, which the system lets go of when the process ends however it ends, and listens on a Unix socket beside it (or in `$TMPDIR` when that path is too long). The CLI and MCP servers send their commands to it: the same JSON-RPC, after a `client.hello { kind: "mcp" | "cli", name, version, protocol, chat? }` that names the author. Their requests run in the server's loop between the app's own, one at a time. A second `serve --stdio` on an owned document answers `session.info` with code `owned` (and the holder's `appPid`) and exits; Pixel Lab then brings the other copy forward. Only the user's own processes can connect.
 
 ## MCP
 
-`pixellab serve --mcp [--direct] [--document <path> | --site <checkout>]` is an MCP server over stdio (protocol `@@MCP_VERSION@@`, hand-written: `initialize`, `notifications/initialized`, `ping`, `tools/list`, `tools/call`). Tools are the commands with `.` → `_` (`scene.place` → `scene_place`), each with its params as `inputSchema`. A tool's result is `content: [{ type: "text", text: <the result as JSON> }]` plus `structuredContent` (the result); render tools return the PNG as an `image` content block first, so agents can see the art. A failed command is a result with `isError: true` and `structuredContent: { error: { code, message, details? } }`; an unknown tool is a JSON-RPC error.
+`pixellab serve --mcp [--document <path> | --site <checkout>]` is an MCP server over stdio (protocol `@@MCP_VERSION@@`, hand-written: `initialize`, `notifications/initialized`, `ping`, `tools/list`, `tools/call`). Tools are the commands with `.` → `_` (`scene.place` → `scene_place`), each with its params as `inputSchema`. A tool's result is `content: [{ type: "text", text: <the result as JSON> }]` plus `structuredContent` (the result); render tools return the PNG as an `image` content block first, so agents can see the art. A failed command is a result with `isError: true` and `structuredContent: { error: { code, message, details? } }`; an unknown tool is a JSON-RPC error.
 
-**Agents propose, people approve.** Edits stay in the server's session. `doc_save` validates the doc (refusing one with problems unless `force`) and writes a **proposal** to the state dir instead of the document; a person approves it in Pixel Lab's Agent window or with `pixellab proposal apply`. With `--direct`, `doc_save` writes the document instead.
+**Edits apply.** An agent's edit changes the document as it's made, with the agent as its author in the version history: nothing waits for approval. While Pixel Lab has the document open, the server sends every call to the app (the owner sees the edit on the stage, and the app saves it); without the app, it saves each edit itself when the call is done (the result lists `saved`, and `unsaved` for a doc with problems, which stays in memory until they're fixed). `doc_undo` takes back the agent's own latest step and refuses (`not-yours`) when someone else has edited the doc since; `history_undo` takes back a whole version. `--direct` is accepted and ignored.
 
-**The session follows disk.** Before every `tools/call`, the session brings its open docs in line with disk where nothing is lost. A doc whose proposal was applied or rejected is settled: marked clean if it matches the file; reloaded if it has no edits since the proposal; rebased onto the file, keeping the later edits, if the proposal was applied; left as it is only when a rejected proposal has edits on top. `doc_status` reports it as `synced: { proposal, outcome: applied | rejected, action: clean | reloaded | rebased | kept }` (`settled`, without a doc, lists the latest, including a new doc discarded after its proposal was rejected). A clean doc whose file changed reloads. So the next edit starts from the file, with no revert. `doc_reload` reloads a doc only when nothing unsaved is lost (code `dirty` with the edits otherwise, `proposed` while its proposal waits); `doc_revert`, which drops edits, is annotated destructive.
-
-**What the app has open.** `doc_status` lists `unsavedInApp`: the docs Pixel Lab has open with unsaved edits (from `open/<pid>.json`). A proposal for one of them comes back with `warnings`: approving it will merge it into the owner's unsaved edits, and lines both changed will clash. Left out of the tools: @@LEFT_OUT@@. With `--direct`, `art_build` is a tool.
+**The session follows disk.** Before every `tools/call` in a server of its own, a clean doc whose file changed reloads, so the next edit starts from the file. `doc_reload` reloads a doc only when nothing unsaved is lost (code `dirty` with the edits otherwise); `doc_revert`, which drops edits, is annotated destructive. When the app closes the document mid-call, the call fails with `owner-gone` and isn't retried. Left out of the tools: @@LEFT_OUT@@.
 
 ### Setup for Claude Code
 
@@ -585,17 +587,16 @@ Or at a release's `pixellab` (`pixellab-darwin-arm64.tar.gz`, `pixellab-linux-x6
 claude mcp add pixellab -- @@REPO@@/target/release/pixellab serve --mcp
 ```
 
-Add `--document <path.pixellab>` (or `--site <checkout>`) after `--mcp` for another document, or set `PIXELLAB_DOC`. Proposals land in the state dir for review; run `pixellab proposal list` and `pixellab proposal show <id>` to see them from a terminal.
+Add `--document <path.pixellab>` (or `--site <checkout>`) after `--mcp` for another document, or set `PIXELLAB_DOC`. See what agents did with `pixellab history list` and `pixellab activity list`.
 
-## Proposals and activity
+## The state dir: history, owners and activity
 
-The state dir is `$PIXELLAB_STATE`, else `~/Library/Application Support/Pixel Lab/`.
+The state dir is `$PIXELLAB_STATE`, else `~/Library/Application Support/Pixel Lab/`. Nothing here is part of the document, so a site that publishes the document never sees it. `<key>` is the first 16 hex digits of the sha256 of the document's real path.
 
-- `proposals/<id>.json`: `{ id, doc: "scene:<name>" | "object:<name>", baseHash, source, summary, createdAt, agent }`. `id` is `YYYYMMDD-HHMMSS-xxxxxx` (UTC, sortable). `baseHash` is the sha256 (hex) of the file the agent opened, or null for a new doc. `source` is the full new file, serialized by the engine. `summary` lists the edits since the doc last matched its file (opened, saved, reloaded, or its last proposal settled), so a proposal made after an earlier one was applied lists only its own edits. `agent` is the MCP client's name and version. Saving the same doc again in one MCP session rewrites its proposal.
+- `history/<key>/`: the document's versions. `versions.jsonl` has one `{ number, startedAt, endedAt, author, edits, changes: [{ file, before, after }], open }` per line, `before` and `after` being the sha256 of the file's text in `blobs/<sha256>.json` (null: no file). Version 0 is the document as first opened. A version is a stretch of one author's writes (`owner`, `agent`, `cli`, `outside`, `restore`), closed when someone else writes, after a minute's pause, by `history.mark` or `doc.save`, or when the document closes. Versions older than a day thin to one a day, older than 30 days to one a week.
+- `owners/<key>.lock` and `<key>.sock`: the app's server that owns the document while it's open: `{ pid, appPid, document, socket, protocol, version, startedAt }`, held with an OS file lock.
 - `activity.jsonl`: one line per MCP `tools/call`: `{ time, tool, args, ok, summary }` (`tool` is the MCP tool name).
-- `open/<pid>.json`: written by Pixel Lab's server (`serve --stdio`) whenever its open docs change, removed when it stops: `{ pid, document, updatedAt, docs: [{ doc, dirty }] }`. Readers skip a file whose process is gone or whose `document` isn't theirs.
-
-`proposal.apply` refuses (`conflict`) when the file no longer has `baseHash`, and (`invalid`) when the proposed doc has validation problems, unless forced; then it writes `source`, deletes the proposal, and reloads an open, unchanged working copy. `proposal.reject` deletes it. `proposal.render` renders the proposed doc over the files on disk (the shape of `scene.render` or `object.render`) without writing, for the Agent window's ghost preview.
+- `retired-proposals/`: proposals left from before edits applied, moved here once with a `notice.json` (`{ count, dir, at }`) that the Agent window shows.
 
 ## Command reference
 

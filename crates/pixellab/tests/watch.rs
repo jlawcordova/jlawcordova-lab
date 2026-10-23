@@ -87,25 +87,26 @@ fn files_that_are_not_sources_are_ignored() {
 }
 
 #[test]
-fn a_proposal_written_and_removed_is_reported() {
-    let state = State::new(temp("proposals"));
-    let mut w = StateWatcher::new(&state);
-    assert!(state.proposals_dir.is_dir());
-    assert!(!w.poll(0.0).proposals);
-    fs::write(state.proposals_dir.join("p1.json"), "{}").unwrap();
-    assert!(!w.poll(100.0).proposals);
-    assert!(w.poll(250.0).proposals);
-    assert!(!w.poll(500.0).proposals);
-    fs::remove_file(state.proposals_dir.join("p1.json")).unwrap();
-    assert!(!w.poll(600.0).proposals);
-    assert!(w.poll(750.0).proposals);
+fn a_change_to_the_version_history_is_reported_once_debounced() {
+    let state = State::new(temp("history"));
+    let versions = state.dir.join("history/k/versions.jsonl");
+    let mut w = StateWatcher::new(&state, versions.clone());
+    assert!(!w.poll(0.0).history);
+    fs::create_dir_all(versions.parent().unwrap()).unwrap();
+    fs::write(&versions, "{}\n").unwrap();
+    assert!(!w.poll(100.0).history);
+    assert!(w.poll(250.0).history);
+    assert!(!w.poll(500.0).history);
+    fs::write(&versions, "{}\n{}\n").unwrap();
+    assert!(!w.poll(600.0).history);
+    assert!(w.poll(750.0).history);
 }
 
 #[test]
 fn activity_lines_appended_are_returned_once_each_and_a_partial_line_waits() {
     let state = State::new(temp("activity"));
     fs::write(&state.activity_file, "{\"tool\":\"old\"}\n").unwrap();
-    let mut w = StateWatcher::new(&state);
+    let mut w = StateWatcher::new(&state, state.dir.join("versions.jsonl"));
     assert!(w.poll(0.0).activity.is_empty()); // starts at the end
     let mut text = fs::read_to_string(&state.activity_file).unwrap();
     text.push_str("{\"tool\":\"a\"}\n{\"tool\":\"b\"}\n{\"tool\":\"c\"");

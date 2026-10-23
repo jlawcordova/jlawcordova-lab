@@ -3,12 +3,12 @@
 //! stdio (protocol 2025-06-18): initialize, notifications/initialized, ping,
 //! tools/list and tools/call, as newline-delimited JSON-RPC 2.0.
 //!
-//! Agents propose, people approve: edits stay in the server's session, and
-//! doc_save writes a proposal to the state dir instead of the document,
-//! unless the server was started with --direct. Every tools/call appends
-//! { time, tool, args, ok, summary } to activity.jsonl there. Before each
-//! call the session settles its proposals the owner applied or rejected and
-//! reloads clean docs whose files changed (session.sync).
+//! Agents' edits apply (docs/intents/2026-10-autosave/spec.md, R16): each
+//! mutating call is saved when it's done, with the agent as its author in
+//! the version history, and nothing waits for approval. Publishing stays a
+//! person's (LEFT_OUT). Every tools/call appends { time, tool, args, ok,
+//! summary } to activity.jsonl in the state dir. Before each call the
+//! session reloads clean docs whose files changed (session.sync).
 
 use std::io::{BufRead, Write};
 
@@ -21,17 +21,15 @@ use crate::document::{Document, Env};
 use crate::errors::Error;
 use crate::jsonrpc::{serve_lines, Failure, Output, RpcError, INVALID_PARAMS, METHOD_NOT_FOUND};
 use crate::registry::{Command, Registry};
-use crate::session::{Mode, Options, Session};
+use crate::session::{Options, Session};
 use crate::state::{iso_time, now_ms};
 
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
 const SUPPORTED: [&str; 3] = [PROTOCOL_VERSION, "2025-03-26", "2024-11-05"];
 
 /// Commands that aren't tools, and why (`LEFT_OUT`).
-pub const LEFT_OUT: [(&str, &str); 5] = [
-    ("proposal.apply", "approving a proposal is for a person, in Pixel Lab or with pixellab proposal apply"),
-    ("proposal.reject", "rejecting a proposal is for a person"),
-    ("art.build", "it publishes the SVGs a site inlines; a person publishes after approving"),
+pub const LEFT_OUT: [(&str, &str); 3] = [
+    ("art.build", "it publishes the SVGs a site inlines; publishing is for a person"),
     ("document.copy", "saving a copy of the document is for a person"),
     ("document.migrate", "migrating the document is for a person, in Pixel Lab or with pixellab document migrate"),
 ];
@@ -46,8 +44,7 @@ pub fn tool_name(command: &str) -> String {
 
 pub const INSTRUCTIONS: &str = "Pixel Lab edits the pixel art in a .pixellab document: scenes (isometric, 32×16 tiles) and objects (sprites and blocks drawn from a fixed palette). The site that inlines the art publishes from the document.
 Look first: document_info, scene_list, scene_items, scene_render (returns the PNG), object_list, object_show, object_render, palette_get, check (problems, and warnings such as off-grid motion).
-Edit: scene_place (also into a group, a new group or a layer), scene_move, scene_set, scene_group_set, object_paint, object_fill, object_map_set (a whole map in one call) and the rest. Layers name parts of a scene (the Mine, the Railway, the Train inside it) and never change paint order or the published SVG; they are apart from { group } wrappers: scene_items lists them, scene_layer_new makes one from items and layers, scene_layer_rename, scene_layer_ungroup, scene_layer_assign (into a layer or the top level), scene_layer_move (by tiles, together). Depth: a scene's items always draw back to front by where each stands (column, row and level, and the size of its block or the footprint of its sprite; a pixel-placed item has a level). Every edit puts the items in that order, so scene_items reads back to front, a new item goes where it belongs and the paths it returns are after the sort (reordered says which other paths moved). There is no raise or lower: scene_set depth (front, back or auto) on an item or a group is the one manual control, to draw it over or under everything else in its list. object_footprint says how many tiles a large sprite covers; scene_sort puts a scene written before this (or by hand) in order and reports what moved. Motion: scene_track_add, scene_track_remove, scene_key_set, scene_key_move, scene_key_delete, scene_motion_set, scene_motion_path (on-grid keys along a polyline). Edits stay in this server's memory with undo (doc_undo, doc_redo, doc_status).
-Save: doc_save validates the doc and, unless the server runs with --direct, writes a proposal for a person to approve in Pixel Lab instead of changing the document. Once the owner applies or rejects it, this server brings the doc back in line with the file on its own before your next call (doc_status shows how, as synced), so keep editing without a revert. doc_reload reloads a doc from disk when nothing unsaved would be lost. Before proposing, doc_status lists unsavedInApp: docs the owner has open in Pixel Lab with unsaved edits; say so if you propose against one. Say what you changed when you're done.
+Edit: scene_place (also into a group, a new group or a layer), scene_move, scene_set, scene_group_set, object_paint, object_fill, object_map_set (a whole map in one call) and the rest. Layers name parts of a scene (the Mine, the Railway, the Train inside it) and never change paint order or the published SVG; they are apart from { group } wrappers: scene_items lists them, scene_layer_new makes one from items and layers, scene_layer_rename, scene_layer_ungroup, scene_layer_assign (into a layer or the top level), scene_layer_move (by tiles, together). Depth: a scene's items always draw back to front by where each stands (column, row and level, and the size of its block or the footprint of its sprite; a pixel-placed item has a level). Every edit puts the items in that order, so scene_items reads back to front, a new item goes where it belongs and the paths it returns are after the sort (reordered says which other paths moved). There is no raise or lower: scene_set depth (front, back or auto) on an item or a group is the one manual control, to draw it over or under everything else in its list. object_footprint says how many tiles a large sprite covers; scene_sort puts a scene written before this (or by hand) in order and reports what moved. Motion: scene_track_add, scene_track_remove, scene_key_set, scene_key_move, scene_key_delete, scene_motion_set, scene_motion_path (on-grid keys along a polyline). Your edits apply to the document as you make them and save themselves: nothing waits for approval. While Pixel Lab has the document open, the owner sees each edit on the stage as it happens. A doc with problems isn't saved until they're fixed; check says what they are. doc_undo takes back your last edit (not one the owner made since). Every change is in the document's version history with you as its author: history_list, history_show and history_render look back, and history_undo takes back a whole version of yours, keeping what came after. Publishing to the site is the owner's. Say what you changed when you're done.
 Ask: chat_ask puts a question with two to four answers in front of the owner in Pixel Lab's Agent chat, as buttons; their choice comes back as their next message, so end your turn after it. Without a chat attached (a terminal) it says so: ask in your own conversation.";
 
 /// The Agent chat a server works for (`chatOf`): PIXELLAB_CHAT and
@@ -63,17 +60,10 @@ fn log(text: &str) {
 }
 
 /// A tool's description (`describe`).
-fn describe(cmd: &Command, direct: bool) -> String {
+fn describe(cmd: &Command) -> String {
     let mut text = format!("{}.{}", cmd.summary, cmd.description.map(|d| format!(" {d}")).unwrap_or_default());
-    if cmd.name == "doc.save" {
-        text += if direct {
-            " This server runs with --direct: doc_save writes the site."
-        } else {
-            " In this server doc_save does not change the site: it writes a proposal (with the list of edits since the doc last matched its file) for a person to approve. Once it is applied or rejected, the doc is brought in line with the file before your next call."
-        };
-    }
     if cmd.mutates && !cmd.writes_direct && cmd.name.split('.').next() != Some("doc") {
-        text += " The edit stays in memory until doc_save.";
+        text += " The edit applies and saves when the call is done.";
     }
     text
 }
@@ -84,9 +74,8 @@ fn tools<'a>(registry: &'a Registry, left: &[(&str, &str)]) -> Vec<(String, &'a 
 }
 
 /// tools/list's tools (`listTools`).
-pub fn list_tools(registry: &Registry, direct: bool) -> Value {
-    let left: Vec<(&str, &str)> = left_out(direct);
-    let list: Vec<Value> = tools(registry, &left)
+pub fn list_tools(registry: &Registry) -> Value {
+    let list: Vec<Value> = tools(registry, &LEFT_OUT)
         .into_iter()
         .map(|(name, cmd)| {
             let mut schema = Map::new();
@@ -99,7 +88,7 @@ pub fn list_tools(registry: &Registry, direct: bool) -> Value {
             json!({
                 "name": name,
                 "title": cmd.summary,
-                "description": describe(cmd, direct),
+                "description": describe(cmd),
                 "inputSchema": schema,
                 "annotations": {
                     "readOnlyHint": !cmd.mutates && !cmd.writes_direct,
@@ -110,14 +99,6 @@ pub fn list_tools(registry: &Registry, direct: bool) -> Value {
         })
         .collect();
     Value::Array(list)
-}
-
-fn left_out(direct: bool) -> Vec<(&'static str, &'static str)> {
-    if direct {
-        LEFT_OUT.iter().copied().filter(|(n, _)| *n == "proposal.apply" || *n == "proposal.reject").collect()
-    } else {
-        LEFT_OUT.to_vec()
-    }
 }
 
 /// The initialize result.
@@ -132,19 +113,11 @@ pub fn initialize_result(asked: Option<&str>) -> Value {
 }
 
 /// Runs the MCP server until its input ends; returns the exit code.
-pub fn start(
-    document: Document,
-    env: Env,
-    registry: &Registry,
-    direct: bool,
-    input: Box<dyn BufRead + Send>,
-    output: Box<dyn Write + Send>,
-) -> i32 {
+pub fn start(document: Document, env: Env, registry: &Registry, input: Box<dyn BufRead + Send>, output: Box<dyn Write + Send>) -> i32 {
     let chat = chat_of(&env);
-    let mut session =
-        Session::new(document, Options { env, mode: if direct { Mode::Direct } else { Mode::Propose }, chat, ..Options::default() });
+    let mut session = Session::new(document, Options { env, chat, ..Options::default() });
     session.author = Author::agent(None, session.chat.clone());
-    let left = left_out(direct);
+    let left = LEFT_OUT;
     let rpc = Output::new(output);
     let mut handle = |method: &str, params: Value, _: &Value| -> Result<Value, Failure> {
         match method {
@@ -162,7 +135,7 @@ pub fn start(
             }
             "notifications/initialized" | "notifications/cancelled" => Ok(Value::Null),
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(json!({ "tools": list_tools(registry, direct) })),
+            "tools/list" => Ok(json!({ "tools": list_tools(registry) })),
             "tools/call" => call_tool(&mut session, registry, &left, &params),
             m if m.starts_with("notifications/") => Ok(Value::Null),
             m => Err(RpcError::new(METHOD_NOT_FOUND, format!("no method {m}")).into()),
@@ -170,6 +143,32 @@ pub fn start(
     };
     serve_lines(input, &rpc, &mut handle, &mut |t| log(t));
     0
+}
+
+/// After a mutating call, saves each doc it left with changes, as the CLI does (R16, R23), and
+/// says so in the result: `saved` lists what was written, `unsaved` what couldn't be and why.
+fn save_after(session: &mut Session, cmd: &Command, result: Value) -> Value {
+    if !cmd.mutates || cmd.writes_direct || cmd.name.starts_with("doc.") {
+        return result;
+    }
+    let mut saved = Vec::new();
+    let mut unsaved = Vec::new();
+    for r in session.dirty_refs() {
+        let done = session.save_now(&r);
+        if done["saved"] == json!(true) {
+            saved.push(json!({ "doc": r, "wrote": done["wrote"] }));
+        } else {
+            unsaved.push(json!({ "doc": r, "code": done["code"], "message": done["message"] }));
+        }
+    }
+    let Value::Object(mut out) = result else { return result };
+    if !saved.is_empty() {
+        out.insert("saved".into(), Value::Array(saved));
+    }
+    if !unsaved.is_empty() {
+        out.insert("unsaved".into(), Value::Array(unsaved));
+    }
+    Value::Object(out)
 }
 
 /// tools/call (`callTool`).
@@ -208,7 +207,7 @@ fn call_tool(session: &mut Session, registry: &Registry, left: &[(&str, &str)], 
         .into());
     };
     session.sync();
-    match registry.call(&mut Ctx::new(session), cmd.name, args.clone(), false) {
+    match registry.call(&mut Ctx::new(session), cmd.name, args.clone(), false).map(|r| save_after(session, cmd, r)) {
         Ok(result) => {
             let summary = activity_summary(cmd, &result, args.as_object().unwrap_or(&Map::new()));
             append(session, true, &summary);

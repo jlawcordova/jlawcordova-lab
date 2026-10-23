@@ -1,5 +1,5 @@
-//! The doc, proposal and check parts of cli/test/edit-commands.test.mjs:
-//! sessions (undo, redo, revert, saves, conflicts) and proposals. The Node
+//! The doc and check parts of cli/test/edit-commands.test.mjs: sessions
+//! (undo, redo, revert, saves, conflicts) and an agent's saves. The Node
 //! tests edit with scene.place / scene.move / object.paint; those commands
 //! belong to other units, so the edits here are made with `ctx.edit` (as the
 //! session suite does), and the tests that need the commands are ignored.
@@ -14,14 +14,15 @@ use std::fs;
 use std::rc::Rc;
 
 use common::{make_document, TempDocument};
+use pixellab::author::Author;
 use pixellab::context::{Ctx, DocKind};
 use pixellab::document::{open_document, OpenOptions};
 use pixellab::errors::{Error, Result};
 use pixellab::registry::registry;
-use pixellab::session::{Edit, Mode, Options, Session};
+use pixellab::session::{Edit, Options, Session};
 use serde_json::{json, Map, Value};
 
-fn session(doc: &TempDocument, mode: Mode) -> Session {
+fn session(doc: &TempDocument) -> Session {
     let mut env = doc.env();
     env.insert("PIXELLAB_STATE".into(), doc.base.join("state").to_string_lossy().into_owned());
     let document = open_document(&OpenOptions {
@@ -31,7 +32,14 @@ fn session(doc: &TempDocument, mode: Mode) -> Session {
         cwd: doc.root.clone(),
     })
     .unwrap();
-    Session::new(document, Options { mode, env, agent: Some("test-agent 1.0".into()), ..Options::default() })
+    Session::new(document, Options { env, agent: Some("test-agent 1.0".into()), ..Options::default() })
+}
+
+/// A session whose edits are an agent's.
+fn agent_session(doc: &TempDocument) -> Session {
+    let mut s = session(doc);
+    s.author = Author::agent(Some("test-agent 1.0".into()), None);
+    s
 }
 
 fn call(s: &mut Session, name: &str, params: Value) -> Result<Value> {
@@ -58,7 +66,7 @@ fn place(s: &mut Session, col: i64) -> Value {
 #[test]
 fn undo_and_redo_with_doc_changed_statuses_and_nothing_written_until_save() {
     let doc = make_document();
-    let mut s = session(&doc, Mode::Direct);
+    let mut s = session(&doc);
     let disk = fs::read_to_string(doc.root.join("scenes/sample.json")).unwrap();
     place(&mut s, 1);
     place(&mut s, 2);
@@ -86,7 +94,7 @@ fn undo_and_redo_with_doc_changed_statuses_and_nothing_written_until_save() {
 #[test]
 fn conflict_a_file_changed_on_disk_since_it_was_opened_is_not_overwritten_unless_forced() {
     let doc = make_document();
-    let mut s = session(&doc, Mode::Direct);
+    let mut s = session(&doc);
     place(&mut s, 1);
     let outside = format!("{}\n", fs::read_to_string(doc.root.join("scenes/sample.json")).unwrap());
     fs::write(doc.root.join("scenes/sample.json"), &outside).unwrap();
@@ -100,7 +108,7 @@ fn conflict_a_file_changed_on_disk_since_it_was_opened_is_not_overwritten_unless
 #[test]
 fn revert_loads_the_file_again_as_an_undo_step_and_close_refuses_unsaved_changes() {
     let doc = make_document();
-    let mut s = session(&doc, Mode::Direct);
+    let mut s = session(&doc);
     place(&mut s, 1);
     let r = call(&mut s, "doc.revert", json!({ "doc": "sample" })).unwrap();
     assert_eq!((r["dirty"].clone(), r["canUndo"].clone()), (json!(false), json!(true)));
@@ -111,77 +119,42 @@ fn revert_loads_the_file_again_as_an_undo_step_and_close_refuses_unsaved_changes
 }
 
 #[test]
-fn propose_mode_doc_save_writes_a_proposal_not_the_document_apply_and_reject() {
+fn r16_an_agents_doc_save_writes_the_document_with_the_agent_as_the_versions_author() {
     let doc = make_document();
-    let mut agent = session(&doc, Mode::Propose);
+    let mut agent = agent_session(&doc);
     let disk = fs::read_to_string(doc.root.join("scenes/sample.json")).unwrap();
     place(&mut agent, 3);
     let saved = call(&mut agent, "doc.save", json!({ "doc": "sample" })).unwrap();
-    assert_eq!(saved["wrote"], json!(false));
-    assert_eq!(fs::read_to_string(doc.root.join("scenes/sample.json")).unwrap(), disk, "the document is untouched");
-    let proposal: Value = serde_json::from_str(&fs::read_to_string(saved["file"].as_str().unwrap()).unwrap()).unwrap();
-    let keys: Vec<&String> = proposal.as_object().unwrap().keys().collect();
-    assert_eq!(keys, ["id", "number", "format", "doc", "baseHash", "source", "summary", "createdAt", "agent"]);
-    assert_eq!(proposal["format"], 2, "R25: a proposal the program writes is format 2");
-    assert_eq!(proposal["agent"], "test-agent 1.0");
-
-    let mut person = session(&doc, Mode::Direct);
-    let list = call(&mut person, "proposal.list", json!({})).unwrap();
-    let p = &list["proposals"][0];
-    assert_eq!(
-        (p["id"].clone(), p["baseMatches"].clone(), p["summary"].as_array().unwrap().len()),
-        (proposal["id"].clone(), json!(true), 1)
-    );
-    let shown = call(&mut person, "proposal.show", json!({ "id": proposal["id"] })).unwrap();
-    assert!(
-        shown["diff"].as_str().unwrap().contains("\"tile\": [3, 2, 0]") || shown["diff"].as_str().unwrap().contains("[3, 2, 0]"),
-        "{}",
-        shown["diff"]
-    );
-    call(&mut person, "doc.open", json!({ "doc": "sample" })).unwrap();
-    let applied = call(&mut person, "proposal.apply", json!({ "id": proposal["id"] })).unwrap();
-    assert_eq!(applied["reloaded"], true);
-    assert_eq!(fs::read_to_string(doc.root.join("scenes/sample.json")).unwrap(), proposal["source"].as_str().unwrap());
-    assert!(!std::path::Path::new(saved["file"].as_str().unwrap()).exists(), "the proposal is removed");
-    assert_eq!(call(&mut person, "proposal.list", json!({})).unwrap()["proposals"], json!([]));
-
-    // A proposal on a base that changed is refused unless forced; reject deletes.
-    let mut agent = session(&doc, Mode::Propose);
-    place(&mut agent, 4);
-    let second = call(&mut agent, "doc.save", json!({ "doc": "sample" })).unwrap();
+    assert_eq!(saved["wrote"], json!(true));
     let now = fs::read_to_string(doc.root.join("scenes/sample.json")).unwrap();
-    fs::write(doc.root.join("scenes/sample.json"), format!("{now}\n")).unwrap();
-    assert_eq!(call(&mut person, "proposal.list", json!({})).unwrap()["proposals"][0]["baseMatches"], false);
-    assert_eq!(code(call(&mut person, "proposal.apply", json!({ "id": second["proposal"] })).unwrap_err()), "conflict");
-    let rejected = call(&mut person, "proposal.reject", json!({ "id": second["proposal"] })).unwrap();
-    assert_eq!(rejected["rejected"], true);
-    assert_eq!(code(call(&mut person, "proposal.show", json!({ "id": second["proposal"] })).unwrap_err()), "not_found");
-    assert_eq!(code(call(&mut person, "proposal.show", json!({ "id": "../../etc/passwd" })).unwrap_err()), "not_found");
+    assert_ne!(now, disk, "the edit applied");
+    assert!(now.contains("[3, 2, 0]"), "{now}");
+    assert!(!doc.base.join("state").join("proposals").exists(), "no proposal is written");
+    let list = call(&mut agent, "history.list", json!({})).unwrap();
+    assert_eq!(list["versions"][0]["author"], json!({ "kind": "agent", "name": "test-agent 1.0" }));
+    assert_eq!(list["versions"][0]["files"], json!(["scenes/sample.json"]));
 }
 
 #[test]
-fn proposal_render_the_proposed_doc_over_the_files_on_disk_rendered_without_writing() {
+fn r15_history_render_draws_a_version_over_the_document_without_writing() {
     let doc = make_document();
-    let mut agent = session(&doc, Mode::Propose);
-    let mut person = session(&doc, Mode::Direct);
+    let mut s = session(&doc);
+    place(&mut s, -2);
+    call(&mut s, "doc.save", json!({ "doc": "sample" })).unwrap();
     let text = fs::read_to_string(doc.root.join("scenes/sample.json")).unwrap();
-    place(&mut agent, -2);
-    let scene = call(&mut agent, "doc.save", json!({ "doc": "sample" })).unwrap();
-    let r = call(&mut person, "proposal.render", json!({ "id": scene["proposal"], "scale": 2 })).unwrap();
-    assert_eq!(
-        (r["kind"].clone(), r["doc"].clone(), r["baseMatches"].clone(), r["scale"].clone()),
-        (json!("scene"), json!("scene:sample"), json!(true), json!(2))
-    );
+    let r = call(&mut s, "history.render", json!({ "version": 1, "doc": "sample", "scale": 2 })).unwrap();
+    assert_eq!((r["kind"].clone(), r["doc"].clone(), r["scale"].clone()), (json!("scene"), json!("scene:sample"), json!(2)));
     assert_eq!(r["items"].as_array().unwrap().len(), 3);
+    let r0 = call(&mut s, "history.render", json!({ "version": 0, "doc": "sample" })).unwrap();
+    assert_eq!(r0["items"].as_array().unwrap().len(), 2, "version 0 is the scene before the pebble");
     assert_eq!(fs::read_to_string(doc.root.join("scenes/sample.json")).unwrap(), text, "nothing written");
-    assert_eq!(code(call(&mut person, "proposal.render", json!({ "id": "20990101-000000-abcdef" })).unwrap_err()), "not_found");
-    call(&mut person, "proposal.reject", json!({ "id": scene["proposal"] })).unwrap();
+    assert_eq!(code(call(&mut s, "history.render", json!({ "version": 99, "doc": "sample" })).unwrap_err()), "not_found");
 }
 
 #[test]
-fn propose_mode_validates_too_a_proposal_with_problems_is_refused_unless_forced() {
+fn r2_an_agents_save_validates_too_a_doc_with_problems_is_refused_unless_forced() {
     let doc = make_document();
-    let mut s = session(&doc, Mode::Propose);
+    let mut s = agent_session(&doc);
     Ctx::new(&mut s)
         .edit(DocKind::Scene, "sample", None, |d, _| {
             d["items"][0]["object"] = json!("no-such-object");
@@ -205,7 +178,7 @@ fn rapid_repeats_coalesce_into_one_undo_step_other_edits_do_not() {
         cwd: doc.root.clone(),
     })
     .unwrap();
-    let mut s = Session::new(document, Options { mode: Mode::Direct, env, now: Box::new(move || c.get()), ..Options::default() });
+    let mut s = Session::new(document, Options { env, now: Box::new(move || c.get()), ..Options::default() });
     for _ in 0..3 {
         call(&mut s, "scene.move", json!({ "name": "sample", "item": "0", "by": [1, 0] })).unwrap();
         clock.set(clock.get() + 100.0);
@@ -224,7 +197,7 @@ fn rapid_repeats_coalesce_into_one_undo_step_other_edits_do_not() {
 #[test]
 fn a_failed_edit_leaves_the_working_copy_as_it_was() {
     let doc = make_document();
-    let mut s = session(&doc, Mode::Direct);
+    let mut s = session(&doc);
     call(&mut s, "doc.open", json!({ "doc": "scene:sample" })).unwrap();
     let before = call(&mut s, "doc.status", json!({ "doc": "sample" })).unwrap();
     let err = call(&mut s, "scene.set", json!({ "name": "sample", "item": "0", "tile": [5, 5, 0], "id": "Bad Id" })).unwrap_err();
@@ -250,7 +223,7 @@ fn every_real_scene_and_object_serializes_to_its_file_byte_for_byte_and_saves_un
         let document =
             open_document(&OpenOptions { doc: Some(root.to_string_lossy().into_owned()), site: None, env: env.clone(), cwd: root.clone() })
                 .unwrap();
-        let mut s = Session::new(document, Options { mode: Mode::Direct, env, ..Options::default() });
+        let mut s = Session::new(document, Options { env, ..Options::default() });
         for kind in [DocKind::Scene, DocKind::Object] {
             let names = Ctx::new(&mut s).names(kind).unwrap();
             for name in names {

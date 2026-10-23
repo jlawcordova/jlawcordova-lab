@@ -125,12 +125,13 @@ fn read(name: &str, r: &Value) -> Option<String> {
                 if problems > 0 { plural_n(problems, "problem") } else { "no problems".into() }
             )
         }
-        "proposal.list" => format!("listed {}", plural_n(count(g("proposals")), "proposal")),
-        "proposal.show" => format!("showed proposal {} ({}, {})", text(g("id")), text(g("doc")), plural_n(count(g("summary")), "edit")),
-        "proposal.render" => format!("rendered proposal {} ({}) at {}×", text(g("id")), text(g("doc")), text(g("scale"))),
         "activity.list" => {
             format!("listed {}", plural(Some(&Value::from(count(g("entries")))), "activity entry", Some("activity entries")))
         }
+        "history.list" => format!("listed {}", plural_n(count(g("versions")), "version")),
+        "history.show" => format!("showed version {} ({})", text(g("number")), plural_n(count(g("edits")), "edit")),
+        "history.render" => format!("rendered {} at version {}, {}×", text(g("doc")), text(g("version")), text(g("scale"))),
+        "history.restore" | "history.undo" | "history.mark" | "doc.flush" if truthy(g("summary")) => text(g("summary")),
         "doc.status" => {
             if truthy(g("docs")) {
                 format!("{} open", plural_n(count(g("docs")), "doc"))

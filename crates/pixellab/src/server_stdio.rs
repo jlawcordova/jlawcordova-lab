@@ -9,7 +9,7 @@
 //!   doc.changed        { doc, dirty, canUndo, canRedo }  after each edit, undo, redo, save, revert or reload
 //!   doc.stale          { doc, file }                     an open doc with unsaved edits whose file changed on disk
 //!   files.changed      { files: ['scenes/x.json', …] }   when sources change on disk (debounced)
-//!   proposals.changed  { proposals: [...] }              when the state dir's proposals change (as proposal.list)
+//!   history.changed    { versions: [latest] }             the document's version history changed
 //!   activity.appended  { entries: [...] }                new lines of activity.jsonl
 //!
 //! It keeps open/<pid>.json in the state dir current (open_docs.rs). One
@@ -29,7 +29,7 @@ use crate::errors::{CommandError, Error};
 use crate::jsonrpc::{handle_line, spawn_lines, Failure, Output, RpcError, METHOD_NOT_FOUND};
 use crate::open_docs::OpenDocsWriter;
 use crate::registry::Registry;
-use crate::session::{is_stale, read_source, Mode, Options, Session};
+use crate::session::{is_stale, read_source, Options, Session};
 use crate::state::now_ms;
 use crate::watch::{SourcesWatcher, StateWatcher, POLL_MS};
 
@@ -72,7 +72,7 @@ pub fn start(
 ) -> i32 {
     let rpc = Output::new(output);
     let notify = rpc.clone();
-    // The app's server notices stale docs itself (the watcher), so proposal.apply can tell it.
+    // The app's server notices stale docs itself (the watcher) and when autosave can't merge one.
     let stale = rpc.clone();
     let autosave_ms = autosave_ms(&env);
     let mut session = Session::new(
@@ -80,7 +80,6 @@ pub fn start(
         Options {
             env,
             autosave_ms: Some(autosave_ms),
-            mode: Mode::Direct,
             on_change: Some(Box::new(move |status| notify.notify("doc.changed", status))),
             on_stale: Some(Box::new(move |doc| stale.notify("doc.stale", doc))),
             ..Options::default()
@@ -96,7 +95,7 @@ pub fn start(
     let mut state = None;
     if watch {
         sources = Some(SourcesWatcher::new(&session.document.source_dir));
-        state = Some(StateWatcher::new(&session.state));
+        state = Some(StateWatcher::new(&session.state, session.history.dir.join("versions.jsonl")));
         let ticks = tx.clone();
         std::thread::spawn(move || loop {
             std::thread::sleep(Duration::from_millis(POLL_MS));
@@ -215,13 +214,9 @@ pub fn start(
                 session.autosave(now, false);
                 if let Some(w) = state.as_mut() {
                     let changes = w.poll(now);
-                    if changes.proposals {
-                        match registry.call(&mut Ctx::new(&mut session), "proposal.list", json!({}), false) {
-                            Ok(r) => {
-                                rpc.notify("proposals.changed", json!({ "proposals": r.get("proposals").cloned().unwrap_or(Value::Null) }))
-                            }
-                            Err(e) => log(&format!("listing proposals failed: {}", e.message())),
-                        }
+                    if changes.history {
+                        let latest: Vec<Value> = session.history.versions().last().map(crate::history::summary).into_iter().collect();
+                        rpc.notify("history.changed", json!({ "versions": latest }));
                     }
                     if !changes.activity.is_empty() {
                         rpc.notify("activity.appended", json!({ "entries": changes.activity }));

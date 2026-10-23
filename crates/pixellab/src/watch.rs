@@ -101,43 +101,38 @@ impl SourcesWatcher {
 /// What a `StateWatcher` poll found.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StateChanges {
-    /// A proposal file came, changed or went (debounced).
-    pub proposals: bool,
+    /// The document's version history changed (debounced).
+    pub history: bool,
     /// The entries appended to activity.jsonl since the last poll.
     pub activity: Vec<Value>,
 }
 
-/// Watches the state dir: the proposals and the activity log.
+/// Watches the state dir: the document's version history and the activity log.
 pub struct StateWatcher {
-    proposals_dir: PathBuf,
+    history_file: PathBuf,
     activity_file: PathBuf,
-    snapshot: HashMap<String, Stamp>,
-    proposals_pending: bool,
+    stamp: Option<Stamp>,
+    history_pending: bool,
     last_change: f64,
     offset: u64,
 }
 
+fn stamp_of(path: &Path) -> Option<Stamp> {
+    fs::metadata(path).ok().map(|m| (m.len(), m.modified().ok()))
+}
+
 impl StateWatcher {
-    /// Creates the proposals dir and starts at the activity log's current end.
-    pub fn new(state: &State) -> StateWatcher {
-        let _ = fs::create_dir_all(&state.proposals_dir);
+    /// Starts at the activity log's current end; `history_file` is the document's versions.jsonl.
+    pub fn new(state: &State, history_file: PathBuf) -> StateWatcher {
         let offset = fs::metadata(&state.activity_file).map(|m| m.len()).unwrap_or(0);
-        let mut w = StateWatcher {
-            proposals_dir: state.proposals_dir.clone(),
+        StateWatcher {
+            stamp: stamp_of(&history_file),
+            history_file,
             activity_file: state.activity_file.clone(),
-            snapshot: HashMap::new(),
-            proposals_pending: false,
+            history_pending: false,
             last_change: 0.0,
             offset,
-        };
-        w.snapshot = w.scan();
-        w
-    }
-
-    fn scan(&self) -> HashMap<String, Stamp> {
-        let mut out = HashMap::new();
-        scan_json(&self.proposals_dir, "", &mut out);
-        out
+        }
     }
 
     fn read_activity(&mut self) -> Vec<Value> {
@@ -163,19 +158,19 @@ impl StateWatcher {
         parse_activity(&String::from_utf8_lossy(&buf[..end]))
     }
 
-    /// Looks for changes; `proposals` is true once `DEBOUNCE_MS` has passed since the latest one.
+    /// Looks for changes; `history` is true once `DEBOUNCE_MS` has passed since the latest one.
     pub fn poll(&mut self, now_ms: f64) -> StateChanges {
-        let now = self.scan();
-        if !changed(&self.snapshot, &now).is_empty() {
-            self.proposals_pending = true;
+        let now = stamp_of(&self.history_file);
+        if now != self.stamp {
+            self.history_pending = true;
             self.last_change = now_ms;
+            self.stamp = now;
         }
-        self.snapshot = now;
-        let mut proposals = false;
-        if self.proposals_pending && now_ms - self.last_change >= DEBOUNCE_MS {
-            self.proposals_pending = false;
-            proposals = true;
+        let mut history = false;
+        if self.history_pending && now_ms - self.last_change >= DEBOUNCE_MS {
+            self.history_pending = false;
+            history = true;
         }
-        StateChanges { proposals, activity: self.read_activity() }
+        StateChanges { history, activity: self.read_activity() }
     }
 }

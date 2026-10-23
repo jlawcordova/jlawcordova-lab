@@ -933,7 +933,7 @@ pub fn commands() -> Vec<Command> {
         "A scene with a viewBox publishes at exactly that box (fixed). One without publishes at the smallest whole-pixel box that holds everything it paints, ",
         "over its whole loop (scene motion, ambient loops and actions included), plus its margin (fit). --box x,y,w,h fixes the size; ",
         "--fit removes the viewBox so the scene fits its content again; --margin n sets the pixels left around a fit scene's art (a fixed box ignores it). ",
-        "With none of them it reports the frame: { frame: \"fixed\" | \"fit\", viewBox, size: [w, h], margin }. One undo step; over MCP a proposal like every edit."
+        "With none of them it reports the frame: { frame: \"fixed\" | \"fit\", viewBox, size: [w, h], margin }. One undo step, saved like every edit."
     ));
     frame.args = vec!["name"];
     frame.examples = vec![

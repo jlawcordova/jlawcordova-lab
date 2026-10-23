@@ -7,14 +7,13 @@ use crate::document::{open_document, open_document_allowing_old, OpenOptions};
 use crate::errors::{CommandError, Error};
 
 pub const SERVE_HELP: &str = "Usage: pixellab serve --stdio [--document <path.pixellab> | --site <checkout>]
-       pixellab serve --mcp [--direct] [--document <path.pixellab> | --site <checkout>]
+       pixellab serve --mcp [--document <path.pixellab> | --site <checkout>]
 
 Starts a server on stdin and stdout (newline-delimited JSON-RPC 2.0; logs on stderr).
   --stdio   the Mac app's server: methods are the command names, plus session.info and
-            shutdown; edits stay in memory with undo until doc.save writes them
+            shutdown; edits save themselves a second after the last one, with undo
   --mcp     an MCP server for agents: tools are the commands (scene.place → scene_place);
-            doc_save writes a proposal to the state dir for a person to approve
-  --direct  with --mcp: doc_save writes the document instead of a proposal
+            each edit applies and saves, with the agent as its author in the history
 
 Register with Claude Code:
   claude mcp add pixellab -- <path to pixellab> serve --mcp
@@ -101,8 +100,9 @@ fn run(argv: &[String], io: &mut Io) -> Result<i32, Error> {
     if flags.stdio == flags.mcp {
         return Err(CommandError::usage("serve: give --stdio or --mcp; run pixellab serve --help").into());
     }
-    if flags.direct && !flags.mcp {
-        return Err(CommandError::usage("serve: --direct goes with --mcp").into());
+    if flags.direct {
+        // Registrations made before edits applied keep working (docs/intents/2026-10-autosave/spec.md, D6).
+        let _ = writeln!(io.stderr, "pixellab: --direct is no longer needed: edits apply");
     }
     let options = OpenOptions { doc: flags.document, site: flags.site, env: io.env.clone(), cwd: io.cwd.clone() };
     // The app's server opens a format-1 document too, so it can migrate it (R8, R9).
@@ -121,7 +121,6 @@ fn run(argv: &[String], io: &mut Io) -> Result<i32, Error> {
         document,
         io.env.clone(),
         io.registry,
-        flags.direct,
         Box::new(std::io::BufReader::new(std::io::stdin())),
         Box::new(std::io::stdout()),
     ))

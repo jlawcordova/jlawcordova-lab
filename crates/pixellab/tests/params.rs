@@ -316,9 +316,6 @@ fn every_command_is_well_formed_and_has_a_group() {
         "object.render",
         "object.show",
         "palette.get",
-        "proposal.list",
-        "proposal.render",
-        "proposal.show",
         "scene.items",
         "scene.list",
         "scene.render",
@@ -354,8 +351,6 @@ fn every_command_is_well_formed_and_has_a_group() {
         "object.paint",
         "object.resize",
         "object.still",
-        "proposal.apply",
-        "proposal.reject",
         "scene.action",
         "scene.ambient",
         "scene.drop",
@@ -402,20 +397,10 @@ fn every_command_is_well_formed_and_has_a_group() {
     let writes: Vec<&str> = names.iter().copied().filter(|n| reg.get(n).unwrap().writes_direct).collect();
     assert_eq!(
         writes,
-        [
-            "art.build",
-            "document.copy",
-            "document.migrate",
-            "document.new",
-            "history.mark",
-            "history.restore",
-            "history.undo",
-            "proposal.apply",
-            "proposal.reject"
-        ]
+        ["art.build", "document.copy", "document.migrate", "document.new", "history.mark", "history.restore", "history.undo"]
     );
     let groups: Vec<String> = reg.groups().into_iter().map(|(g, _)| g).collect();
-    assert_eq!(groups, ["activity", "art", "chat", "check", "doc", "document", "history", "object", "palette", "proposal", "scene"]);
+    assert_eq!(groups, ["activity", "art", "chat", "check", "doc", "document", "history", "object", "palette", "scene"]);
 }
 
 fn base(name: &'static str) -> Command {

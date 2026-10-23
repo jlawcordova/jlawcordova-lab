@@ -227,13 +227,10 @@ fn r4_over_mcp_the_tool_result_carries_the_warnings() {
     let mut s = start("--mcp", &doc);
     s.request("initialize", json!({ "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": { "name": "t", "version": "1" } }));
     let mut call = |name: &str, args: Value| s.request("tools/call", json!({ "name": name, "arguments": args }));
+    // Publishing is the owner's (autosave spec, R16): art_build isn't a tool, even with --direct.
     let built = call("art_build", json!({ "dir": out.to_string_lossy() }));
-    assert_ne!(built["isError"], true, "{built}");
-    assert_eq!(built["structuredContent"]["ok"], true);
-    assert_eq!(built["structuredContent"]["outputs"][0]["warnings"], json!(["over its 0.5 KB budget"]));
-    let text = built["content"][0]["text"].as_str().unwrap();
-    assert!(text.contains("over its 0.5 KB budget (warning)"), "{text}");
-    assert!(dir_has(&out, "sample.svg"));
+    assert!(built.is_null(), "an unknown tool is an error, not a result: {built}");
+    assert!(!dir_has(&out, "sample.svg"));
     let sizes = call("art_sizes", json!({ "name": "sample" }));
     assert_eq!(sizes["structuredContent"]["warnings"], json!(["over its 0.5 KB budget"]));
     let check = call("check", json!({}));

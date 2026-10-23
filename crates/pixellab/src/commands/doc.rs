@@ -2,10 +2,9 @@
 
 use serde_json::{json, Map, Value};
 
-use super::common::{doc_param, flag, join, opt_str, resolve_doc, str_of};
+use super::common::{doc_param, flag, opt_str, resolve_doc, str_of};
 use crate::context::Ctx;
 use crate::errors::Result;
-use crate::open_docs::unsaved_in_app;
 use crate::registry::{Command, Params};
 
 fn doc_params(more: Vec<(&str, Value)>) -> Value {
@@ -56,37 +55,20 @@ fn open_format(r: &Value, _: &Params) -> String {
 }
 
 fn status_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
-    let in_app = {
-        let session = ctx.session()?;
-        unsaved_in_app(&session.state.dir, &session.document.root)
-    };
     let Some(doc) = opt_str(&params, "doc") else {
         let session = ctx.session()?;
-        return Ok(json!({ "docs": session.list(), "unsavedInApp": in_app, "settled": session.settled }));
+        return Ok(json!({ "docs": session.list() }));
     };
     let ref_ = entry_of(ctx, doc, false)?;
-    let mut out = match ctx.session()?.details(&ref_) {
-        Value::Object(m) => m,
-        _ => Map::new(),
-    };
-    out.insert("unsavedInApp".into(), json!(in_app.contains(&ref_)));
-    Ok(Value::Object(out))
+    Ok(ctx.session()?.details(&ref_))
 }
 
 fn status_format(r: &Value, _: &Params) -> String {
     if let Some(docs) = r.get("docs").and_then(Value::as_array) {
         let lines = docs.iter().map(status_line).collect::<Vec<_>>().join("\n");
-        let first = if lines.is_empty() { "no docs open".to_string() } else { lines };
-        let unsaved = r["unsavedInApp"].as_array().is_some_and(|a| !a.is_empty());
-        let second = if unsaved { format!("unsaved in Pixel Lab: {}", join(r.get("unsavedInApp"), ", ")) } else { String::new() };
-        return [first, second].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n");
+        return if lines.is_empty() { "no docs open".to_string() } else { lines };
     }
-    format!(
-        "{}{}{}",
-        status_line(r),
-        if r["stale"] == json!(true) { ", changed on disk" } else { "" },
-        if r["unsavedInApp"] == json!(true) { ", unsaved in Pixel Lab" } else { "" }
-    )
+    format!("{}{}", status_line(r), if r["stale"] == json!(true) { ", changed on disk" } else { "" })
 }
 
 fn undo_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
@@ -160,16 +142,12 @@ fn flush_format(r: &Value, _: &Params) -> String {
 }
 
 fn save_format(r: &Value, _: &Params) -> String {
-    if engine::engine::truthy(r.get("proposal")) {
-        format!("{}: proposed as {}", str_of(r.get("doc")), str_of(r.get("proposal")))
-    } else {
-        let file = str_of(r.get("file"));
-        format!(
-            "{}: {}",
-            str_of(r.get("doc")),
-            if engine::engine::truthy(r.get("wrote")) { format!("wrote {file}") } else { format!("{file} unchanged") }
-        )
-    }
+    let file = str_of(r.get("file"));
+    format!(
+        "{}: {}",
+        str_of(r.get("doc")),
+        if engine::engine::truthy(r.get("wrote")) { format!("wrote {file}") } else { format!("{file} unchanged") }
+    )
 }
 
 fn revert_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
@@ -223,7 +201,7 @@ pub fn commands() -> Vec<Command> {
         session_command(
             "doc.open",
             "Open a scene or object as a working copy, with undo and redo",
-            Some("Edits to an open doc stay in memory until doc.save. Editing a doc that isn't open opens it, so this is only needed to start from a clean status."),
+            Some("Edits to an open doc save themselves (the app's server: about a second after the last one; MCP and the CLI: after each command). Editing a doc that isn't open opens it, so this is only needed to start from a clean status."),
             doc_params(vec![]),
             false,
             open_run,
@@ -233,11 +211,10 @@ pub fn commands() -> Vec<Command> {
             "doc.status",
             "Whether open docs have unsaved changes, and can undo or redo",
             Some(concat!(
-                "With a doc: { doc, dirty, canUndo, canRedo, file, exists, stale, undo: [edits], redo: [edits], edits, proposal?, synced?, unsavedInApp }. ",
-                "stale: the file changed on disk since the doc was opened or last matched it. edits: the edits since the doc last matched its file (what a proposal lists). ",
-                "synced: how the doc was brought in line with disk after its proposal was applied or rejected ({ proposal, outcome, action }). ",
-                "unsavedInApp: Pixel Lab has this doc open with unsaved edits, so a proposal for it will clash with them. ",
-                "Without a doc: { docs: [{ doc, dirty, canUndo, canRedo }], unsavedInApp: [docs Pixel Lab has open with unsaved edits], settled: [proposals settled lately] }."
+                "With a doc: { doc, dirty, canUndo, canRedo, undoLabel, redoLabel, author, saveState, problems, file, exists, stale, undo: [edits], redo: [edits], edits }. ",
+                "saveState: saved, pending (a save is coming), problems (it can't be saved until they're fixed) or conflict (its file changed on disk and clashes). ",
+                "undoLabel and redoLabel name the step and, for anyone but the owner, whose it is. stale: the file changed on disk since the doc was opened or last matched it. ",
+                "edits: the edits since the doc last matched its file. Without a doc: { docs: [{ doc, dirty, canUndo, canRedo }] }."
             )),
             json!({ "type": "object", "properties": { "doc": doc_param() } }),
             false,
@@ -264,12 +241,11 @@ pub fn commands() -> Vec<Command> {
         ),
         session_command(
             "doc.save",
-            "Save an open doc: validate, serialize with the engine and write its source (MCP: write a proposal)",
+            "Save an open doc now and close its version: validate, serialize with the engine and write its source",
             Some(concat!(
+                "Edits save themselves, so this is the Mac's Save: it writes now and starts a new version for the next edit. ",
                 "Refuses a doc with validation problems (code invalid, details: the problems) and a file that changed on disk since the doc was opened ",
-                "(code conflict), unless --force. In the MCP server it writes a proposal to the state dir for a person to approve instead (unless started with --direct). ",
-                "Returns { doc, file, wrote, hash, diff, dirty, canUndo, canRedo }, or { doc, proposal, file, summary, edits, diff, warnings?, … } for a proposal: ",
-                "edits lists the edits since the doc last matched its file, and warnings says when Pixel Lab has the doc open with unsaved edits."
+                "(code conflict), unless --force. Returns { doc, file, wrote, hash, diff, dirty, canUndo, canRedo }."
             )),
             doc_params(vec![force_param("save despite problems or a conflict")]),
             true,
@@ -301,8 +277,8 @@ pub fn commands() -> Vec<Command> {
             "doc.reload",
             "Load an open doc from disk again, only if no unsaved work is lost",
             Some(concat!(
-                "Reloads when the working copy has no edits its file lacks: it is clean, or it matches the file (as after its proposal was applied). ",
-                "Refuses with code dirty (details: the edits that would be lost) when there are unsaved edits, and with code proposed while its proposal waits for the owner. ",
+                "Reloads when the working copy has no edits its file lacks: it is clean, or it matches the file. ",
+                "Refuses with code dirty (details: the edits that would be lost) when there are unsaved edits. ",
                 "Returns { doc, reloaded, changed, summary, dirty, canUndo, canRedo }; reloaded is false when the doc already matched the file. ",
                 "A scene whose file is not in depth order (a hand edit) is sorted as a step of its own: the result has sorted (how many items moved), the doc is then unsaved, ",
                 "and one undo gives back exactly the file. doc.revert is the one that drops edits."

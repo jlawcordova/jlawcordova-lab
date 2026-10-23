@@ -12,16 +12,17 @@
 //! Saving: validate with the engine and refuse a doc with problems unless
 //! forced; write the canonical format-2 text; refuse with a conflict if the
 //! file changed on disk since the doc was opened (by hash) unless forced;
-//! write atomically. In 'propose' mode (MCP) a save writes a proposal to the
-//! state dir instead.
+//! write atomically, and record the write in the version history
+//! (docs/intents/2026-10-autosave/spec.md, D3). Every save is a write: agents'
+//! edits apply as anyone's do (R16). `autosave` saves a doc a while after its
+//! last change (D1).
 //!
 //! Edits since disk (docs/intents/2026-10-mcp-gaps/spec.md, D1): every undo
 //! step has a sequence number, and an entry's base_seq is the number when
-//! the doc last matched its file; a proposal lists only the steps after it.
-//! `sync` (D2) settles an MCP session's proposals once the owner applies or
-//! rejects them, and reloads clean docs whose files changed. `merge` (D4)
-//! brings a change on disk into a dirty working copy, three ways, in the
-//! sources' trailing-comma form (merge.rs).
+//! the doc last matched its file; a version lists the steps after it.
+//! `sync` reloads clean docs whose files changed. `merge` (D4) brings a
+//! change on disk into a dirty working copy, three ways, in the sources'
+//! trailing-comma form (merge.rs).
 //!
 //! Depth order (docs/intents/2026-10-depth-order/spec.md, R4): an edit of a
 //! scene ends by putting every list of its items in depth order, inside the
@@ -43,16 +44,8 @@ use crate::document::{Document, Env};
 use crate::errors::{CommandError, Error, Result};
 use crate::history::{Change, History};
 use crate::merge::{fold_scene, merge3, trailing, untrailing};
-use crate::open_docs::unsaved_in_app;
 use crate::sorting::{path_changes, remap_json, sort_scene, Sorted};
-use crate::state::{create_state, iso_time, new_proposal_id, state_dir, write_atomic, State};
-
-/// How a session saves: the document's files, or proposals (MCP).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Mode {
-    Direct,
-    Propose,
-}
+use crate::state::{create_state, state_dir, write_atomic, State};
 
 pub const UNDO_LIMIT: usize = 200;
 pub const COALESCE_MS: f64 = 1000.0;
@@ -132,14 +125,6 @@ pub struct Base {
     pub text: String,
 }
 
-/// A proposal this session wrote for a doc.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Proposed {
-    pub id: String,
-    pub text: String,
-    pub seq: u64,
-}
-
 /// An open doc (`Entry`).
 #[derive(Clone, Debug)]
 pub struct Entry {
@@ -156,9 +141,6 @@ pub struct Entry {
     pub base_seq: u64,
     pub undone: Vec<String>,
     pub created: Option<String>,
-    pub proposal: Option<String>,
-    pub proposed: Option<Proposed>,
-    pub synced: Option<Value>,
     /// When the doc last changed, for autosave's pause (docs/intents/2026-10-autosave/spec.md, D1).
     pub changed_at: Option<f64>,
     /// Why autosave last couldn't write it, until it changes again.
@@ -215,7 +197,6 @@ impl Edit {
 
 /// How a session starts.
 pub struct Options {
-    pub mode: Mode,
     pub env: Env,
     pub agent: Option<String>,
     pub chat: Option<Value>,
@@ -230,7 +211,6 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Options {
-            mode: Mode::Direct,
             env: crate::document::process_env(),
             agent: None,
             chat: None,
@@ -328,7 +308,6 @@ fn placed(doc: &Value) -> Vec<Value> {
 /// The open docs of one door's run.
 pub struct Session {
     pub document: Document,
-    pub mode: Mode,
     pub env: Env,
     pub agent: Option<String>,
     /// The Agent chat this session works for (docs/intents/2026-10-agent-chat/spec.md, D7).
@@ -347,8 +326,6 @@ pub struct Session {
     /// Open docs by ref, in the order they were opened.
     pub entries: engine::omap::OMap<String, Entry>,
     pub seq: u64,
-    /// The proposals `sync` settled lately, newest last.
-    pub settled: Vec<Value>,
     disk: Option<Rc<Docs>>,
     loaded: Option<Rc<Loaded>>,
 }
@@ -367,7 +344,6 @@ impl Session {
         }
         Session {
             document,
-            mode: options.mode,
             env: options.env,
             agent: options.agent,
             chat: options.chat,
@@ -381,7 +357,6 @@ impl Session {
             history,
             entries: engine::omap::OMap::new(),
             seq: 0,
-            settled: Vec::new(),
             disk: None,
             loaded: None,
         }
@@ -526,9 +501,6 @@ impl Session {
                 base_seq: self.seq,
                 undone: vec![],
                 created: None,
-                proposal: None,
-                proposed: None,
-                synced: None,
                 changed_at: None,
                 blocked: None,
             };
@@ -555,9 +527,6 @@ impl Session {
             base_seq: self.seq,
             undone: vec![],
             created: Some(label.to_string()),
-            proposal: None,
-            proposed: None,
-            synced: None,
             changed_at: None,
             blocked: None,
         };
@@ -673,12 +642,6 @@ impl Session {
         redo.reverse();
         out.insert("redo".into(), Value::from(redo));
         out.insert("edits".into(), Value::from(edits(entry)));
-        if let Some(p) = &entry.proposal {
-            out.insert("proposal".into(), Value::String(p.clone()));
-        }
-        if let Some(s) = &entry.synced {
-            out.insert("synced".into(), s.clone());
-        }
         Value::Object(out)
     }
 
@@ -977,7 +940,7 @@ impl Session {
         }
     }
 
-    /// Saves a doc: writes its file ('direct') or a proposal ('propose').
+    /// Saves a doc: validates it and writes its file, recording the version.
     pub fn save(&mut self, ref_: &str, force: bool) -> Result<Value> {
         let plan = self.plan(ref_)?;
         let file = self.entry(ref_)?.file.clone();
@@ -994,9 +957,6 @@ impl Session {
             )
             .with_details(Value::from(plan.problems.clone()))
             .into());
-        }
-        if self.mode == Mode::Propose {
-            return self.propose(ref_, plan);
         }
         if let Some(conflict) = plan.conflict.filter(|_| !force) {
             let how = match conflict {
@@ -1020,12 +980,6 @@ impl Session {
         }
         let hash = hash_text(&plan.text);
         self.match_disk(ref_, Base { exists: true, hash: Some(hash.clone()), text: plan.text.clone() }, plan.text.clone(), None);
-        {
-            let entry = self.entries.get_mut(ref_).expect("open");
-            entry.proposal = None;
-            entry.proposed = None;
-            entry.synced = None;
-        }
         self.invalidate();
         self.changed(ref_);
         let mut out = obj(vec![
@@ -1038,64 +992,6 @@ impl Session {
         ]);
         if !plan.problems.is_empty() {
             out.insert("forcedProblems".into(), Value::from(plan.problems));
-        }
-        Ok(Value::Object(spread(out, self.status(ref_))))
-    }
-
-    /// Writes (or rewrites) this doc's proposal in the state dir (`propose`).
-    fn propose(&mut self, ref_: &str, plan: Plan) -> Result<Value> {
-        let entry = self.entry(ref_)?.clone();
-        let now = (self.now)();
-        let reuse = entry.proposal.as_ref().filter(|p| self.state.has_proposal(p)).cloned();
-        let id = reuse.unwrap_or_else(|| new_proposal_id(now));
-        let summary = edits(&entry);
-        let mut proposal = obj(vec![
-            ("id", Value::String(id.clone())),
-            ("doc", Value::String(entry.ref_.clone())),
-            ("baseHash", if entry.base.exists { entry.base.hash.clone().map_or(Value::Null, Value::String) } else { Value::Null }),
-            ("source", Value::String(plan.text.clone())),
-            ("summary", Value::from(summary.clone())),
-            ("createdAt", Value::String(iso_time(now))),
-            ("agent", self.agent.clone().map_or(Value::Null, Value::String)),
-        ]);
-        if let Some(chat) = &self.chat {
-            proposal.insert("chat".into(), chat.clone());
-        }
-        let written = self.state.write_proposal(&Value::Object(proposal))?;
-        let in_app = unsaved_in_app(&self.state.dir, &self.document.root).contains(&entry.ref_);
-        let seq = self.seq;
-        {
-            let e = self.entries.get_mut(ref_).expect("open");
-            e.proposal = Some(id.clone());
-            e.proposed = Some(Proposed { id: id.clone(), text: plan.text.clone(), seq });
-            e.synced = None;
-        }
-        self.changed(ref_);
-        let number = written.get("number").and_then(Value::as_u64).filter(|n| *n > 0);
-        let mut out = obj(vec![("doc", Value::String(entry.ref_.clone())), ("proposal", Value::String(id.clone()))]);
-        if let Some(n) = number {
-            out.insert("number".into(), Value::from(n));
-        }
-        out.insert("file".into(), Value::String(self.state.proposals_dir.join(format!("{id}.json")).to_string_lossy().into_owned()));
-        out.insert("wrote".into(), Value::Bool(false));
-        let named = match number {
-            Some(n) => format!("#{n} ({id})"),
-            None => id.clone(),
-        };
-        out.insert(
-            "summary".into(),
-            Value::String(format!("Proposed {} as {named} ({} edit{})", entry.ref_, summary.len(), plural(summary.len()))),
-        );
-        out.insert("edits".into(), Value::from(summary));
-        out.insert("diff".into(), Value::String(plan.diff));
-        if in_app {
-            out.insert(
-                "warnings".into(),
-                Value::from(vec![format!(
-                    "{} has unsaved edits in Pixel Lab; approving this proposal will merge it into them, and lines both of you changed will clash. Tell the owner.",
-                    entry.ref_
-                )]),
-            );
         }
         Ok(Value::Object(spread(out, self.status(ref_))))
     }
@@ -1137,11 +1033,6 @@ impl Session {
             }
         }
         self.match_disk(ref_, base_of(&disk), clean, None);
-        {
-            let e = self.entries.get_mut(ref_).expect("open");
-            e.proposal = None;
-            e.proposed = None;
-        }
         self.invalidate();
         self.changed(ref_);
         let head = obj(vec![
@@ -1169,7 +1060,8 @@ impl Session {
         true
     }
 
-    /// Brings every open doc in line with disk where nothing is lost (`sync`).
+    /// Brings every open doc in line with disk where nothing is lost (`sync`): a clean doc whose
+    /// file changed reloads, and a dirty one that now matches its file is clean.
     pub fn sync(&mut self) {
         let refs: Vec<String> = self.entries.keys().cloned().collect();
         for ref_ in refs {
@@ -1182,53 +1074,6 @@ impl Session {
         let Some(entry) = self.entries.get(ref_).cloned() else { return Ok(()) };
         let disk = read_source(&self.document, entry.kind, &entry.name);
         let text = serialize(&entry.doc);
-        if let Some(id) = entry.proposal.clone() {
-            if self.state.has_proposal(&id) {
-                return Ok(());
-            }
-            let proposed = entry.proposed.clone();
-            let outcome = if disk.exists && proposed.as_ref().is_some_and(|p| p.text == disk.text) { "applied" } else { "rejected" };
-            {
-                let e = self.entries.get_mut(ref_).expect("open");
-                e.proposal = None;
-                e.proposed = None;
-            }
-            let canon = if disk.exists { canonical(&disk.text) } else { None };
-            let action;
-            if canon.is_some() && text == canon {
-                self.match_disk(ref_, base_of(&disk), canon.expect("checked"), None);
-                action = "clean";
-            } else if proposed.as_ref().is_some_and(|p| text.as_deref() == Some(p.text.as_str())) {
-                // Nothing since the proposal: the file is all there is to keep.
-                if disk.exists && canon.is_some() {
-                    self.load_from_disk(ref_, &disk)?;
-                    action = "reloaded";
-                } else {
-                    self.entries.delete(ref_);
-                    self.invalidate();
-                    action = "discarded";
-                }
-            } else if outcome == "applied" && canon.is_some() && proposed.is_some() {
-                // Later edits on top of the applied proposal: they stay, now over the file.
-                self.match_disk(ref_, base_of(&disk), canon.expect("checked"), Some(proposed.expect("checked").seq));
-                action = "rebased";
-            } else {
-                action = "kept";
-            }
-            let settled = json!({ "doc": ref_, "proposal": id, "outcome": outcome, "action": action });
-            if action != "discarded" {
-                self.entries.get_mut(ref_).expect("open").synced = Some(settled.clone());
-            }
-            self.settled.push(settled);
-            if self.settled.len() > 20 {
-                let extra = self.settled.len() - 20;
-                self.settled.drain(..extra);
-            }
-            if action != "discarded" {
-                self.changed(ref_);
-            }
-            return Ok(());
-        }
         if !disk.exists || !is_stale(&entry, &disk) {
             return Ok(());
         }
@@ -1247,14 +1092,6 @@ impl Session {
     /// Loads a doc from disk, but only if no unsaved work is lost (`reload`).
     pub fn reload(&mut self, ref_: &str) -> Result<Value> {
         let entry = self.entry(ref_)?.clone();
-        if let Some(p) = entry.proposal.as_ref().filter(|p| self.state.has_proposal(p)) {
-            return Err(CommandError::new(
-                format!("{ref_}'s edits are in proposal {p}, which is waiting for the owner; reloading would start over without them. Keep editing on top of it (doc.save updates the proposal), or wait until it's approved or rejected."),
-                "proposed",
-            )
-            .with_details(json!({ "proposal": p }))
-            .into());
-        }
         let disk = read_source(&self.document, entry.kind, &entry.name);
         let text = serialize(&entry.doc);
         let dirty = text.as_deref() != Some(entry.clean.as_str());
@@ -1297,11 +1134,6 @@ impl Session {
         let before = stringify(&entry.doc);
         self.note_outside(&entry.file, entry.base.exists.then(|| entry.base.text.clone()), &disk);
         let sorted = self.load_from_disk(ref_, &disk)?;
-        {
-            let e = self.entries.get_mut(ref_).expect("open");
-            e.proposal = None;
-            e.proposed = None;
-        }
         self.invalidate();
         self.changed(ref_);
         let now_text = stringify(&self.entries.get(ref_).expect("open").doc);
