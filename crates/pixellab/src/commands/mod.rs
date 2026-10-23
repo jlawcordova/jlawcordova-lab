@@ -8,6 +8,7 @@ pub mod check;
 pub mod common;
 pub mod doc;
 pub mod document;
+pub mod history;
 pub mod migrate;
 pub mod object;
 pub mod object_edit;

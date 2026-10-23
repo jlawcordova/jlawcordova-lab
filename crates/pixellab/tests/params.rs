@@ -308,6 +308,9 @@ fn every_command_is_well_formed_and_has_a_group() {
         "doc.open",
         "doc.status",
         "document.info",
+        "history.list",
+        "history.render",
+        "history.show",
         "object.list",
         "object.pick",
         "object.render",
@@ -377,6 +380,9 @@ fn every_command_is_well_formed_and_has_a_group() {
         "scene.sort",
         "scene.track.add",
         "scene.track.remove",
+        "history.mark",
+        "history.restore",
+        "history.undo",
     ];
     let mut expected: Vec<&str> = read_only.iter().chain(mutating.iter()).copied().chain(["art.build"]).collect();
     expected.sort();
@@ -393,9 +399,22 @@ fn every_command_is_well_formed_and_has_a_group() {
         ["doc.close", "doc.merge", "doc.open", "doc.redo", "doc.reload", "doc.revert", "doc.save", "doc.status", "doc.undo"]
     );
     let writes: Vec<&str> = names.iter().copied().filter(|n| reg.get(n).unwrap().writes_direct).collect();
-    assert_eq!(writes, ["art.build", "document.copy", "document.migrate", "document.new", "proposal.apply", "proposal.reject"]);
+    assert_eq!(
+        writes,
+        [
+            "art.build",
+            "document.copy",
+            "document.migrate",
+            "document.new",
+            "history.mark",
+            "history.restore",
+            "history.undo",
+            "proposal.apply",
+            "proposal.reject"
+        ]
+    );
     let groups: Vec<String> = reg.groups().into_iter().map(|(g, _)| g).collect();
-    assert_eq!(groups, ["activity", "art", "chat", "check", "doc", "document", "object", "palette", "proposal", "scene"]);
+    assert_eq!(groups, ["activity", "art", "chat", "check", "doc", "document", "history", "object", "palette", "proposal", "scene"]);
 }
 
 fn base(name: &'static str) -> Command {

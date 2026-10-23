@@ -809,6 +809,46 @@ impl Session {
         Ok(Plan { text, disk, problems, conflict, diff })
     }
 
+    /// Puts a doc's content to `data` as one undo step labelled `label`, opening it, or adding it
+    /// when it isn't in the document (history.restore and history.undo). Returns its ref.
+    pub fn set_doc(&mut self, kind: DocKind, name: &str, data: Value, label: &str) -> Result<String> {
+        let ref_ = doc_ref(kind.as_str(), name);
+        let exists = self.entries.has(&ref_) || read_source(&self.document, kind, name).exists;
+        if exists {
+            let label = label.to_string();
+            self.edit(kind, name, None, move |doc, _| {
+                *doc = data;
+                Ok(Edit::new(Map::new(), label))
+            })?;
+        } else {
+            self.create(kind, name, data, label);
+        }
+        Ok(ref_)
+    }
+
+    /// Deletes a doc's file and closes it, recording the change (history.restore and history.undo).
+    pub fn delete_doc(&mut self, kind: DocKind, name: &str, label: &str) -> Result<()> {
+        let ref_ = doc_ref(kind.as_str(), name);
+        let disk = read_source(&self.document, kind, name);
+        if disk.exists {
+            std::fs::remove_file(&disk.path)?;
+            self.record(Change { file: disk.file.clone(), before: Some(disk.text.clone()), after: None }, &[label.to_string()]);
+        }
+        self.entries.delete(&ref_);
+        self.invalidate();
+        Ok(())
+    }
+
+    /// A doc's text as the session has it now: its working copy when open, else its file (None: no file).
+    pub fn current_text(&self, kind: DocKind, name: &str) -> Option<String> {
+        let ref_ = doc_ref(kind.as_str(), name);
+        if let Some(e) = self.entries.get(&ref_) {
+            return serialize(&e.doc);
+        }
+        let disk = read_source(&self.document, kind, name);
+        disk.exists.then_some(disk.text)
+    }
+
     /// Records a write in the version history, by this request's author. A history that can't be
     /// written doesn't fail the save that's already on disk.
     pub fn record(&mut self, change: Change, labels: &[String]) {

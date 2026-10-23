@@ -35,6 +35,12 @@
 | [`document info`](#documentinfo) | Show the document in use: where it came from, its publish folder and what it holds | read |
 | [`document migrate`](#documentmigrate) | Migrate a document from format 1 (.mjs sources) to format 2 (JSON sources), in place or as a copy | writes files |
 | [`document new`](#documentnew) | Make a new, empty .pixellab document with the starter palette | writes files |
+| [`history list`](#historylist) | List the document's versions, newest first | read |
+| [`history mark`](#historymark) | Close the open version, so the next edit starts a new one | writes files |
+| [`history render`](#historyrender) | Render a scene or object as it was after a version, without writing anything | read |
+| [`history restore`](#historyrestore) | Put the document (or one doc) back as it was after a version | writes files |
+| [`history show`](#historyshow) | Show a version: its edits and a diff of each file it changed | read |
+| [`history undo`](#historyundo) | Take back just what one version changed, keeping everything since | writes files |
 | [`object action`](#objectaction) | Add, change or delete an action of a sprite map layer | edit |
 | [`object ambient`](#objectambient) | Set or clear a sprite map layer's ambient loop | edit |
 | [`object animate`](#objectanimate) | Turn a still layer into one of the site's frame loops, or switch a loop's kind | edit |
@@ -586,6 +592,110 @@ edits docs · writes files directly · MCP tool `document_new`
 ```sh
 pixellab document new ~/Art/meadow.pixellab
 ```
+
+### history
+
+#### history.list
+
+List the document's versions, newest first.
+
+```
+pixellab history list [--doc <text>] [--limit <n>]
+```
+
+Each is { number, startedAt, endedAt, author: { kind, name?, chat? }, edits, files, open }. A version is a stretch of one author's writes (owner, agent, cli, outside, restore; several once thinned). open marks the version still growing. With doc, only versions that changed it.
+
+read-only · MCP tool `history_list`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `--doc` | string |  | a scene or object: its name, scene:<name> or object:<name>, or scenes/<name>.json |
+| `--limit` | integer | default `50` | how many versions (1 to 1000) |
+
+#### history.mark
+
+Close the open version, so the next edit starts a new one.
+
+```
+pixellab history mark [--label <text>]
+```
+
+edits docs · writes files directly · MCP tool `history_mark`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `--label` | string |  | a name for the version |
+
+#### history.render
+
+Render a scene or object as it was after a version, without writing anything.
+
+```
+pixellab history render <version> <doc> [--scale <n>] [--time <n>] [--frame <n>] [--layers <n,…>] [--theme <light|dark>] [--out <file.png>]
+```
+
+The doc as it was after that version, over the rest of the document as it is now, rendered as scene.render or object.render renders (same params, same result shape), plus { version, doc, kind }. Pixel Lab draws it over the stage as a ghost.
+
+read-only · MCP tool `history_render`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `version` (positional) | integer | required | the version's number (history.list) (at least 0) |
+| `doc` (positional) | string | required | a scene or object: its name, scene:<name> or object:<name>, or scenes/<name>.json |
+| `--scale` | integer | default `1` | whole-pixel zoom of the PNG (1 to 16) |
+| `--time` | integer |  | ms into the motion and loops (a scene: default 0; an object: overrides frame) (at least 0) |
+| `--frame` | integer | default `0` | an object's frame (at least 0) |
+| `--layers` | list of integer |  | only these layers of a sprite |
+| `--theme` | `light` \| `dark` | default `"light"` | a scene's theme |
+
+#### history.restore
+
+Put the document (or one doc) back as it was after a version.
+
+```
+pixellab history restore <version> [--doc <text>]
+```
+
+Every scene and object (or just doc) goes back to its text at that version: one undo step per doc, saved at once, and a version of its own, so a restore can be undone too. A doc made since is removed; one removed since comes back.
+
+edits docs · writes files directly · MCP tool `history_restore`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `version` (positional) | integer | required | the version's number (history.list) (at least 0) |
+| `--doc` | string |  | a scene or object: its name, scene:<name> or object:<name>, or scenes/<name>.json |
+
+#### history.show
+
+Show a version: its edits and a diff of each file it changed.
+
+```
+pixellab history show <version> [--doc <text>]
+```
+
+read-only · MCP tool `history_show`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `version` (positional) | integer | required | the version's number (history.list) (at least 0) |
+| `--doc` | string |  | a scene or object: its name, scene:<name> or object:<name>, or scenes/<name>.json |
+
+#### history.undo
+
+Take back just what one version changed, keeping everything since.
+
+```
+pixellab history undo <version> [--force]
+```
+
+Each file the version changed is merged three ways (its after as the base, the doc now, its before), so later edits stay. Refuses (code clash, the files in details) when later edits changed the same lines, writing nothing. One undo step per doc, saved, and a version of its own.
+
+edits docs · writes files directly · MCP tool `history_undo`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `version` (positional) | integer | required | the version's number (history.list) (at least 0) |
+| `--force` | boolean | default `false` | save even when the result has problems |
 
 ### object
 

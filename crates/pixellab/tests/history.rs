@@ -198,3 +198,138 @@ fn r11_history_is_keyed_by_the_documents_real_path() {
     a.record(&[Change { file: "scenes/x.json".into(), before: None, after: Some("{}".into()) }], &Author::cli(), &[], T0).unwrap();
     assert_eq!(b.latest(), Some(1));
 }
+
+// ------------------------------------------------------------ commands (D4)
+
+fn call(s: &mut Session, name: &str, params: Value) -> Result<Value, pixellab::errors::Error> {
+    let reg = pixellab::registry::registry();
+    let mut ctx = Ctx::new(s);
+    reg.call(&mut ctx, name, params, false)
+}
+
+fn sample(doc: &common::TempDocument) -> String {
+    std::fs::read_to_string(doc.root.join("scenes/sample.json")).unwrap()
+}
+
+#[test]
+fn r13_restore_puts_the_document_back_as_one_undoable_step_and_a_version() {
+    let doc = common::make_document();
+    let clock = Rc::new(Cell::new(T0));
+    let mut s = session(&doc, &clock);
+    let original = sample(&doc);
+    place(&mut s, 1);
+    save(&mut s);
+    let at1 = sample(&doc);
+    s.history.mark(None).unwrap();
+    place(&mut s, 2);
+    save(&mut s);
+    assert_ne!(sample(&doc), at1);
+    let r = call(&mut s, "history.restore", json!({ "version": 1 })).unwrap();
+    assert_eq!(r["changed"], true, "{r}");
+    assert_eq!(sample(&doc), at1);
+    let last = s.history.versions().last().cloned().unwrap();
+    assert_eq!(last["author"]["kind"], "restore");
+    assert_eq!(last["author"]["name"], "you");
+    // One undo step takes the restore back; it saves like any edit.
+    s.step("scene:sample", true).unwrap();
+    s.save("scene:sample", false).unwrap();
+    assert_ne!(sample(&doc), at1);
+    // Version 0 is the document as it was first opened.
+    call(&mut s, "history.restore", json!({ "version": 0 })).unwrap();
+    assert_eq!(engine::format::parse(&sample(&doc)).unwrap(), engine::format::parse(&original).unwrap());
+}
+
+#[test]
+fn r13_restore_of_one_doc_leaves_the_others() {
+    let doc = common::make_document();
+    let clock = Rc::new(Cell::new(T0));
+    let mut s = session(&doc, &clock);
+    place(&mut s, 1);
+    save(&mut s);
+    let r = call(&mut s, "history.restore", json!({ "version": 0, "doc": "scene:sample" })).unwrap();
+    assert_eq!(r["written"], json!(["scene:sample"]));
+    let r = call(&mut s, "history.restore", json!({ "version": 0, "doc": "sample" })).unwrap();
+    assert_eq!(r["changed"], false);
+}
+
+#[test]
+fn r14_undo_these_changes_takes_back_an_agents_version_and_keeps_later_edits() {
+    let doc = common::make_document();
+    let clock = Rc::new(Cell::new(T0));
+    let mut s = session(&doc, &clock);
+    s.author = Author::agent(Some("claude".into()), None);
+    place(&mut s, 7);
+    save(&mut s);
+    let agent_version = s.history.latest().unwrap();
+    s.author = Author::owner();
+    // The owner edits another part of the scene afterwards.
+    Ctx::new(&mut s)
+        .edit(DocKind::Scene, "sample", None, |doc, _| {
+            doc["viewBox"] = json!([-16, -16, 80, 48]);
+            Ok(Edit::new(Map::new(), "Widened the view"))
+        })
+        .unwrap();
+    save(&mut s);
+    let r = call(&mut s, "history.undo", json!({ "version": agent_version })).unwrap();
+    assert_eq!(r["changed"], true, "{r}");
+    let now: Value = serde_json::from_str(&sample(&doc)).unwrap();
+    let cols: Vec<i64> = now["items"].as_array().unwrap().iter().filter_map(|i| i["at"]["tile"][0].as_i64()).collect();
+    assert!(!cols.contains(&7), "the agent's pebble is gone: {cols:?}");
+    assert_eq!(now["viewBox"], json!([-16, -16, 80, 48]), "the owner's later edit stays");
+}
+
+#[test]
+fn r13_undo_refuses_when_later_edits_touched_the_same_lines() {
+    let doc = common::make_document();
+    let clock = Rc::new(Cell::new(T0));
+    let mut s = session(&doc, &clock);
+    s.author = Author::agent(Some("claude".into()), None);
+    place(&mut s, 7);
+    save(&mut s);
+    let agent_version = s.history.latest().unwrap();
+    s.author = Author::owner();
+    // The owner moves the agent's pebble: the same line.
+    Ctx::new(&mut s)
+        .edit(DocKind::Scene, "sample", None, |doc, _| {
+            for item in doc["items"].as_array_mut().unwrap() {
+                if item["at"]["tile"][0] == json!(7) {
+                    item["at"]["tile"][0] = json!(8);
+                }
+            }
+            Ok(Edit::new(Map::new(), "Moved pebble"))
+        })
+        .unwrap();
+    save(&mut s);
+    let before = sample(&doc);
+    let err = call(&mut s, "history.undo", json!({ "version": agent_version })).unwrap_err();
+    let pixellab::errors::Error::Command(e) = err else { panic!("an internal error") };
+    assert_eq!(e.code, "clash", "{}", e.message);
+    assert_eq!(sample(&doc), before, "nothing written");
+}
+
+#[test]
+fn r15_history_reaches_the_cli() {
+    let doc = common::make_document();
+    let reg = pixellab::registry::registry();
+    let run = |args: &[&str]| {
+        let mut argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        argv.extend(["--document".to_string(), doc.root.to_string_lossy().into_owned()]);
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = {
+            let mut io = pixellab::cli::Io { stdout: &mut out, stderr: &mut err, env: doc.env(), cwd: doc.root.clone(), registry: &reg };
+            pixellab::cli::main(&argv, &mut io)
+        };
+        (code, String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap())
+    };
+    let (code, _, err) = run(&["scene", "place", "sample", "pebble", "--at", "3,0,0"]);
+    assert_eq!(code, 0, "{err}");
+    let (code, out, err) = run(&["history", "list"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("#1") && out.contains("the CLI"), "{out}");
+    let (code, out, err) = run(&["history", "show", "1"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("pebble"), "{out}");
+    let (code, out, err) = run(&["history", "restore", "0"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("Restored to version 0"), "{out}");
+}
