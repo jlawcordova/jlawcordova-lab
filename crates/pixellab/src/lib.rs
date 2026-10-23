@@ -23,7 +23,7 @@ pub mod jsonrpc;
 pub mod layer_ops;
 pub mod merge;
 pub mod motion_ops;
-pub mod open_docs;
+pub mod owner;
 pub mod params;
 pub mod registry;
 pub mod render;

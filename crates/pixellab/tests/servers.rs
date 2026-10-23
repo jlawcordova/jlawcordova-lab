@@ -685,7 +685,7 @@ fn run_cli(args: &[&str], env: &HashMap<String, String>, state: &Path) -> (i32, 
 }
 
 #[test]
-fn r7_the_stdio_server_merges_a_change_on_disk_into_a_dirty_doc_and_keeps_open_pid_json() {
+fn r7_r22_the_stdio_server_owns_its_document_and_merges_a_change_on_disk_into_a_dirty_doc() {
     let doc = make_document();
     let state = temp_dir("pixellab-state-");
     let mut env = doc.env();
@@ -693,13 +693,12 @@ fn r7_the_stdio_server_merges_a_change_on_disk_into_a_dirty_doc_and_keeps_open_p
     env.insert("PIXELLAB_AUTOSAVE_MS".into(), "3000".into());
     let mut server = start_server(&["--stdio", "--document", doc.root.to_str().unwrap()], &env, &state);
     let info = server.request("session.info", json!({}))["result"].clone();
-    let open_file = state.join("open").join(format!("{}.json", info["pid"]));
+    // It holds the document's lock (autosave spec, D9).
+    let holder = pixellab::owner::holder(&state, &doc.root).expect("an owner");
+    assert_eq!(holder["pid"], info["pid"]);
+    assert_eq!(holder["document"], json!(fs::canonicalize(&doc.root).unwrap().to_str().unwrap()));
+    assert_eq!(info["owner"]["pid"], info["pid"]);
     server.request("scene.place", json!({ "name": "sample", "object": "pebble", "at": [3, 3, 0] }));
-    let listed = read_json(&open_file);
-    assert_eq!(
-        [listed["pid"].clone(), listed["document"].clone(), listed["docs"].clone()],
-        [info["pid"].clone(), json!(doc.root.to_str().unwrap()), json!([{ "doc": "scene:sample", "dirty": true }])]
-    );
     let since = server.notifications().len();
     let file = doc.root.join("scenes/sample.json");
     let text = fs::read_to_string(&file).unwrap().replace("\"tile\": [0, 0, 1]", "\"tile\": [0, 0, 2]");
@@ -710,11 +709,9 @@ fn r7_the_stdio_server_merges_a_change_on_disk_into_a_dirty_doc_and_keeps_open_p
     let now = read_json(&file);
     assert!(pebble_at(&now, json!([0, 0, 2])).is_some(), "theirs kept: {now}");
     assert!(pebble_at(&now, json!([3, 3, 0])).is_some(), "ours kept: {now}");
-    server.request("doc.close", json!({ "doc": "scene:sample", "force": true }));
-    assert_eq!(read_json(&open_file)["docs"], json!([]), "closing updates the list");
     server.request("shutdown", json!({}));
     assert_eq!(server.exited(), 0);
-    assert!(!open_file.exists(), "removed when the server stops");
+    assert!(pixellab::owner::holder(&state, &doc.root).is_none(), "the document is free once the server stops");
 }
 
 #[test]

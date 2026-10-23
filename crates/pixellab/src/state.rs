@@ -178,6 +178,11 @@ fn resolve(p: &str) -> PathBuf {
     out
 }
 
+/// `path.resolve`: an absolute path, `.` and `..` folded, without touching the disk.
+pub fn resolve_path(path: &Path) -> PathBuf {
+    resolve(&path.to_string_lossy())
+}
+
 /// A document's path as every process names it: its real path when it exists (symlinks and
 /// `/private` folded), else `path.resolve`. History and owner keys hash it.
 pub fn real_path(path: &Path) -> PathBuf {

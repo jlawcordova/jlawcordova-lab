@@ -102,7 +102,7 @@ fn r8_migrate_to_writes_the_format_2_copy_and_leaves_the_document_alone() {
 }
 
 #[test]
-fn r8_migrate_refuses_code_already_migrated_documents_and_unsaved_edits() {
+fn r8_migrate_refuses_code_already_migrated_documents_and_a_document_pixel_lab_has_open() {
     let (root, env) = old_document();
     let doc = root.to_str().unwrap();
     // Code that isn't data, with its place.
@@ -112,18 +112,14 @@ fn r8_migrate_refuses_code_already_migrated_documents_and_unsaved_edits() {
     assert_eq!(err, "pixellab: 1 source can't be read as data; nothing written:\nobjects/odd.mjs:1:1: expected export default, found 'import' (imports, functions and other code aren't supported)\n");
     assert!(root.join("palette.mjs").exists() && !root.join("palette.json").exists(), "nothing written");
     std::fs::remove_file(root.join("objects/odd.mjs")).unwrap();
-    // Unsaved edits open in Pixel Lab (a running process's open-docs file).
-    let open = Path::new(&env["PIXELLAB_STATE"]).join("open");
-    std::fs::create_dir_all(&open).unwrap();
-    let file = open.join("1.json");
-    std::fs::write(
-        &file,
-        serde_json::json!({ "pid": 1, "document": doc, "updatedAt": "x", "docs": [{ "doc": "scene:sample", "dirty": true }] }).to_string(),
-    )
-    .unwrap();
+    // Pixel Lab has the document open (its server owns it): the CLI refuses (autosave spec, D10).
+    let state = Path::new(&env["PIXELLAB_STATE"]).to_path_buf();
+    std::fs::create_dir_all(&state).unwrap();
+    let mut app = common::server::start_server(&["--stdio", "--document", doc], &env, &state);
+    app.request("session.info", serde_json::json!({}));
     let (code, _, err) = cli(&["document", "migrate", "--document", doc], &env, &root);
-    assert_eq!((code, err.as_str()), (1, "pixellab: sample has unsaved edits open (scene:sample); save or revert them before migrating\n"));
-    std::fs::remove_file(file).unwrap();
+    assert_eq!((code, err.as_str()), (1, "pixellab: Pixel Lab has sample open; close the document there first (it can migrate it too)\n"));
+    assert_eq!(app.close(), 0);
     assert_eq!(cli(&["document", "migrate", "--document", doc], &env, &root).0, 0);
     let (code, _, err) = cli(&["document", "migrate", "--document", doc], &env, &root);
     assert_eq!((code, err.as_str()), (1, "pixellab: sample is already in format 2; there's nothing to migrate\n"));
