@@ -11,8 +11,11 @@ agent open
 snapshot agent @OUT@/a5-agent-dark.png
 agent close
 versions open
+# The agent's doc_save closed each version: the trees, then the house's pixels
 expect version newest author agent
-expect version newest files scenes/hero-island.json,objects/house.json
+expect version newest files objects/house.json
+# the agent's trees, then the owner's last version before them
+version select next
 version select next
 expect ghost on
 expect ghostchanges 2
@@ -20,7 +23,8 @@ snapshot @OUT@/a5-ghost-dark.png
 appearance light
 snapshot @OUT@/a5-ghost-light.png
 appearance dark
-version select newest
+# Undo These Changes on the agent's trees
+version select prev
 version undo
 expect versionresult Undid version
 expect items 281

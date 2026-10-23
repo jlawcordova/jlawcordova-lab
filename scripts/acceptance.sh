@@ -79,6 +79,8 @@ app="$root/build/Pixel Lab.app"
 
 site="$out/site" state="$out/state" shots="$out/shots"
 rm -rf "$site" "$state" "$shots" && mkdir -p "$site" "$state" "$shots"
+# Temp copies of examples/ go here (a stage run alone with --only needs it too).
+mkdir -p "$out/examples"
 cp -R "$real/src" "$real/scripts" "$real/package.json" "$real/package-lock.json" "$site/"
 [[ -d "$real/node_modules" ]] && ln -s "$real/node_modules" "$site/node_modules"
 program="$app/Contents/Helpers/pixellab"
@@ -144,25 +146,25 @@ if stage scene-object; then
   git -C "$site" add -A && git -C "$site" -c user.email=t@t -c user.name=t commit -qm "after scene-object"
 fi
 if stage mcp-agent; then
-  echo "==> an agent over MCP proposes"
+  echo "==> an agent over MCP edits, with no app open"
   node "$root/scripts/acceptance/mcp-agent.mjs" "$site" "$state"
 fi
 if stage agent; then
-  echo "==> the Agent window: ghost, approve, reject"
+  echo "==> the Agent window and the Versions panel: the agent's version ghosted and taken back"
   run agent.txt agent.log
 fi
 if stage stale-agent; then
-  echo "==> a doc changed on disk under unsaved edits: merge, reload, keep; an approve merged in"
+  echo "==> a change on disk merged into a pending save; a clash reloaded and kept; an agent's version"
   node "$root/scripts/acceptance/stale-agent.mjs" "$site" "$state"
 fi
 if stage stale; then
-  (( ${ran[(Ie)stale-agent]} )) || echo "==> a doc changed on disk under unsaved edits: merge, reload, keep; an approve merged in"
+  (( ${ran[(Ie)stale-agent]} )) || echo "==> a change on disk merged into a pending save; a clash reloaded and kept; an agent's version"
   run stale.txt stale.log
 fi
 if stage chat; then
-  echo "==> the Agent chat on the site: a chat's proposal ghosted, approved and rejected from its card; the Agent window"
+  echo "==> the Agent chat on the site: a chat's edits applied, a change card undone, Show in Versions; the Agent window"
   run_chat chat.txt chat.log
-  grep -q 'closeup-front-trees' <(git -C "$site" diff --stat) || { echo "approving the chat's proposal didn't change closeup-front-trees" >&2; exit 1; }
+  grep -q 'closeup-front-trees' <(git -C "$site" diff --stat) || { echo "the chat's edits didn't change closeup-front-trees" >&2; exit 1; }
   git -C "$site" add -A && git -C "$site" -c user.email=t@t -c user.name=t commit -qm "after chat"
 fi
 if stage document; then
@@ -253,7 +255,7 @@ if stage chat-setup; then
   echo "the chat's versions name their chat; 2 chats kept in the state dir, none in the document; one Claude session per chat"
 fi
 if stage chat-harbor; then
-  echo "==> the Agent chat on the harbor example: layers as chips, Option-click, pins, unsaved items, a question, ghosts per chat"
+  echo "==> the Agent chat on the harbor example: layers as chips, Option-click, pins, unsaved items, a question, cards per chat"
   run_chat chat-harbor.txt chat-harbor.log harbor
 fi
 relaunch_doc="$out/examples/relaunch.pixellab" relaunch_state="$out/state-relaunch" relaunch_fake="$out/fake-relaunch"
@@ -265,7 +267,7 @@ relaunch() { # relaunch <part>
   grep -q 'all steps passed' "$out/chat-relaunch-$1.log"
 }
 if stage chat-relaunch-1; then
-  echo "==> the Agent chat across launches: the session resumed, a proposal settled while closed, a lost session"
+  echo "==> the Agent chat across launches: the session resumed, a version undone while closed, a lost session"
   rm -rf "$relaunch_doc" "$relaunch_state" "$relaunch_fake" && cp -R "$root/examples/harbor.pixellab" "$relaunch_doc" && migrate_doc "$relaunch_doc" > /dev/null && mkdir -p "$relaunch_state"
   relaunch 1
 fi

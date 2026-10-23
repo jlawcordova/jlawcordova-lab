@@ -112,6 +112,7 @@ What was built differently from the steps above, and why:
 - **The script hook's `cli`** runs the program with a state dir of its own, so it stays what scripts use it for: an edit from outside Pixel Lab, which doesn't find the app's lock. `cli-owned` is the CLI as a terminal runs it, through the app.
 - **`sync.rs` is trimmed, not deleted** (step 6), and **`open_docs.rs` goes in step 7** with the owner lock that replaces it.
 - **History starts at the first write** (step 9): version 0 is written with the first recorded write, as the document was just before it, so commands that only read leave the state dir alone.
+- **The script hook's `key` sends a ⌘ key as a key equivalent** (the window's views, then the main menu) before falling back to `NSApp.sendEvent`. Under the hook the app isn't frontmost, and `sendEvent` alone dropped ⌘↓, so `canvas.txt`'s drop failed on `main`'s build too. This isn't caused by autosave, but the acceptance pass has to exit 0.
 
 ## Proof
 

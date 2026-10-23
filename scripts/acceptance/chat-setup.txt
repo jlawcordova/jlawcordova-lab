@@ -47,7 +47,6 @@ expect placeholder Select something on the stage, then ask Claude
 select 14.0
 select add 39.0
 chat send Move these one tile east
-expect running true
 chat wait
 expect running false
 # R3: the chat has a Claude session; its follow-ups resume it
@@ -67,6 +66,9 @@ appearance light
 snapshot @OUT@/chat-details-light.png
 appearance dark
 details off
+# The turn's moves applied: its card takes them back (autosave spec, R18), so the items have their paths again
+card undo
+expect cardstatus Undone
 # R14: a link in the reply selects it on the stage
 select none
 link pine 39.0

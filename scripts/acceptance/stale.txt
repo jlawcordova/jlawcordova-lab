@@ -2,6 +2,13 @@
 # pending, without asking; only a clash with the open copy shows the banner, with Reload and Keep Mine.
 # acceptance.sh runs this with a long autosave pause, so the edits wait for a save.
 appearance dark
+# The agent's tree (stale-agent.mjs, with no app open) is in the file, as its version
+open scene:footer-grass
+expect items 2
+versions open
+expect version newest author agent
+expect version newest edits pine placed
+versions close
 open scene:footer-dirt
 expect stale false
 library pine
@@ -36,11 +43,3 @@ stale keep
 expect stale false
 expect savestate saved
 expect items 3
-# The agent's tree (stale-agent.mjs, with no app open) is in the file, as its version
-appearance dark
-open scene:footer-grass
-expect items 3
-versions open
-expect version newest author agent
-expect version newest edits pine placed
-versions close

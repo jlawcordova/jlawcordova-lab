@@ -400,7 +400,11 @@ final class ScriptRunner {
                 guard let view = editor.stageView, let window = view.window else { throw Failure("no stage") }
                 guard window.firstResponder === view else { throw Failure("the stage isn't the first responder (click it, or `focus`): \(String(describing: window.firstResponder))") }
                 guard let event = StageInputView.keyEvent(for: k, window: window) else { throw Failure("can't make a key event for \(words[1])") }
-                NSApp.sendEvent(event)
+                // A ⌘ key goes the way AppKit sends a key equivalent: the window's views, then the main menu.
+                // NSApp.sendEvent alone skips both when the app isn't frontmost, as under the hook.
+                if !k.command || !(window.performKeyEquivalent(with: event) || NSApp.mainMenu?.performKeyEquivalent(with: event) == true) {
+                    NSApp.sendEvent(event)
+                }
                 try? await Task.sleep(for: .milliseconds(60))
                 return nil
             }
