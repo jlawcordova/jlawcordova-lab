@@ -22,8 +22,9 @@
 //                   of houses: about 60 layers, four levels deep, no wrappers.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -361,18 +362,22 @@ export async function writeExamples(out) {
   }
   /** @type {string[]} */
   const files = [];
+  // The program's state dir (version history, owners) goes in a temp folder, never under `out`.
+  const state = mkdtempSync(join(tmpdir(), 'pixellab-examples-state-'));
+  const env = { ...process.env, HOME: out, PIXELLAB_STATE: state };
+  try {
   for (const [name, ex] of Object.entries(examples())) {
     const root = join(out, `${name}.pixellab`);
     await rm(root, { recursive: true, force: true });
     await mkdir(out, { recursive: true });
     const run = (/** @type {string[]} */ ...args) => {
       try {
-        return execFileSync(BIN, ['--document', root, ...args], { encoding: 'utf8', env: { ...process.env, HOME: out }, stdio: ['ignore', 'pipe', 'pipe'] });
+        return execFileSync(BIN, ['--document', root, ...args], { encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] });
       } catch (e) {
         throw new Error(`pixellab ${args.join(' ')} failed:\n${/** @type {any} */ (e).stderr}${/** @type {any} */ (e).stdout}`);
       }
     };
-    execFileSync(BIN, ['document', 'new', root, '--name', name], { stdio: 'ignore', env: { ...process.env, HOME: out } });
+    execFileSync(BIN, ['document', 'new', root, '--name', name], { stdio: 'ignore', env });
     await writeFile(join(root, 'manifest.json'), `${JSON.stringify(ex.manifest, null, 2)}\n`);
     for (const o of ex.objects) await writeFile(join(root, 'objects', `${o}.json`), objectText(/** @type {any} */ (OBJECTS)[o]));
     for (const scene of ex.scenes) {
@@ -388,6 +393,9 @@ export async function writeExamples(out) {
       scene.finish((...a) => run(...a), scene.name);
     }
     run('check');
+  }
+  } finally {
+    rmSync(state, { recursive: true, force: true });
   }
   const { readdir } = await import('node:fs/promises');
   for (const e of await readdir(out, { recursive: true, withFileTypes: true })) {

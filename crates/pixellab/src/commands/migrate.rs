@@ -24,7 +24,6 @@ use crate::document::{
     SITE_ART_DIR,
 };
 use crate::errors::{CommandError, Result};
-use crate::open_docs::unsaved_in_app;
 use crate::registry::{Command, Params};
 use crate::state::{state_dir, write_atomic};
 
@@ -142,8 +141,18 @@ fn migrate_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
         ))
         .into());
     }
-    // Unsaved edits open in Pixel Lab (or in this session) would be lost.
-    let mut dirty = unsaved_in_app(&state_dir(&options.env), &root);
+    // Pixel Lab owning the document from another process migrates it there (D10); unsaved edits in
+    // this session would be lost.
+    if let Some(holder) = crate::owner::holder(&state_dir(&options.env), &root) {
+        if holder.get("pid").and_then(Value::as_u64) != Some(u64::from(std::process::id())) {
+            return Err(CommandError::new(
+                format!("Pixel Lab has {name} open; close the document there first (it can migrate it too)"),
+                "owned",
+            )
+            .into());
+        }
+    }
+    let mut dirty: Vec<String> = Vec::new();
     if let Some(s) = ctx.session.as_deref() {
         dirty.extend(s.dirty_refs());
     }

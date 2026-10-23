@@ -83,7 +83,7 @@ mod common;
 
 use pixellab::context::Ctx;
 use pixellab::document::{open_document, OpenOptions};
-use pixellab::session::{Mode, Options};
+use pixellab::session::Options;
 
 /// A session over a temp copy of the sample document with the stone and the groups scene added.
 struct Session {
@@ -105,7 +105,7 @@ fn session() -> Session {
         cwd: doc.root.clone(),
     })
     .unwrap();
-    let session = pixellab::session::Session::new(document, Options { mode: Mode::Direct, env, ..Options::default() });
+    let session = pixellab::session::Session::new(document, Options { env, ..Options::default() });
     Session { session, _doc: doc }
 }
 

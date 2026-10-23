@@ -9,19 +9,22 @@
 
 pub mod activity_summary;
 pub mod argv;
+pub mod author;
 pub mod chat_context;
 pub mod cli;
+pub mod client;
 pub mod commands;
 pub mod context;
 pub mod diff;
 pub mod document;
 pub mod errors;
 pub mod help;
+pub mod history;
 pub mod jsonrpc;
 pub mod layer_ops;
 pub mod merge;
 pub mod motion_ops;
-pub mod open_docs;
+pub mod owner;
 pub mod params;
 pub mod registry;
 pub mod render;

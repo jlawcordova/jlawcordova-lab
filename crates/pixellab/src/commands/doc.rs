@@ -2,10 +2,9 @@
 
 use serde_json::{json, Map, Value};
 
-use super::common::{doc_param, flag, join, opt_str, resolve_doc, str_of};
+use super::common::{doc_param, flag, opt_str, resolve_doc, str_of};
 use crate::context::Ctx;
-use crate::errors::Result;
-use crate::open_docs::unsaved_in_app;
+use crate::errors::{CommandError, Result};
 use crate::registry::{Command, Params};
 
 fn doc_params(more: Vec<(&str, Value)>) -> Value {
@@ -56,47 +55,57 @@ fn open_format(r: &Value, _: &Params) -> String {
 }
 
 fn status_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
-    let in_app = {
-        let session = ctx.session()?;
-        unsaved_in_app(&session.state.dir, &session.document.root)
-    };
     let Some(doc) = opt_str(&params, "doc") else {
         let session = ctx.session()?;
-        return Ok(json!({ "docs": session.list(), "unsavedInApp": in_app, "settled": session.settled }));
+        return Ok(json!({ "docs": session.list() }));
     };
     let ref_ = entry_of(ctx, doc, false)?;
-    let mut out = match ctx.session()?.details(&ref_) {
-        Value::Object(m) => m,
-        _ => Map::new(),
-    };
-    out.insert("unsavedInApp".into(), json!(in_app.contains(&ref_)));
-    Ok(Value::Object(out))
+    Ok(ctx.session()?.details(&ref_))
 }
 
 fn status_format(r: &Value, _: &Params) -> String {
     if let Some(docs) = r.get("docs").and_then(Value::as_array) {
         let lines = docs.iter().map(status_line).collect::<Vec<_>>().join("\n");
-        let first = if lines.is_empty() { "no docs open".to_string() } else { lines };
-        let unsaved = r["unsavedInApp"].as_array().is_some_and(|a| !a.is_empty());
-        let second = if unsaved { format!("unsaved in Pixel Lab: {}", join(r.get("unsavedInApp"), ", ")) } else { String::new() };
-        return [first, second].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n");
+        return if lines.is_empty() { "no docs open".to_string() } else { lines };
     }
-    format!(
-        "{}{}{}",
-        status_line(r),
-        if r["stale"] == json!(true) { ", changed on disk" } else { "" },
-        if r["unsavedInApp"] == json!(true) { ", unsaved in Pixel Lab" } else { "" }
-    )
+    format!("{}{}", status_line(r), if r["stale"] == json!(true) { ", changed on disk" } else { "" })
+}
+
+/// A client of the owner undoes or redoes only its own latest step (docs/intents/2026-10-autosave/spec.md, D7).
+fn own_step(session: &mut crate::session::Session, ref_: &str, undo: bool) -> Result<()> {
+    if !session.remote {
+        return Ok(());
+    }
+    let author = session.author.clone();
+    let entry = session.entry(ref_)?;
+    let top = if undo { entry.undo.last() } else { entry.redo.last() };
+    match top {
+        Some(step) if !step.author.same(&author) => Err(CommandError::new(
+            format!(
+                "{} was edited since by {}; {} takes back only your own latest step. Use history_undo to take back your version.",
+                ref_,
+                step.author.display(),
+                if undo { "doc_undo" } else { "doc_redo" }
+            ),
+            "not-yours",
+        )
+        .into()),
+        _ => Ok(()),
+    }
 }
 
 fn undo_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let ref_ = entry_of(ctx, doc_of(&params), false)?;
-    ctx.session()?.step(&ref_, true)
+    let session = ctx.session()?;
+    own_step(session, &ref_, true)?;
+    session.step(&ref_, true)
 }
 
 fn redo_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let ref_ = entry_of(ctx, doc_of(&params), false)?;
-    ctx.session()?.step(&ref_, false)
+    let session = ctx.session()?;
+    own_step(session, &ref_, false)?;
+    session.step(&ref_, false)
 }
 
 fn summary_format(r: &Value, _: &Params) -> String {
@@ -105,25 +114,128 @@ fn summary_format(r: &Value, _: &Params) -> String {
 
 fn save_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let ref_ = entry_of(ctx, doc_of(&params), false)?;
-    ctx.session()?.save(&ref_, flag(&params, "force"))
+    let session = ctx.session()?;
+    let saved = session.save(&ref_, flag(&params, "force"))?;
+    // Saving by hand (⌘S) closes the version, as a Mac app's Save saves a version (R5).
+    let _ = session.history.mark(None);
+    Ok(saved)
+}
+
+/// doc.adopt: a client's unsaved copy of a doc, merged into this session's as one step by that
+/// client (D10): the text it started from (`base`, null for a new doc) and its own (`source`).
+fn adopt_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
+    use crate::context::DocKind;
+    use crate::merge::{fold_scene, merge3, trailing, untrailing, Folded};
+    use crate::session::{canonical, import_source};
+    let query = doc_of(&params).to_string();
+    let found = resolve_doc(ctx, &query).ok();
+    let source = opt_str(&params, "source").unwrap_or("").to_string();
+    let base = opt_str(&params, "base").map(str::to_string);
+    let session = ctx.session()?;
+    let (kind, name) = match &found {
+        Some(f) => (f.kind, f.name.clone()),
+        None => match query.split_once(':').and_then(|(k, n)| DocKind::parse(k).map(|k| (k, n.to_string()))) {
+            Some(pair) => pair,
+            None => return Err(CommandError::not_found(format!("no doc {query}")).into()),
+        },
+    };
+    let mine = session.current_text(kind, &name);
+    let canon = |t: &str| canonical(t).unwrap_or_else(|| t.to_string());
+    let text = match (&base, &mine) {
+        (_, None) => source.clone(),
+        (Some(b), Some(m)) if canon(b) == canon(m) => source.clone(),
+        (Some(b), Some(m)) => {
+            let is_scene = kind == DocKind::Scene;
+            let merged = merge3(&trailing(&canon(b)), &trailing(&canon(m)), &trailing(&canon(&source)), is_scene);
+            let folded = if is_scene { fold_scene(&merged.text) } else { Folded { text: merged.text.clone(), clashes: vec![] } };
+            if !merged.conflicts.is_empty() || !folded.clashes.is_empty() {
+                return Err(CommandError::new(
+                    format!("your copy of {query} and Pixel Lab's changed the same lines; nothing merged"),
+                    "merge_conflict",
+                )
+                .into());
+            }
+            untrailing(&folded.text)
+        }
+        (None, Some(_)) => {
+            return Err(CommandError::new(format!("{query} was made in both places; nothing merged"), "merge_conflict").into());
+        }
+    };
+    let data = import_source(&text).map_err(|e| CommandError::new(format!("{query} doesn't load: {e}"), "load_error"))?;
+    let label = format!("Brought in {}'s unsaved edits", session.author.display());
+    let ref_ = session.set_doc(kind, &name, data, &label)?;
+    Ok(json!({ "doc": ref_, "adopted": true, "summary": label }))
+}
+
+/// doc.flush: saves now what autosave would save soon (docs/intents/2026-10-autosave/spec.md, D1).
+fn flush_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
+    let only = match opt_str(&params, "doc") {
+        Some(d) => Some(resolve_doc(ctx, d)?.ref_),
+        None => None,
+    };
+    let session = ctx.session()?;
+    let refs: Vec<String> = match &only {
+        Some(r) if session.entries.has(r) => vec![r.clone()],
+        Some(_) => vec![],
+        None => session.entries.keys().cloned().collect(),
+    };
+    let mut docs = Vec::new();
+    for r in refs {
+        if session.is_dirty(&r) {
+            session.save_now(&r);
+        }
+        let (state, problems) = session.save_state(&r);
+        docs.push(json!({ "doc": r, "saveState": state, "problems": problems }));
+    }
+    let saved = docs.iter().all(|d| d["saveState"] == "saved");
+    Ok(json!({ "saved": saved, "docs": docs }))
+}
+
+fn flush_format(r: &Value, _: &Params) -> String {
+    let lines: Vec<String> = r["docs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|d| match str_of(d.get("saveState")).as_str() {
+            "problems" => format!(
+                "{}: not saved, {} problem{}",
+                str_of(d.get("doc")),
+                str_of(d.get("problems")),
+                if d["problems"] == 1 { "" } else { "s" }
+            ),
+            "conflict" => format!("{}: not saved, its file changed on disk and clashes", str_of(d.get("doc"))),
+            other => format!("{}: {other}", str_of(d.get("doc"))),
+        })
+        .collect();
+    if lines.is_empty() {
+        "no docs open".into()
+    } else {
+        lines.join("\n")
+    }
 }
 
 fn save_format(r: &Value, _: &Params) -> String {
-    if engine::engine::truthy(r.get("proposal")) {
-        format!("{}: proposed as {}", str_of(r.get("doc")), str_of(r.get("proposal")))
-    } else {
-        let file = str_of(r.get("file"));
-        format!(
-            "{}: {}",
-            str_of(r.get("doc")),
-            if engine::engine::truthy(r.get("wrote")) { format!("wrote {file}") } else { format!("{file} unchanged") }
-        )
-    }
+    let file = str_of(r.get("file"));
+    format!(
+        "{}: {}",
+        str_of(r.get("doc")),
+        if engine::engine::truthy(r.get("wrote")) { format!("wrote {file}") } else { format!("{file} unchanged") }
+    )
 }
 
 fn revert_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let ref_ = entry_of(ctx, doc_of(&params), false)?;
-    ctx.session()?.revert(&ref_)
+    let session = ctx.session()?;
+    if session.remote {
+        return Err(CommandError::new(
+            format!(
+                "{ref_} is open in Pixel Lab, where reverting would drop the owner's edits; use history_undo to take back your version"
+            ),
+            "owned",
+        )
+        .into());
+    }
+    session.revert(&ref_)
 }
 
 fn reload_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
@@ -138,6 +250,10 @@ fn merge_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
 
 fn close_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let ref_ = entry_of(ctx, doc_of(&params), false)?;
+    if ctx.session()?.remote {
+        // The app's copy stays open (D7).
+        return Ok(json!({ "doc": ref_, "closed": false, "summary": format!("{ref_} stays open in Pixel Lab") }));
+    }
     let r = ctx.session()?.close(&ref_, flag(&params, "force"))?;
     ctx.invalidate();
     Ok(r)
@@ -172,7 +288,7 @@ pub fn commands() -> Vec<Command> {
         session_command(
             "doc.open",
             "Open a scene or object as a working copy, with undo and redo",
-            Some("Edits to an open doc stay in memory until doc.save. Editing a doc that isn't open opens it, so this is only needed to start from a clean status."),
+            Some("Edits to an open doc save themselves (the app's server: about a second after the last one; MCP and the CLI: after each command). Editing a doc that isn't open opens it, so this is only needed to start from a clean status."),
             doc_params(vec![]),
             false,
             open_run,
@@ -182,11 +298,10 @@ pub fn commands() -> Vec<Command> {
             "doc.status",
             "Whether open docs have unsaved changes, and can undo or redo",
             Some(concat!(
-                "With a doc: { doc, dirty, canUndo, canRedo, file, exists, stale, undo: [edits], redo: [edits], edits, proposal?, synced?, unsavedInApp }. ",
-                "stale: the file changed on disk since the doc was opened or last matched it. edits: the edits since the doc last matched its file (what a proposal lists). ",
-                "synced: how the doc was brought in line with disk after its proposal was applied or rejected ({ proposal, outcome, action }). ",
-                "unsavedInApp: Pixel Lab has this doc open with unsaved edits, so a proposal for it will clash with them. ",
-                "Without a doc: { docs: [{ doc, dirty, canUndo, canRedo }], unsavedInApp: [docs Pixel Lab has open with unsaved edits], settled: [proposals settled lately] }."
+                "With a doc: { doc, dirty, canUndo, canRedo, undoLabel, redoLabel, author, saveState, problems, file, exists, stale, undo: [edits], redo: [edits], edits }. ",
+                "saveState: saved, pending (a save is coming), problems (it can't be saved until they're fixed) or conflict (its file changed on disk and clashes). ",
+                "undoLabel and redoLabel name the step and, for anyone but the owner, whose it is. stale: the file changed on disk since the doc was opened or last matched it. ",
+                "edits: the edits since the doc last matched its file. Without a doc: { docs: [{ doc, dirty, canUndo, canRedo }] }."
             )),
             json!({ "type": "object", "properties": { "doc": doc_param() } }),
             false,
@@ -213,17 +328,49 @@ pub fn commands() -> Vec<Command> {
         ),
         session_command(
             "doc.save",
-            "Save an open doc: validate, serialize with the engine and write its source (MCP: write a proposal)",
+            "Save an open doc now and close its version: validate, serialize with the engine and write its source",
             Some(concat!(
+                "Edits save themselves, so this is the Mac's Save: it writes now and starts a new version for the next edit. ",
                 "Refuses a doc with validation problems (code invalid, details: the problems) and a file that changed on disk since the doc was opened ",
-                "(code conflict), unless --force. In the MCP server it writes a proposal to the state dir for a person to approve instead (unless started with --direct). ",
-                "Returns { doc, file, wrote, hash, diff, dirty, canUndo, canRedo }, or { doc, proposal, file, summary, edits, diff, warnings?, … } for a proposal: ",
-                "edits lists the edits since the doc last matched its file, and warnings says when Pixel Lab has the doc open with unsaved edits."
+                "(code conflict), unless --force. Returns { doc, file, wrote, hash, diff, dirty, canUndo, canRedo }."
             )),
             doc_params(vec![force_param("save despite problems or a conflict")]),
             true,
             save_run,
             save_format,
+        ),
+        {
+            let mut c = session_command(
+                "doc.adopt",
+                "Merge a client's unsaved copy of a doc into this one, as one step",
+                Some("For an MCP server that edited a doc it couldn't save before Pixel Lab opened the document: base is the text it started from (null for a new doc), source its own. One undo step by that client; refuses with merge_conflict when both changed the same lines."),
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "doc": doc_param(),
+                        "base": { "type": ["string", "null"], "description": "the text the copy started from" },
+                        "source": { "type": "string", "description": "the copy's text" }
+                    },
+                    "required": ["doc", "source"]
+                }),
+                true,
+                adopt_run,
+                summary_format,
+            );
+            c.args = vec!["doc"];
+            c
+        },
+        session_command(
+            "doc.flush",
+            "Save every open doc with changes now (or one), as autosave would soon",
+            Some(concat!(
+                "Edits save themselves about a second after the last one; this saves now. A doc with problems isn't written (saveState problems), ",
+                "and one whose file changed on disk is merged first (saveState conflict when that clashes). Returns { saved, docs: [{ doc, saveState, problems }] }."
+            )),
+            json!({ "type": "object", "properties": { "doc": doc_param() } }),
+            true,
+            flush_run,
+            flush_format,
         ),
         session_command(
             "doc.revert",
@@ -238,8 +385,8 @@ pub fn commands() -> Vec<Command> {
             "doc.reload",
             "Load an open doc from disk again, only if no unsaved work is lost",
             Some(concat!(
-                "Reloads when the working copy has no edits its file lacks: it is clean, or it matches the file (as after its proposal was applied). ",
-                "Refuses with code dirty (details: the edits that would be lost) when there are unsaved edits, and with code proposed while its proposal waits for the owner. ",
+                "Reloads when the working copy has no edits its file lacks: it is clean, or it matches the file. ",
+                "Refuses with code dirty (details: the edits that would be lost) when there are unsaved edits. ",
                 "Returns { doc, reloaded, changed, summary, dirty, canUndo, canRedo }; reloaded is false when the doc already matched the file. ",
                 "A scene whose file is not in depth order (a hand edit) is sorted as a step of its own: the result has sorted (how many items moved), the doc is then unsaved, ",
                 "and one undo gives back exactly the file. doc.revert is the one that drops edits."

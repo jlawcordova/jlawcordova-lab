@@ -6,12 +6,13 @@
 
 mod common;
 
+use pixellab::author::Author;
 use pixellab::cli::{main, Io};
 use pixellab::context::{Ctx, DocKind};
 use pixellab::document::{open_document, OpenOptions};
 use pixellab::errors::{CommandError, Error};
 use pixellab::registry::registry;
-use pixellab::session::{Mode, Options, Session};
+use pixellab::session::{Options, Session};
 use serde_json::{json, Value};
 
 /// A session over a temp copy of the sample document (objects `block` and `pebble`).
@@ -21,7 +22,7 @@ struct Lab {
     state: std::path::PathBuf,
 }
 
-fn lab_with(scenes: &[(&str, Value)], mode: Mode) -> Lab {
+fn lab_with(scenes: &[(&str, Value)], agent: bool) -> Lab {
     let doc = common::make_document();
     for (name, scene) in scenes {
         doc.write(&format!("scenes/{name}.json"), &engine::format::stringify_pretty(scene));
@@ -36,11 +37,15 @@ fn lab_with(scenes: &[(&str, Value)], mode: Mode) -> Lab {
         cwd: doc.root.clone(),
     })
     .unwrap();
-    Lab { session: Session::new(document, Options { mode, env, ..Options::default() }), doc, state }
+    let mut session = Session::new(document, Options { env, ..Options::default() });
+    if agent {
+        session.author = Author::agent(Some("test".into()), None);
+    }
+    Lab { session, doc, state }
 }
 
 fn lab(scenes: &[(&str, Value)]) -> Lab {
-    lab_with(scenes, Mode::Direct)
+    lab_with(scenes, false)
 }
 
 impl Lab {
@@ -225,17 +230,16 @@ fn r8_scene_frame_over_the_cli() {
 }
 
 #[test]
-fn r8_scene_frame_as_a_proposal() {
-    let mut lab = lab_with(&[("fit", json!({ "items": [block_item(0, 0, 0)] }))], Mode::Propose);
-    let before = std::fs::read_to_string(lab.doc.root.join("scenes/fit.json")).unwrap();
+fn r8_scene_frame_by_an_agent_applies_and_is_its_version() {
+    let mut lab = lab_with(&[("fit", json!({ "items": [block_item(0, 0, 0)] }))], true);
     lab.ok("scene.frame", json!({ "name": "fit", "box": [-16, -16, 64, 48] }));
     let saved = lab.ok("doc.save", json!({ "doc": "scene:fit" }));
-    assert_eq!(saved["wrote"], false);
-    assert_eq!(std::fs::read_to_string(lab.doc.root.join("scenes/fit.json")).unwrap(), before, "the document is untouched");
-    let proposal = lab.session.state.read_proposal(saved["proposal"].as_str().unwrap()).unwrap();
-    let source: Value = serde_json::from_str(proposal["source"].as_str().unwrap()).unwrap();
+    assert_eq!(saved["wrote"], true);
+    let source: Value = serde_json::from_str(&std::fs::read_to_string(lab.doc.root.join("scenes/fit.json")).unwrap()).unwrap();
     assert_eq!(source["viewBox"], json!([-16, -16, 64, 48]));
-    assert_eq!(proposal["summary"].as_array().unwrap().len(), 1);
+    let v = lab.session.history.versions().last().cloned().unwrap();
+    assert_eq!(v["author"]["kind"], "agent");
+    assert_eq!(v["edits"].as_array().unwrap().len(), 1);
 }
 
 // ------------------------------------------------------------ R16, R17
