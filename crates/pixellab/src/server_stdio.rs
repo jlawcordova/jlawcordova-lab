@@ -132,7 +132,9 @@ fn refuse_owned(holder: &Value, input: Box<dyn BufRead + Send>, rpc: &Output) ->
     for line in input.lines() {
         let Ok(line) = line else { break };
         let mut handle = |_: &str, _: Value, _: &Value| -> Result<Value, Failure> {
-            Err(RpcError::new(-32000, message).with_data(json!({ "code": "owned", "appPid": app, "pid": pid, "message": message })).into())
+            Err(RpcError::new(-32000, message)
+                .with_data(json!({ "code": "owned", "appPid": app, "pid": pid, "details": { "appPid": app, "pid": pid } }))
+                .into())
         };
         if let Some(reply) = handle_line(&line, &mut handle, &mut |t| log(t)) {
             rpc.send(&reply);
@@ -320,6 +322,7 @@ pub fn start(
                             // A doc with a save pending takes the change, three ways, and autosave
                             // writes the result (R7); only a clash is left to the owner.
                             if is_stale(entry, &disk) && session.merge(&ref_).is_err() {
+                                session.block_conflict(&ref_);
                                 rpc.notify("doc.stale", json!({ "doc": ref_, "file": file }));
                             }
                         }

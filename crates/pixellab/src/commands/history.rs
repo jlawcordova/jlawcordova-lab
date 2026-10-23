@@ -82,10 +82,6 @@ fn requester(session: &Session) -> Author {
     Author { kind: AuthorKind::Restore, name: Some(who.display()), chat: who.chat.clone() }
 }
 
-fn when(v: &Value) -> String {
-    str_of(v.get("endedAt"))
-}
-
 // ------------------------------------------------------------------ list
 
 fn list_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
@@ -319,7 +315,7 @@ fn restore_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
             targets.push((file, target));
         }
     }
-    let label = format!("Restored to version {n} ({})", when(&v));
+    let label = format!("Restored to version {n}");
     let (written, removed) = put_files(session, targets, &label, true)?;
     let changed = !written.is_empty() || !removed.is_empty();
     let summary = if changed {

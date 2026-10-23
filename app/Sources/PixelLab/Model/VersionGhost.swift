@@ -1,78 +1,15 @@
 import CoreGraphics
 import Foundation
 
-// The shapes of the proposal commands (docs/cli.md, "Proposals and
-// activity") and the ghost preview: a proposal's doc rendered without
-// writing, drawn over the stage, and what changed in it.
+// The ghost preview of a version (docs/intents/2026-10-autosave/spec.md, D5): a
+// doc as it was after a version (`history.render`), drawn over the stage, and
+// what changed in it; and the activity log's lines.
 
-/// One proposal of `proposal.list` / `proposals.changed`.
-struct ProposalSummary: Codable, Sendable, Hashable, Identifiable {
-    var id: String
-    /// #n (docs/intents/2026-10-agent-chat/spec.md, D7); older proposals have none.
-    var number: Int?
-    var doc: String
-    var summary: [String]
-    var createdAt: String
-    var agent: String?
-    /// The Agent chat it came from, if any.
-    var chat: ProposalChat?
-    var baseMatches: Bool
-
-    var ref: DocRef? { DocRef(id: doc) }
-    /// A rewrite of the same proposal (the agent saved again) has a new createdAt.
-    var version: String { "\(id)@\(createdAt)" }
-    var agentName: String { agent ?? "an agent" }
-    /// "#12", or "" for an older proposal.
-    var numberLabel: String { number.map { "#\($0)" } ?? "" }
-    /// The stage banner's title: "Previewing proposal #12 from the chat “Pines”" (docs/intents/2026-10-agent-chat/spec.md, D7).
-    var bannerTitle: String {
-        let n = number.map { "proposal #\($0)" } ?? "proposal"
-        return chat.map { "Previewing \(n) from the chat “\($0.title)”" } ?? "Previewing \(n) from \(agentName)"
-    }
-    /// Where it came from: "Chat · Forest by the house", or "claude-code 2.1.0 · terminal".
-    var source: String { chat.map { "Chat · \($0.title)" } ?? "\(agentName) · terminal" }
-    var editsLabel: String { "\(summary.count) edit\(summary.count == 1 ? "" : "s")" }
-}
-
-struct ProposalList: Codable, Sendable { var proposals: [ProposalSummary] }
-
-/// `proposal.show`: the summary plus the source and a diff from the file now.
-struct ProposalDetail: Codable, Sendable {
-    var id: String
-    var doc: String
-    var summary: [String]
-    var createdAt: String
-    var agent: String?
-    var baseMatches: Bool
-    var baseHash: String?
-    var file: String
-    var exists: Bool
-    var currentHash: String?
-    var source: String
-    var diff: String
-}
-
-/// `proposal.apply`.
-struct ProposalApplyResult: Codable, Sendable {
-    var id: String
-    var doc: String
-    var file: String
-    var wrote: Bool
-    var reloaded: Bool
-    /// The proposal was merged into the app's open copy, keeping its unsaved edits.
-    var merged: Bool?
-    /// The open copy's unsaved edits clash with it: the file is written, the copy is left stale.
-    var conflict: Bool?
-    var summary: String?
-    var forcedProblems: [String]?
-}
-
-/// `proposal.render`: a render result (as `scene.render` / `object.render`) of the proposed doc.
-struct ProposalRenderResult: Codable, Sendable {
-    var id: String
+/// `history.render`: a render result (as `scene.render` / `object.render`) of a doc at a version.
+struct HistoryRenderResult: Codable, Sendable {
+    var version: Int
     var doc: String
     var kind: String
-    var baseMatches: Bool
     var png: Data
     var scale: Int
     var viewBox: [Double]
@@ -98,7 +35,7 @@ struct ActivityEntry: Codable, Sendable, Hashable {
     var who: String { chat.map { "chat · \($0.title)" } ?? agent ?? "" }
 }
 
-/// `{ id, title }`: the Agent chat a proposal or tool call came from.
+/// `{ id, title }`: the Agent chat a version or tool call came from.
 struct ProposalChat: Codable, Sendable, Hashable {
     var id: String
     var title: String
@@ -106,23 +43,23 @@ struct ProposalChat: Codable, Sendable, Hashable {
 
 struct ActivityList: Codable, Sendable { var entries: [ActivityEntry] }
 
-/// The selected proposal, rendered for the doc open on the stage.
-struct ProposalGhost {
-    /// What it was rendered for: proposal version, doc, time or frame and layers.
+/// The selected version, rendered for the doc open on the stage.
+struct VersionGhost {
+    /// What it was rendered for: version, doc, time or frame and layers.
     var key: String
-    var proposalID: String
+    var version: Int
     var ref: DocRef
     var image: StageImage
     /// Its pixels (objects), for the changed-pixel marks.
     var colors: PixelColors?
 }
 
-/// What a proposal changes on the stage.
+/// What a version shows changed on the stage, against the doc now.
 struct GhostChange: Hashable, Sendable {
     enum Kind: String, Sendable { case added, moved, removed }
     var kind: Kind
     var object: String
-    /// The item's path in the render it comes from (the proposal's, or the current one's for removed items).
+    /// The item's path in the render it comes from (the version's, or the current one's for removed items).
     var path: String?
     /// Output-pixel bounds in that render.
     var bounds: [Double]?

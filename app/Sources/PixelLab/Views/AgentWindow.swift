@@ -2,12 +2,9 @@ import AppKit
 import SwiftUI
 
 /// The Agent window (Window › Agent Window, ⇧⌥⌘A): Claude Code's status (the Agent tab's chat), how to connect
-/// an agent over MCP, the PROPOSALS it saved (the edits, a diff, Approve and
-/// Reject, the ghost on the main window's stage) and the live ACTIVITY feed
-/// of its tool calls. Board 03, night and day.
-///
-/// Keys: ↑ / ↓ move through the proposals, ⌘↩ approves, ⌫ rejects (after a
-/// confirmation), Esc hides the ghost.
+/// an agent over MCP, and the live ACTIVITY feed of its tool calls. Agents' edits apply as they're made, so
+/// there's nothing to approve here (docs/intents/2026-10-autosave/spec.md, R19): File › Revert To › Browse All
+/// Versions… shows what they changed. Board 03, night and day.
 struct AgentWindow: View {
     @Environment(AppModel.self) private var model
 
@@ -17,24 +14,24 @@ struct AgentWindow: View {
             if model.phase == .ready {
                 VStack(spacing: 0) {
                     AgentHeader(agent: agent)
-                    Rectangle().fill(Theme.border).frame(height: 1)
-                    ProposalsSection(agent: agent)
-                        .frame(maxHeight: .infinity)
+                    if let retired = agent.retired {
+                        Rectangle().fill(Theme.border).frame(height: 1)
+                        RetiredNoticeRow(notice: retired, agent: agent)
+                    }
                     Rectangle().fill(Theme.border).frame(height: 1)
                     ActivitySection(agent: agent)
-                        .frame(height: 190)
+                        .frame(maxHeight: .infinity)
                 }
-                .background(keys(agent))
             } else {
                 ContentUnavailableView {
                     Label("Agent", systemImage: "sparkles")
                 } description: {
-                    Text("Pixel Lab is starting. Proposals and activity show here once the pixellab server runs.")
+                    Text("Pixel Lab is starting. Agents' activity shows here once the pixellab server runs.")
                 }
             }
         }
         .foregroundStyle(Theme.ink)
-        .frame(minWidth: 700, maxWidth: .infinity, minHeight: 560, maxHeight: .infinity)
+        .frame(minWidth: 700, maxWidth: .infinity, minHeight: 420, maxHeight: .infinity)
         .background(Theme.page)
         .tint(Theme.accent)
         .background(WindowAccessor { window in
@@ -42,17 +39,28 @@ struct AgentWindow: View {
             model.agent.window = window
         })
     }
+}
 
-    /// ↑ / ↓ and Esc as window key equivalents (the window has no text fields).
-    private func keys(_ agent: AgentModel) -> some View {
-        ZStack {
-            Button("Previous Proposal") { agent.move(by: -1) }.keyboardShortcut(.upArrow, modifiers: [])
-            Button("Next Proposal") { agent.move(by: 1) }.keyboardShortcut(.downArrow, modifiers: [])
-            Button("Hide Ghost") { agent.setGhostShown(false) }.keyboardShortcut(.escape, modifiers: [])
+/// The one-time notice (R21): proposals that were waiting when edits started to apply were set aside.
+struct RetiredNoticeRow: View {
+    var notice: AgentModel.RetiredNotice
+    var agent: AgentModel
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "tray.full").foregroundStyle(Theme.gold).accessibilityHidden(true)
+            Text("\(notice.count) waiting proposal\(notice.count == 1 ? " was" : "s were") set aside when edits started to apply. Their files are in \(AgentModel.abbreviate(notice.dir)).")
+                .font(.callout)
+                .foregroundStyle(Theme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button("Show in Finder") { agent.showRetired() }
+            Button("Dismiss") { agent.dismissRetired() }
         }
-        .opacity(0)
-        .frame(width: 0, height: 0)
-        .accessibilityHidden(true)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .background(Theme.card)
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -68,10 +76,7 @@ struct AgentHeader: View {
                 Image(systemName: "sparkles").foregroundStyle(Theme.accent).font(.system(size: 15, weight: .semibold))
                 Text("Agent").font(Theme.nameFont(17))
                 Spacer()
-                if let working = agent.working {
-                    ProgressView().controlSize(.small)
-                    Text(working).font(.callout).foregroundStyle(Theme.inkMuted)
-                } else if let result = agent.lastResult {
+                if let result = agent.lastResult {
                     Text(result).font(.callout).foregroundStyle(Theme.inkMuted).lineLimit(1).truncationMode(.middle)
                 }
             }
@@ -98,11 +103,11 @@ struct AgentHeader: View {
                     } label: {
                         Label("Reveal", systemImage: "folder")
                     }
-                    .help("Show the state dir (proposals/ and activity.jsonl) in the Finder")
+                    .help("Show the state dir (the version history and activity.jsonl) in the Finder")
                     .accessibilityLabel("Reveal the state folder in the Finder")
                 }
             }
-            Text("Chats in the main window and agents you connect from a terminal both save here as proposals. The document changes only when you approve.")
+            Text("Chats in the main window and agents you connect from a terminal edit the document as they go, and you see each edit on the stage. File › Revert To › Browse All Versions… shows what they changed, and takes it back.")
                 .font(.callout)
                 .foregroundStyle(Theme.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -180,243 +185,7 @@ struct CodeChip: View {
     }
 }
 
-// MARK: Proposals
-
-struct ProposalsSection: View {
-    var agent: AgentModel
-
-    var body: some View {
-        HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .firstTextBaseline) {
-                    SectionLabel(title: "Proposals")
-                    Spacer()
-                    Text("\(agent.proposals.count)").font(Theme.monoFont(11)).foregroundStyle(Theme.inkMuted)
-                }
-                .padding(.horizontal, 14)
-                .padding(.top, 12)
-                if agent.proposals.isEmpty {
-                    Text("Nothing to review. When an agent saves over MCP, its edits wait here for you.")
-                        .font(.callout)
-                        .foregroundStyle(Theme.inkMuted)
-                        .padding(.horizontal, 14)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer()
-                } else {
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            VStack(spacing: 2) {
-                                ForEach(agent.proposals) { p in
-                                    ProposalRow(proposal: p, selected: agent.selectedID == p.id) { agent.select(p.id) }
-                                        .id(p.id)
-                                }
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.bottom, 10)
-                        }
-                        .onChange(of: agent.selectedID) { _, id in
-                            if let id { withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(id) } }
-                        }
-                    }
-                }
-            }
-            .frame(width: 260)
-            .frame(maxHeight: .infinity, alignment: .top)
-            .background(Theme.sidebar)
-            Rectangle().fill(Theme.border).frame(width: 1)
-            ProposalDetailView(agent: agent)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        }
-    }
-}
-
-struct ProposalRow: View {
-    var proposal: ProposalSummary
-    var selected: Bool
-    var action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(alignment: .top, spacing: 9) {
-                Image(systemName: proposal.ref?.kind == .object ? "cube" : "square.stack.3d.up")
-                    .foregroundStyle(selected ? Theme.accent : Theme.inkMuted)
-                    .frame(width: 18)
-                    .padding(.top, 1)
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 5) {
-                        if proposal.number != nil { Text(proposal.numberLabel).font(Theme.monoFont(11)).foregroundStyle(Theme.inkMuted) }
-                        Text(proposal.ref?.name ?? proposal.doc).font(Theme.nameFont(13)).foregroundStyle(Theme.ink).lineLimit(1)
-                    }
-                    HStack(spacing: 5) {
-                        if proposal.chat != nil { ClaudeAvatar(size: 14) }
-                        Text(proposal.source).font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(1)
-                    }
-                    Text(proposal.editsLabel).font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(1)
-                }
-                Spacer(minLength: 4)
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text(AgentTime.short(proposal.createdAt)).font(Theme.monoFont(10)).foregroundStyle(Theme.inkMuted)
-                    if !proposal.baseMatches {
-                        Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 10)).foregroundStyle(Theme.gold)
-                            .help("The file changed since this proposal was made")
-                    }
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 7)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(selected ? Theme.selection : Color.clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(proposal.numberLabel) \(proposal.ref?.kind.rawValue ?? "doc") \(proposal.ref?.name ?? proposal.doc), from \(proposal.source), \(proposal.editsLabel), \(AgentTime.short(proposal.createdAt))\(proposal.baseMatches ? "" : ", the file changed since")")
-        .accessibilityAddTraits(selected ? [.isSelected] : [])
-    }
-}
-
-struct ProposalDetailView: View {
-    var agent: AgentModel
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        if let p = agent.selected {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(systemName: p.ref?.kind == .object ? "cube" : "square.stack.3d.up").foregroundStyle(Theme.accent)
-                    Text(p.ref?.name ?? p.doc).font(Theme.nameFont(16)).lineLimit(1)
-                    Text(p.ref?.kind.rawValue ?? "").font(.callout).foregroundStyle(Theme.inkMuted)
-                    Spacer()
-                    Text("\(p.numberLabel.isEmpty ? "" : "\(p.numberLabel) · ")\(p.source) · \(AgentTime.short(p.createdAt))").font(.callout).foregroundStyle(Theme.inkMuted).lineLimit(1)
-                }
-                if let c = p.chat { chatLine(p, c) }
-                baseStatus(p)
-                VStack(alignment: .leading, spacing: 5) {
-                    SectionLabel(title: "Edits")
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 3) {
-                            ForEach(Array(p.summary.enumerated()), id: \.offset) { _, line in
-                                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                    Text("•").foregroundStyle(Theme.inkMuted)
-                                    Text(line).font(.callout).fixedSize(horizontal: false, vertical: true)
-                                }
-                            }
-                            if p.summary.isEmpty { Text("No edits listed.").font(.callout).foregroundStyle(Theme.inkMuted) }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .scrollBounceBehavior(.basedOnSize)
-                    .frame(maxHeight: 96)
-                    .fixedSize(horizontal: false, vertical: true)
-                }
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(alignment: .firstTextBaseline) {
-                        SectionLabel(title: "Diff")
-                        if let d = agent.detail { Text(d.file).font(Theme.monoFont(11)).foregroundStyle(Theme.inkMuted) }
-                        Spacer()
-                        if let d = agent.detail { diffStats(d.diff) }
-                    }
-                    if let d = agent.detail, d.id == p.id {
-                        DiffView(lines: DiffLine.parse(d.diff))
-                    } else if let e = agent.detailError {
-                        Text(e).font(Theme.monoFont(11)).foregroundStyle(Theme.inkMuted)
-                        Spacer()
-                    } else {
-                        ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-                }
-                .frame(maxHeight: .infinity, alignment: .top)
-                footer(p)
-            }
-            .padding(16)
-        } else {
-            ContentUnavailableView {
-                Label(agent.proposals.isEmpty ? "No proposals" : "Choose a proposal", systemImage: "tray")
-            } description: {
-                Text(agent.proposals.isEmpty
-                     ? "Edits an agent saves over MCP wait here for you to approve or reject."
-                     : "Select one to see its edits and diff, and preview it on the stage.")
-            }
-            .foregroundStyle(Theme.ink)
-        }
-    }
-
-    /// From the chat “…”, asked about …. Open the chat (spec R21).
-    private func chatLine(_ p: ProposalSummary, _ c: ProposalChat) -> some View {
-        HStack(spacing: 6) {
-            ClaudeAvatar(size: 16)
-            (Text("From the chat ") + Text("“\(c.title)”").bold() + Text(model.chat.askedAbout(p.id).map { ", asked about \($0)." } ?? "."))
-                .font(.system(size: 12)).foregroundStyle(Theme.ink).lineLimit(2)
-            Spacer(minLength: 4)
-            Button("Open the chat") { model.chat.openChat(forProposal: p) }
-                .buttonStyle(AccentLinkStyle())
-                .disabled(!model.chat.chats.contains { $0.id == c.id })
-        }
-        .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .accessibilityElement(children: .contain)
-    }
-
-    private func baseStatus(_ p: ProposalSummary) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: p.baseMatches ? "checkmark.seal" : "exclamationmark.triangle.fill")
-                .foregroundStyle(p.baseMatches ? Theme.accent : Theme.gold)
-            Text(p.baseMatches ? "Base matches: made from \(p.ref?.file ?? "the file") as it is now" : "\(p.ref?.file ?? "The file") changed since the proposal was made")
-                .font(.callout)
-            Spacer()
-            Text(stageStatus(p)).font(.callout).foregroundStyle(Theme.inkMuted).lineLimit(1)
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    private func stageStatus(_ p: ProposalSummary) -> String {
-        if !agent.previewing { return "Not open on the stage" }
-        if !agent.ghostShown { return "Ghost hidden" }
-        if let e = agent.ghostError { return "Couldn't render: \(e)" }
-        return agent.visibleGhost != nil ? "Ghosted on the stage" : "Rendering the ghost…"
-    }
-
-    private func diffStats(_ diff: String) -> some View {
-        let lines = DiffLine.parse(diff)
-        let added = lines.filter { $0.kind == .added }.count, removed = lines.filter { $0.kind == .removed }.count
-        return Text("+\(added) −\(removed)").font(Theme.monoFont(11)).foregroundStyle(Theme.inkMuted)
-            .accessibilityLabel("\(added) lines added, \(removed) removed")
-    }
-
-    private func footer(_ p: ProposalSummary) -> some View {
-        HStack(spacing: 8) {
-            Button {
-                Task { await agent.openInEditor() }
-            } label: {
-                Label("Open in Editor", systemImage: "arrow.up.forward.app")
-            }
-            .help("Open \(p.ref?.name ?? "the doc") in the main window with the proposal ghosted on the stage")
-            Button {
-                agent.setGhostShown(!agent.ghostShown)
-            } label: {
-                Label(agent.ghostShown ? "Hide Ghost" : "Show Ghost", systemImage: agent.ghostShown ? "eye.slash" : "eye")
-            }
-            .disabled(!agent.previewing)
-            .help(agent.ghostShown ? "Hide the proposal on the stage (Esc)" : "Show the proposal on the stage")
-            Spacer()
-            Button(role: .destructive) {
-                Task { await agent.reject() }
-            } label: {
-                Text("Reject")
-            }
-            .disabled(agent.working != nil)
-            .help("Reject: delete the proposal and leave the site as it is (⌫)")
-            Button {
-                Task { await agent.approve() }
-            } label: {
-                Text("Approve")
-            }
-            .buttonStyle(AccentButtonStyle())
-            .keyboardShortcut(.return, modifiers: .command)
-            .disabled(agent.working != nil)
-            .help("Approve: write the proposal to \(p.ref?.file ?? "the file") (⌘↩)")
-        }
-    }
-}
+// MARK: Diff
 
 /// A unified diff in SF Mono on the site's code ground, with the site's
 /// syntax colors (src/styles/syntax.css): inserted and deleted line tints,

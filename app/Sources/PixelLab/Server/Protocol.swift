@@ -26,6 +26,18 @@ struct DocRef: Hashable, Sendable, Codable, CustomStringConvertible {
     /// The source file a `files.changed` notification names for this doc.
     var file: String { kind == .scene ? "scenes/\(name).json" : "objects/\(name).json" }
 
+    /// The doc a source file is: `scenes/<name>.json` or `objects/<name>.json`.
+    init?(file: String) {
+        let parts = file.split(separator: "/", maxSplits: 1).map(String.init)
+        guard parts.count == 2, parts[1].hasSuffix(".json") else { return nil }
+        let name = String(parts[1].dropLast(5))
+        switch parts[0] {
+        case "scenes": self.init(.scene, name)
+        case "objects": self.init(.object, name)
+        default: return nil
+        }
+    }
+
     init(from decoder: Decoder) throws {
         let s = try decoder.singleValueContainer().decode(String.self)
         guard let ref = DocRef(id: s) else {
@@ -48,6 +60,92 @@ struct DocStatus: Codable, Sendable, Equatable {
     var file: String?
     var exists: Bool?
     var stale: Bool?
+    /// `saved`, `pending`, `problems` or `conflict` (docs/intents/2026-10-autosave/spec.md, D1); in `doc.changed`.
+    var saveState: String? = nil
+    var problems: Int? = nil
+    /// The Edit menu's words for the next undo and redo, with whose step it is ("Place pine (Claude)").
+    var undoLabel: String? = nil
+    var redoLabel: String? = nil
+    /// Who made the change this status follows.
+    var author: VersionAuthor? = nil
+
+    /// A save is coming, or can't happen yet.
+    var unsaved: Bool { dirty || (saveState.map { $0 != "saved" } ?? false) }
+    /// Autosave can't write it: problems, or a clash with the file on disk.
+    var blocked: Bool { saveState == "problems" || saveState == "conflict" }
+}
+
+/// Who made an edit or a version (D8).
+struct VersionAuthor: Codable, Sendable, Equatable, Hashable {
+    var kind: String
+    var name: String?
+    var chat: ProposalChat?
+
+    /// "You", "Claude", "the CLI", "outside Pixel Lab"…
+    var display: String {
+        switch kind {
+        case "owner": "You"
+        case "agent":
+            if let n = name?.split(separator: " ").first, n.lowercased().hasPrefix("claude") { "Claude" } else { name.map { String($0.split(separator: " ").first ?? "") } ?? "An agent" }
+        case "cli": "The CLI"
+        case "outside": "Outside Pixel Lab"
+        case "restore": name.map { "\($0.prefix(1).uppercased() + $0.dropFirst()) (restore)" } ?? "A restore"
+        case "several": "Several authors"
+        case "opened": "As first opened"
+        default: kind
+        }
+    }
+}
+
+/// One version of `history.list` (D3, D4).
+struct VersionSummary: Codable, Sendable, Equatable, Hashable, Identifiable {
+    var number: Int
+    var startedAt: String
+    var endedAt: String
+    var author: VersionAuthor
+    var authors: [VersionAuthor]?
+    var edits: [String]
+    var files: [String]
+    var open: Bool?
+    var label: String?
+
+    var id: Int { number }
+    /// The docs it touched, as refs ("scene:harbor").
+    var refs: [DocRef] { files.compactMap(DocRef.init(file:)) }
+}
+
+struct HistoryList: Codable, Sendable {
+    var versions: [VersionSummary]
+    var total: Int
+}
+
+/// `history.show`: a version and each file's diff.
+struct HistoryShow: Codable, Sendable {
+    struct FileDiff: Codable, Sendable, Hashable {
+        var file: String
+        var created: Bool
+        var deleted: Bool
+        var diff: String
+    }
+    var number: Int
+    var edits: [String]
+    var diffs: [FileDiff]
+}
+
+/// `history.restore` and `history.undo`.
+struct HistoryActionResult: Codable, Sendable {
+    var version: Int
+    var changed: Bool
+    var written: [String]
+    var removed: [String]
+    var summary: String
+}
+
+/// `doc.flush`.
+struct FlushResult: Codable, Sendable {
+    struct Doc: Codable, Sendable { var doc: String; var saveState: String; var problems: Int }
+    var saved: Bool
+    var docs: [Doc]
 }
 
 struct SessionInfo: Codable, Sendable {
@@ -62,7 +160,18 @@ struct SessionInfo: Codable, Sendable {
     var sourceDir: String
     var stateDir: String
     var saves: String
+    /// The newest version when the server opened the document: Revert To › Last Opened restores it (R13).
+    var openedVersion: Int? = nil
+    /// The document's owner: this server, holding its lock (D9).
+    var owner: OwnerInfo? = nil
     var docs: [DocStatus]
+}
+
+/// `session.info.owner`: the lock's contents (docs/intents/2026-10-autosave/spec.md, D9).
+struct OwnerInfo: Codable, Sendable, Equatable {
+    var pid: Int
+    var appPid: Int?
+    var socket: String?
 }
 
 /// `session.info.document`: the `.pixellab` folder (or a legacy `source/` folder,
@@ -246,7 +355,8 @@ enum ServerNotification: Sendable {
     /// An open doc with unsaved edits whose file changed on disk (docs/intents/2026-10-mcp-gaps/spec.md, D5).
     case docStale(doc: String, file: String)
     case filesChanged([String])
-    case proposalsChanged(JSONValue)
+    /// The document's version history changed (the newest version).
+    case historyChanged(JSONValue)
     case activityAppended(JSONValue)
     case other(method: String, params: JSONValue)
 }

@@ -24,6 +24,7 @@ import Foundation
 ///     playend   (releases a held `playat` frame: the stage draws the playhead's frame again)
 ///     reducemotion on|off|system   (overrides the system's Reduce Motion for Play and the timeline)
 ///     undo redo save [force] revert publish [<dir>] done   saveas <path.pixellab>
+///     flush   wait saved   (doc.flush; wait until the open doc's saveState is saved)   revertto lastopened
 ///     time <ms>  play  pause  tracks on|off   zoom fit|1-4   sidebar library|layers
 ///     pinch in|out [<x> <y>]   (one zoom step, kept under that scene pixel or the middle)   zoomkey in|out   (⌘= and ⌘−)
 ///     librarydrop <name> <col> <row> <level>   (a drop from the Library onto a tile)   expect floatingbar <ids>   expect toolbar none
@@ -32,11 +33,15 @@ import Foundation
 ///     expect anchor kept   (the last pinch left its scene point where it was)   expect anchor steady   (and no frame on the way moved it; after wait 600)
 ///     search <text>   wait <ms>   snapshot <file.png>   log <text>
 ///     settings open|close   snapshot settings <file.png>   (the Settings window)
-///     cli <args…>  (the bundled program on the script's document: an outside edit to the files)
-///     stale merge|reload|keep     (the changed-on-disk banner's buttons)
+///     cli <args…>  (the bundled program on the script's document, from another state dir: an outside edit to the files)
+///     cli-owned <args…>  (the bundled program on the script's document, from the app's state dir: it edits through the app)
+///     outside <file> <field.path> <json>  (an editor sets one field of a source file, e.g. `outside scenes/harbor.json items.0.object "no-such"`)
+///     stale reload|keep     (the changed-on-disk banner's buttons)   secondapp  (a second server on the document: refused, owned)
 ///     expect dirty|selected|object|at|items|problems|build|outputs|publishdir|document|tool|time <value>
 ///     expect scenes|objects|zoom|badge|theme|ghosttime <value>   expect scenepixel <x>,<y> <#RRGGBB|empty>
 ///     expect stale true|false     (the banner shows)   expect mergealert true|false
+///     expect savestate saved|pending|problems|conflict   expect subtitle <text>   expect undolabel|redolabel <text|none>
+///     expect owner true|false   (the app's server holds the document's lock)
 ///     expect depth front|back|auto (what the Depth control shows)   expect level <n>   expect groupdepth <path>|selected front|back|auto
 ///     expect order <entry entry …>   (the scene's items in list order: each entry is a path, `#id`, `selected`,
 ///         an object name (its first item) or `name@col,row,level`; they must appear in that order)
@@ -88,13 +93,14 @@ import Foundation
 ///     expect phase setup|starting|ready   expect problem <text>  (the setup screen's document problem contains it)
 ///     expect migratemessage <text>   (the line under the document row contains it)
 ///
-/// The Agent window (proposals are numbered from 1, oldest first, as listed):
+/// The Agent window and the Versions panel (docs/intents/2026-10-autosave/spec.md, D12; versions by their number):
 ///
-///     agent open|close|size <w>x<h>   proposal select <n>|<id>|none   proposal next|prev|open
-///     approve [force]   reject   ghost on|off   answer proceed|force|reject|cancel (the next question)
-///     agentkey up|down|esc|cmd+return|delete (a key into the Agent window)
-///     snapshot agent <file.png>   menus (logs the Edit, View and Window menus)
-///     expect proposals|ghost|ghostchanges|base|activity|question|proposal <value>
+///     agent open|close|size <w>x<h>   snapshot agent <file.png>   menus (logs the File, Edit, View and Window menus)
+///     versions open|close   version select <n>|newest|next|prev|none   version restore [doc]   version undo [<n>]
+///     version answer yes|no  (the next restore question)   ghost on|off
+///     expect versions <n>   expect version <n>|newest author|edits|files|open <value>   expect ghost on|off   expect ghostchanges <n>
+///     mcpcall <tool> <json args>  (an MCP client, the bundled program's serve --mcp on the app's state dir: it edits through the app)
+///     expect versionresult <text>   (contains)   expect retired <n|none>   expect activity <n>
 ///
 /// The Agent tab's chat (docs/intents/2026-10-agent-chat/spec.md, D15; with PIXELLAB_CLAUDE_HOME
 /// and PIXELLAB_CLAUDE_INSTALLER pointing at scripts/fake-claude, never the owner's Claude Code):
@@ -105,9 +111,9 @@ import Foundation
 ///     expect setup|righttab|chats|chattitle|messages|steps|steplabel|chatquestion|chosen|cards|cardstatus <value>
 ///     expect placeholder|draft|draftlines|running|claudeinfo|lastnote|loginurl|details <value>
 ///     expect lastreply|setupmessage|installlog|context <text>   (contains)
-///     chip pin|unpin|remove <target>   savenow   card approve|reject|ghost|diff [<n>]   altclick <x> <y> [shift]
+///     chip pin|unpin|remove <target>   savenow   card undo|show [<n>]   altclick <x> <y> [shift]
 ///     selectuses   activity all|chats|errors   askclaude   agentwindow
-///     expect chips|pinned|unsaved|contextline|suggestion|ghostchat|activityrows|proposalsource|proposalnumber|banner|askedabout <value>
+///     expect chips|pinned|unsaved|contextline|suggestion|activityrows|banner <value>
 ///
 /// Each action waits until renders, checks and edits settle. The app logs
 /// each step to stderr and quits at the end: exit 0 if every step and
@@ -394,7 +400,11 @@ final class ScriptRunner {
                 guard let view = editor.stageView, let window = view.window else { throw Failure("no stage") }
                 guard window.firstResponder === view else { throw Failure("the stage isn't the first responder (click it, or `focus`): \(String(describing: window.firstResponder))") }
                 guard let event = StageInputView.keyEvent(for: k, window: window) else { throw Failure("can't make a key event for \(words[1])") }
-                NSApp.sendEvent(event)
+                // A ⌘ key goes the way AppKit sends a key equivalent: the window's views, then the main menu.
+                // NSApp.sendEvent alone skips both when the app isn't frontmost, as under the hook.
+                if !k.command || !(window.performKeyEquivalent(with: event) || NSApp.mainMenu?.performKeyEquivalent(with: event) == true) {
+                    NSApp.sendEvent(event)
+                }
                 try? await Task.sleep(for: .milliseconds(60))
                 return nil
             }
@@ -458,10 +468,79 @@ final class ScriptRunner {
             if !ok, let a = model.saveAlert { return "refused (\(a.kind)): \(a.message)" }
             return ok ? model.lastEdit : "not saved"
         case "revert": await model.revert(); return nil
-        case "cli":
-            // An outside editor: the bundled program, one-shot, on the document the script runs on.
+        case "revertto":
+            guard try arg(words, 1) == "lastopened" else { throw Failure("revertto lastopened") }
+            await model.restoreLastOpened()
+            return model.lastEdit ?? model.notice
+        case "flush":
+            return await model.flush() ? "saved" : "not everything saved"
+        case "wait":
+            guard words.count > 1, words[1] == "saved" else {
+                try? await Task.sleep(for: .milliseconds(try int(words, 1)))
+                return nil
+            }
+            let started = Date()
+            while Date().timeIntervalSince(started) < 10 {
+                if model.document?.status?.saveState == "saved" { return "saved" }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            throw Failure("not saved after 10 s: \(model.document?.status?.saveState ?? "no status")")
+        case "cli-owned":
+            // The bundled program on the document, as a terminal would run it: the app owns the document, so it edits through it (R22).
             guard let program = Locator.findProgram() else { throw Failure("no program") }
             let out = try await Locator.runCli(program: program, Array(words.dropFirst()) + model.documentLocation.arguments)
+            try? await Task.sleep(for: .milliseconds(300))
+            lastCLIOutput = out
+            return out.split(separator: "\n").last.map(String.init)
+        case "outside":
+            // An editor outside Pixel Lab changes one field of a file in the document, valid or not.
+            guard let root = model.sessionInfo?.document?.root else { throw Failure("no document") }
+            let url = URL(fileURLWithPath: root).appendingPathComponent(try arg(words, 1))
+            let path = try arg(words, 2).split(separator: ".").map(String.init)
+            let value = try JSONSerialization.jsonObject(with: Data(words.dropFirst(3).joined(separator: " ").utf8), options: .fragmentsAllowed)
+            let data = try Data(contentsOf: url)
+            guard var top = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw Failure("\(url.lastPathComponent) isn't an object") }
+            func set(_ node: Any, _ keys: ArraySlice<String>) throws -> Any {
+                guard let key = keys.first else { return value }
+                if var a = node as? [Any], let i = Int(key), a.indices.contains(i) { a[i] = try set(a[i], keys.dropFirst()); return a }
+                if var o = node as? [String: Any] { o[key] = try set(o[key] ?? [String: Any](), keys.dropFirst()); return o }
+                throw Failure("no \(key) in \(url.lastPathComponent)")
+            }
+            top = try set(top, path[...]) as? [String: Any] ?? top
+            try JSONSerialization.data(withJSONObject: top, options: [.prettyPrinted, .sortedKeys]).write(to: url, options: .atomic)
+            // The server's watcher sees it and the app follows.
+            try? await Task.sleep(for: .milliseconds(900))
+            return "wrote \(url.lastPathComponent)"
+        case "mcpcall":
+            // One tool call from an MCP client, as Claude Code would make it while the app has the document open (R22).
+            guard let program = Locator.findProgram() else { throw Failure("no program") }
+            let tool = try arg(words, 1)
+            let args = words.dropFirst(2).joined(separator: " ")
+            let reply = try await Self.mcpCall(program: program, location: model.documentLocation, tool: tool, arguments: args.isEmpty ? "{}" : args)
+            try? await Task.sleep(for: .milliseconds(300))
+            lastCLIOutput = reply
+            if reply.contains("\"isError\":true") { throw Failure("\(tool) failed: \(reply.prefix(300))") }
+            return String(reply.prefix(200))
+        case "secondapp":
+            // A second server on the same document, as a second copy of the app would start (R26): it's refused.
+            guard let program = Locator.findProgram() else { throw Failure("no program") }
+            let second = ServerConnection(launch: ServerLaunch(program: program, location: model.documentLocation))
+            do {
+                _ = try await second.start()
+                await second.stop()
+                throw Failure("the second server opened the document")
+            } catch let e as RPCError where e.dataCode == "owned" {
+                await second.stop()
+                let pid = e.details?["appPid"]?.doubleValue.map { String(Int($0)) } ?? "?"
+                guard pid == String(ProcessInfo.processInfo.processIdentifier) else { throw Failure("owned, but by app \(pid)") }
+                return "refused: owned by this app (\(pid))"
+            }
+        case "cli":
+            // An outside editor: the bundled program, one-shot, on the document the script runs on. Its own state
+            // dir, so it doesn't find the app that owns the document and writes the files itself, as git or an editor would.
+            guard let program = Locator.findProgram() else { throw Failure("no program") }
+            let elsewhere = FileManager.default.temporaryDirectory.appendingPathComponent("pixellab-outside-\(ProcessInfo.processInfo.processIdentifier)").path
+            let out = try await Locator.runCli(program: program, Array(words.dropFirst()) + model.documentLocation.arguments, environment: ["PIXELLAB_STATE": elsewhere])
             // Give the server's watcher time to see the file and tell the app.
             let started = Date()
             while Date().timeIntervalSince(started) < 2 {
@@ -473,14 +552,9 @@ final class ScriptRunner {
             return out.split(separator: "\n").last.map(String.init)
         case "stale":
             switch try arg(words, 1) {
-            case "merge":
-                model.mergeAlert = nil
-                await model.mergeFromDisk()
-                if let a = model.mergeAlert { return "refused: \(a)" }
-                return model.lastEdit
             case "reload": await model.reloadFromDisk(); return model.lastEdit
-            case "keep": model.keepMine(); return nil
-            default: throw Failure("stale merge|reload|keep")
+            case "keep": await model.keepMine(); return model.lastEdit
+            default: throw Failure("stale reload|keep")
             }
         case "build", "publish":
             // `publish [dir]`: into the document's publish folder, or the given one (no panel opens under a script).
@@ -574,9 +648,6 @@ final class ScriptRunner {
         case "search":
             model.searchText = words.dropFirst().joined(separator: " ")
             return nil
-        case "wait":
-            try? await Task.sleep(for: .milliseconds(try int(words, 1)))
-            return nil
         case "mouse":
             // Real NSEvents into the stage view: mouse down|drag|up <sceneX> <sceneY> [opt]
             guard let view = editor.stageView as? StageInputView, let geometry = view.geometry, let window = view.window else { throw Failure("no stage") }
@@ -664,7 +735,7 @@ final class ScriptRunner {
             guard case .setup(let p) = model.phase, p.migrate else { throw Failure("there's no Migrate… on screen") }
             model.askMigrate()
             return nil
-        case "agent", "proposal", "approve", "reject", "ghost", "answer", "menus", "agentkey":
+        case "agent", "versions", "version", "ghost", "answer", "menus":
             return try await performAgent(words, model: model)
         case "righttab", "setup", "chat", "chatkey", "details", "steps", "choose", "link", "chip", "savenow", "card", "altclick", "selectuses",
              "activity", "askclaude", "agentwindow":
@@ -1135,21 +1206,17 @@ final class ScriptRunner {
             await chat.saveNow()
             return chat.context.map { "unsaved: \($0.unsaved.isEmpty ? "none" : $0.unsaved.joined(separator: ","))" }
         case "card":
-            let cards = (chat.current?.messages ?? []).filter { $0.kind == .proposal }
+            // A change card's buttons (R18): Undo These Changes, Show in Versions.
+            let cards = (chat.current?.messages ?? []).filter { $0.kind == .change }
             let card = words.count > 2 ? cards[safe: (try int(words, 2)) - 1] : cards.last
-            guard let card else { throw Failure("no proposal card") }
+            guard let card else { throw Failure("no change card") }
             switch try arg(words, 1) {
-            case "approve": await chat.approve(card)
-            case "reject": await chat.reject(card)
-            case "ghost": await chat.toggleGhost(card)
-            case "diff":
-                await chat.showDiff(card)
-                let started = Date()
-                while model.agent.window?.isVisible != true, Date().timeIntervalSince(started) < 5 { try? await Task.sleep(for: .milliseconds(50)) }
-            default: throw Failure("card approve|reject|ghost|diff [<n>]")
+            case "undo": await chat.undoChanges(card)
+            case "show": await chat.showInVersions(card)
+            default: throw Failure("card undo|show [<n>]")
             }
             let now = chat.current?.messages.first { $0.id == card.id }
-            return "#\(card.number ?? 0): \(now.map(chat.statusText) ?? "?")\(chat.ghostOn(card) ? ", on stage" : "")"
+            return "versions \(card.versions?.map(String.init).joined(separator: ",") ?? "none"): \(now.map(chat.statusText) ?? "?")"
         case "altclick":
             // A real ⌥-click through the stage: mouse down and up without moving (D6).
             guard let view = model.editor.stageView as? StageInputView, let geometry = view.geometry else { throw Failure("no stage") }
@@ -1203,8 +1270,9 @@ final class ScriptRunner {
             return runs.last.map(ChatRow.stepsLabel) ?? "none"
         case "chatquestion": return messages.last(where: { $0.kind == .question })?.text ?? "none"
         case "chosen": return messages.last(where: { $0.kind == .question })?.chosen ?? "none"
-        case "cards": return String(messages.filter { $0.kind == .proposal }.count)
-        case "cardstatus": return messages.last(where: { $0.kind == .proposal }).map(chat.statusText) ?? "none"
+        case "cards": return String(messages.filter { $0.kind == .change }.count)
+        case "cardstatus": return messages.last(where: { $0.kind == .change }).map(chat.statusText) ?? "none"
+        case "cardtitle": return messages.last(where: { $0.kind == .change })?.text ?? "none"
         case "placeholder": return chat.placeholder
         case "draft": return chat.draft
         case "draftlines": return String(chat.draft.components(separatedBy: "\n").count)
@@ -1223,24 +1291,18 @@ final class ScriptRunner {
         case "unsaved": return (chat.context?.unsaved ?? []).isEmpty ? "none" : (chat.context?.unsaved ?? []).joined(separator: ",")
         case "contextline": return chat.contextSummary
         case "suggestion": return chat.suggestion ?? "none"
-        case "ghostchat":
-            guard let g = model.agent.visibleGhost, let p = model.agent.proposals.first(where: { $0.id == g.proposalID }) else { return "off" }
-            return p.chat?.title ?? "terminal"
         case "activityrows": return String(model.agent.visibleActivity.count)
-        case "proposalsource": return model.agent.selected?.source ?? "none"
-        case "proposalnumber": return model.agent.selected?.number.map(String.init) ?? "none"
         case "banner":
-            guard let p = model.agent.selected, model.agent.visibleGhost != nil else { return "none" }
-            return p.bannerTitle
-        case "askedabout": return model.agent.selected.flatMap { chat.askedAbout($0.id) } ?? "none"
+            guard let v = model.versions.selected, model.versions.previewing, model.versions.ghostShown else { return "none" }
+            return "Version \(v.number) · \(v.author.display)"
         default: return nil
         }
     }
 
-    /// The Agent window's actions.
+    /// The Agent window's and the Versions panel's actions.
     private func performAgent(_ words: [String], model: AppModel) async throws -> String? {
         let agent = model.agent
-        func result() -> String? { agent.lastResult.map { r in agent.lastQuestion.map { "asked \($0.rawValue); \(r)" } ?? r } }
+        let versions = model.versions
         switch words[0] {
         case "agent":
             switch try arg(words, 1) {
@@ -1249,7 +1311,7 @@ final class ScriptRunner {
                 let started = Date()
                 while agent.window?.isVisible != true, Date().timeIntervalSince(started) < 5 { try? await Task.sleep(for: .milliseconds(50)) }
                 guard let w = agent.window, w.isVisible else { throw Failure("the Agent window didn't open") }
-                w.setFrame(NSRect(origin: w.frame.origin, size: CGSize(width: 880, height: 820)), display: true)
+                w.setFrame(NSRect(origin: w.frame.origin, size: CGSize(width: 880, height: 640)), display: true)
                 return "Agent window \(Int(w.frame.width))×\(Int(w.frame.height)), autosave \(w.frameAutosaveName.isEmpty ? "none" : w.frameAutosaveName)"
             case "close":
                 agent.window?.performClose(nil)
@@ -1262,36 +1324,44 @@ final class ScriptRunner {
                 return nil
             default: throw Failure("agent open|close|size")
             }
-        case "proposal":
+        case "versions":
+            switch try arg(words, 1) {
+            case "open": await versions.open()
+            case "close": versions.close()
+            default: throw Failure("versions open|close")
+            }
+            return "\(versions.versions.count) versions"
+        case "version":
             switch try arg(words, 1) {
             case "select":
                 let what = try arg(words, 2)
-                if what == "none" { agent.select(nil) }
-                else if let n = Int(what) {
-                    guard agent.proposals.indices.contains(n - 1) else { throw Failure("no proposal \(n) (\(agent.proposals.count) listed)") }
-                    agent.select(agent.proposals[n - 1].id)
-                } else {
-                    guard agent.proposals.contains(where: { $0.id == what }) else { throw Failure("no proposal \(what)") }
-                    agent.select(what)
+                switch what {
+                case "none": versions.select(nil)
+                case "newest": versions.select(versions.versions.first?.number)
+                case "next": versions.move(by: 1)
+                case "prev": versions.move(by: -1)
+                default:
+                    guard let n = Int(what), versions.versions.contains(where: { $0.number == n }) else { throw Failure("no version \(what) (\(versions.versions.map(\.number).map(String.init).joined(separator: ",")))") }
+                    versions.select(n)
                 }
-            case "next": agent.move(by: 1)
-            case "prev": agent.move(by: -1)
-            case "open": await agent.openInEditor()
-            default: throw Failure("proposal select|next|prev|open")
+                return versions.selected.map { "version \($0.number) by \($0.author.display): \($0.edits.first ?? "")" } ?? "none selected"
+            case "restore":
+                guard versions.selected != nil else { throw Failure("no version selected") }
+                versions.lastQuestion = nil
+                await versions.restore(only: words.count > 2 && words[2] == "doc" ? model.document?.ref : nil)
+                return [versions.lastQuestion.map { "asked: \($0)" }, versions.lastResult].compactMap { $0 }.joined(separator: "; ")
+            case "undo":
+                let n = words.count > 2 ? try int(words, 2) : nil
+                guard n != nil || versions.selected != nil else { throw Failure("no version selected") }
+                _ = await versions.undoChanges(n)
+                return versions.lastResult
+            case "answer":
+                versions.scriptAnswer = (try arg(words, 2)) == "yes"
+                return nil
+            default: throw Failure("version select|restore|undo|answer")
             }
-            return agent.selected.map { "\($0.id) \($0.doc) from \($0.agentName), \($0.editsLabel)" } ?? "none selected"
-        case "approve":
-            guard agent.selected != nil else { throw Failure("no proposal selected") }
-            agent.lastQuestion = nil
-            await agent.approve(force: words.count > 1 && words[1] == "force")
-            return result()
-        case "reject":
-            guard agent.selected != nil else { throw Failure("no proposal selected") }
-            agent.lastQuestion = nil
-            await agent.reject()
-            return result()
         case "ghost":
-            agent.setGhostShown((try arg(words, 1)) == "on")
+            versions.setGhostShown((try arg(words, 1)) == "on")
             return nil
         case "answer":
             // The Migrate alert's buttons (R9), when it is up.
@@ -1299,29 +1369,9 @@ final class ScriptRunner {
                 if which == "migrate" { await model.migrate() } else { model.migrateAsking = false }
                 return nil
             }
-            guard let a = AgentAnswer(rawValue: try arg(words, 1)) else { throw Failure("answer proceed|force|reject|cancel") }
-            agent.scriptAnswer = a
-            return nil
-        case "agentkey":
-            // A real key down into the Agent window's key equivalents: up, down, esc, cmd+return, delete.
-            guard let w = agent.window, w.isVisible else { throw Failure("agent open first") }
-            let spec = try arg(words, 1)
-            let keys: [String: (String, UInt16, NSEvent.ModifierFlags)] = [
-                "up": (String(UnicodeScalar(0xF700)!), 126, [.numericPad, .function]), "down": (String(UnicodeScalar(0xF701)!), 125, [.numericPad, .function]),
-                "esc": ("\u{1b}", 53, []), "cmd+return": ("\r", 36, [.command]), "delete": ("\u{7f}", 51, []), "backspace": ("\u{8}", 51, []),
-            ]
-            guard let (chars, code, flags) = keys[spec] else { throw Failure("agentkey up|down|esc|cmd+return|delete") }
-            w.makeKeyAndOrderFront(nil)
-            guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
-                                               windowNumber: w.windowNumber, context: nil, characters: chars, charactersIgnoringModifiers: chars,
-                                               isARepeat: false, keyCode: code) else { throw Failure("no event") }
-            agent.lastQuestion = nil
-            let used = agent.handleKeyDown(event) || w.performKeyEquivalent(with: event)
-            try? await Task.sleep(for: .milliseconds(150))
-            guard used else { throw Failure("the Agent window didn't use \(spec)") }
-            return result() ?? agent.selected.map { "selected \($0.doc)" } ?? "none selected"
+            throw Failure("answer migrate|cancel (with the Migrate alert up)")
         case "menus":
-            for title in ["Edit", "View", "Window"] {
+            for title in ["File", "Edit", "View", "Window"] {
                 guard let menu = NSApp.mainMenu?.items.first(where: { $0.title == title })?.submenu else { continue }
                 let items = menu.items.filter { !$0.isSeparatorItem }.map { item in
                     let mods = item.keyEquivalentModifierMask
@@ -1340,6 +1390,29 @@ final class ScriptRunner {
         default:
             throw Failure("unknown action \(words[0])")
         }
+    }
+
+    /// Runs `pixellab serve --mcp` on the document, initializes, makes one tool call and returns its result line.
+    nonisolated static func mcpCall(program: URL, location: DocumentLocation, tool: String, arguments: String) async throws -> String {
+        try await Task.detached {
+            let p = Process()
+            p.executableURL = program
+            p.arguments = ["serve", "--mcp"] + location.arguments
+            let input = Pipe(), output = Pipe()
+            p.standardInput = input
+            p.standardOutput = output
+            p.standardError = FileHandle.nullDevice
+            try p.run()
+            let lines = [
+                #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"claude-code","version":"2.1.0"}}}"#,
+                #"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"\#(tool)","arguments":\#(arguments)}}"#,
+            ]
+            input.fileHandleForWriting.write(Data((lines.joined(separator: "\n") + "\n").utf8))
+            try? input.fileHandleForWriting.close()
+            let out = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            p.waitUntilExit()
+            return out.split(separator: "\n").last.map(String.init) ?? ""
+        }.value
     }
 
     /// The Settings window, when it is up.
@@ -1456,20 +1529,43 @@ final class ScriptRunner {
             got = model.objectEditor.footprint.map { "\($0.width),\($0.depth)" } ?? "none"
         case "doc": got = doc?.ref.id ?? "none"
         case "mode": got = model.mode.rawValue
-        case "proposals": got = String(model.agent.proposals.count)
-        case "proposal": got = model.agent.selected?.doc ?? "none"
-        case "ghost": got = model.agent.visibleGhost != nil ? "on" : "off"
+        case "versions": got = String(model.versions.versions.count)
+        case "version":
+            // expect version <n> author|edits|files|open <value>
+            let n = words.count > 2 ? (words[2] == "newest" ? model.versions.versions.first?.number : Int(words[2])) : nil
+            guard words.count >= 4, let n, let v = model.versions.versions.first(where: { $0.number == n }) else { throw Failure("expect version <n>|newest author|edits|files|open <value> (no such version)") }
+            let field = words[3]
+            let value = words.dropFirst(4).joined(separator: " ")
+            let have: String
+            switch field {
+            case "author": have = v.author.kind + (v.author.chat.map { " in \($0.title)" } ?? "")
+            case "edits": have = v.edits.joined(separator: " | ")
+            case "files": have = v.files.joined(separator: ",")
+            case "open": have = String(v.open == true)
+            default: throw Failure("expect version <n> author|edits|files|open <value>")
+            }
+            guard field == "edits" ? have.contains(value) : have == value else { throw Failure("expected version \(n) \(field) \(value), got \(have)") }
+            return "version \(n) \(field) = \(have)"
+        case "versionresult":
+            let said = model.versions.lastResult ?? ""
+            guard said.contains(want) else { throw Failure("expected the last restore or undo to say \"\(want)\", got \"\(said)\"") }
+            return said
+        case "ghost": got = model.versions.visibleGhost != nil ? "on" : "off"
         case "ghostchanges":
-            guard let render = doc?.render, model.agent.visibleGhost != nil else { throw Failure("no ghost on the stage") }
-            let c = model.agent.changes(current: render, renderCount: doc?.renderCount ?? 0)
+            guard let render = doc?.render, model.versions.visibleGhost != nil else { throw Failure("no ghost on the stage") }
+            let c = model.versions.changes(current: render, renderCount: doc?.renderCount ?? 0)
             let n = { (k: GhostChange.Kind) in c.items.filter { $0.kind == k }.count }
             got = String(c.items.count + c.pixels.count)
             guard got == want else { throw Failure("expected ghostchanges \(want), got \(got)") }
-            return doc?.ref.kind == .object ? "\(c.pixels.count) pixels change" : "added \(n(.added)), moved \(n(.moved)), removed \(n(.removed)): \(c.items.map { "\($0.kind.rawValue) \($0.object) \($0.path ?? "")" }.joined(separator: ", "))"
-        case "base": got = model.agent.selected.map { $0.baseMatches ? "matches" : "changed" } ?? "none"
+            return doc?.ref.kind == .object ? "\(c.pixels.count) pixels differ" : "added \(n(.added)), moved \(n(.moved)), removed \(n(.removed)): \(c.items.map { "\($0.kind.rawValue) \($0.object) \($0.path ?? "")" }.joined(separator: ", "))"
+        case "retired": got = model.agent.retired.map { String($0.count) } ?? "none"
         case "activity": got = String(model.agent.visibleActivity.count)
-        case "question": got = model.agent.lastQuestion?.rawValue ?? "none"
-        case "ghosttime": got = model.agent.visibleGhost?.image.time.map { String(Int($0)) } ?? "none"
+        case "savestate": got = doc?.status?.saveState ?? (doc?.isDirty == true ? "pending" : "saved")
+        case "subtitle": got = model.saveStateText
+        case "undolabel": got = model.document?.status?.undoLabel ?? "none"
+        case "redolabel": got = model.document?.status?.redoLabel ?? "none"
+        case "owner": got = String(model.sessionInfo?.owner?.pid == model.sessionInfo?.pid && model.sessionInfo?.owner != nil)
+        case "ghosttime": got = model.versions.visibleGhost?.image.time.map { String(Int($0)) } ?? "none"
         case "scenes": got = String(model.scenes.count)
         case "objects": got = String(model.objects.count)
         case "zoom": got = model.zoomText
@@ -1596,7 +1692,7 @@ final class ScriptRunner {
                 if model.newDoc?.creating == true { return true }
                 if model.migrating { return true }
                 if case .starting = model.phase { return true }
-                if model.agent.busy { return true }
+                if model.agent.busy || model.versions.busy { return true }
                 if model.chat.setup == .checking, model.rightTab == .agent { return true }
                 guard let doc = model.document else { return false }
                 // A scene's items as of the last edit's result, so Moved by and the inspector read them.

@@ -66,7 +66,8 @@ struct DocumentWindow: View {
         // The layer menu, over the whole window (docs/intents/2026-10-scene-layers/spec.md, D9).
         .overlay { LayerMenuLayer() }
         .navigationTitle(model.windowTitle)
-        .navigationSubtitle(model.document == nil ? "" : (model.document?.isDirty == true ? "Edited" : "Saved"))
+        // Saved, Edited (a save is coming) or why it can't be saved (docs/intents/2026-10-autosave/spec.md, R3).
+        .navigationSubtitle(model.document == nil ? "" : model.saveStateText)
         // No toolbar: the title and its Edited / Saved subtitle in a slim title bar (R12).
         .toolbar(removing: .sidebarToggle)
         .toolbarBackground(Theme.hero, for: .windowToolbar)
@@ -90,8 +91,7 @@ struct DocumentWindow: View {
             case .invalid:
                 Button("OK", role: .cancel) {}
             case .conflict:
-                Button("Merge") { Task { await model.mergeFromDisk() } }
-                Button("Revert") { Task { await model.revert() } }
+                Button("Reload") { Task { await model.reloadFromDisk() } }
                 Button("Save Anyway", role: .destructive) { Task { await model.save(alert.doc, force: true) } }
                 Button("Cancel", role: .cancel) {}
             }
@@ -102,7 +102,7 @@ struct DocumentWindow: View {
                 let more = alert.problems.count > 8 ? "\n…and \(alert.problems.count - 8) more (see Checks)." : ""
                 Text("Fix these first; nothing was written.\n\n" + (shown.isEmpty ? alert.message : shown) + more)
             case .conflict:
-                Text("\(alert.doc.file) changed on disk since you opened it. Merge brings that change into your copy and keeps your edits; Revert loads the file as it is now and drops your changes; Save Anyway overwrites it.")
+                Text("\(alert.doc.file) changed on disk, on the same lines as your edits. Reload loads the file as it is now and drops your edits; Save Anyway overwrites it.")
             }
         }
         .alert(
@@ -111,10 +111,10 @@ struct DocumentWindow: View {
             presenting: model.mergeAlert
         ) { _ in
             Button("Reload", role: .destructive) { Task { await model.reloadFromDisk() } }
-            Button("Keep Mine") { model.keepMine() }
+            Button("Keep Mine") { Task { await model.keepMine() } }
             Button("Cancel", role: .cancel) {}
         } message: { _ in
-            Text("Nothing was merged. Reload loads the file and drops your unsaved edits (Undo brings them back); Keep Mine keeps your copy, and saving it later asks before it overwrites the file.")
+            Text("Nothing was merged. Reload loads the file and drops your unsaved edits (Undo brings them back); Keep Mine saves your copy over the file.")
         }
         .sheet(isPresented: Binding(get: { model.build != nil }, set: { if !$0 { model.build = nil } })) {
             PublishSheet().environment(model)

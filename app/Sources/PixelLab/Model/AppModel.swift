@@ -101,7 +101,14 @@ final class AppModel {
                 MainActor.assumeIsolated { self?.mainIsKey = true }
             },
             center.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.mainIsKey = false }
+                MainActor.assumeIsolated {
+                    self?.mainIsKey = false
+                    // Edits save at once when the window stops being the key window (docs/intents/2026-10-autosave/spec.md, R1).
+                    Task { await self?.flush() }
+                }
+            },
+            center.addObserver(forName: NSApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { _ = Task { await self?.flush() } }
             },
         ]
     }
@@ -150,8 +157,10 @@ final class AppModel {
     let layers = LayersModel()
     let objectEditor = ObjectEditor()
     let timeline = TimelineModel()
-    /// The Agent window: proposals, activity and the ghost preview.
+    /// The Agent window: agents' activity and the MCP setup.
     let agent = AgentModel()
+    /// The Versions sheet: the document's history and the ghost of a version (docs/intents/2026-10-autosave/spec.md, D5).
+    let versions = VersionsModel()
     /// The Agent tab's chat with Claude Code (docs/intents/2026-10-agent-chat/spec.md).
     let chat = ChatModel()
     /// The right column's tab (spec D12): remembered, except under the script hook or a snapshot.
@@ -166,8 +175,10 @@ final class AppModel {
     var newDoc: NewDocDraft?
     /// The last edit's summary (the status line under the stage).
     var lastEdit: String?
-    /// Open docs with unsaved changes (from `doc.changed`), for Save/Don't Save on quit.
+    /// Open docs with a save pending or blocked (from `doc.changed`): the window's edited dot.
     var dirtyDocs: Set<String> = []
+    /// Open docs autosave can't write (problems, or a clash with the file), by ref: closing and quitting ask about these (R4).
+    var blockedDocs: [String: DocStatus] = [:]
     /// Open docs with unsaved changes whose file changed on disk (`doc.stale`): the stage shows a banner.
     var staleDocs: Set<String> = []
     /// Stale docs the owner chose Keep Mine for: no banner until the file changes again.
@@ -189,6 +200,7 @@ final class AppModel {
         objectEditor.app = self
         timeline.app = self
         agent.app = self
+        versions.app = self
         chat.app = self
         // The script hook and a snapshot start on the default tab, not the one the owner left open.
         if script != nil || snapshot != nil { rightTab = .inspector }
@@ -253,7 +265,7 @@ final class AppModel {
         stageDark = dark
         timeline.invalidate()
         requestRender()
-        agent.syncGhost()
+        versions.syncGhost()
     }
 
     func setHovered(_ id: String, _ inside: Bool) {
@@ -285,6 +297,11 @@ final class AppModel {
         let conn = ServerConnection(launch: ServerLaunch(program: program, location: location))
         do {
             sessionInfo = try await conn.start()
+        } catch let e as RPCError where e.dataCode == "owned" {
+            // Another copy of Pixel Lab has this document open: bring it forward instead (R26).
+            await conn.stop()
+            handOff(appPid: e.details?["appPid"]?.doubleValue.map { Int32($0) })
+            return
         } catch {
             let diag = conn.diagnostics.trimmingCharacters(in: .whitespacesAndNewlines)
             await conn.stop()
@@ -297,12 +314,28 @@ final class AppModel {
         await loadPalette()
         await loadLists()
         await agent.load()
+        await versions.load()
         document = nil
         phase = .ready
         chat.documentChanged()
         if rightTab == .agent { chat.start() }
         await openInitialDoc()
     }
+
+    /// The copy of Pixel Lab that owns the document comes to the front; this one, with nothing of its own open, quits (R26).
+    /// Under the script hook it stays, on the setup screen, so a script can say what happened.
+    func handOff(appPid: Int32?) {
+        handedOffTo = appPid
+        phase = .setup(SetupProblem(server: "Another Pixel Lab window has this document open."))
+        guard script == nil else { return }
+        if let pid = appPid, let other = NSRunningApplication(processIdentifier: pid) {
+            other.activate()
+        }
+        NSApp.terminate(nil)
+    }
+
+    /// The app pid of the copy this one handed the document to, for the script hook.
+    var handedOffTo: Int32?
 
     /// Stops the server (quit, or before restarting with new settings).
     func shutdown() async {
@@ -325,11 +358,12 @@ final class AppModel {
     private func handle(_ event: ServerEvent) async {
         switch event {
         case .notification(.docChanged(let status)):
-            if status.dirty { dirtyDocs.insert(status.doc) } else {
+            if status.unsaved { dirtyDocs.insert(status.doc) } else {
                 dirtyDocs.remove(status.doc)
                 staleDocs.remove(status.doc)
                 keptStale.remove(status.doc)
             }
+            if status.blocked { blockedDocs[status.doc] = status } else { blockedDocs[status.doc] = nil }
             guard let doc = document, doc.ref.id == status.doc else { return }
             doc.status = status
             if doc.ref.kind == .object {
@@ -362,8 +396,8 @@ final class AppModel {
         case .notification(.docStale(let doc, _)):
             staleDocs.insert(doc)
             keptStale.remove(doc)
-        case .notification(.proposalsChanged(let proposals)):
-            agent.proposalsChanged(proposals)
+        case .notification(.historyChanged(let latest)):
+            versions.historyChanged(latest)
         case .notification(.activityAppended(let entries)):
             agent.activityAppended(entries)
         case .notification:
@@ -373,9 +407,11 @@ final class AppModel {
             notice = "The pixellab server restarted."
             thumbnails.reset(connection: connection)
             await agent.load()
+            await versions.load()
             if let doc = document {
                 _ = try? await connection?.call("doc.open", ["doc": .string(doc.ref.id)])
                 dirtyDocs = []
+                blockedDocs = [:]
                 staleDocs = []
                 keptStale = []
                 if doc.ref.kind == .object { objectEditor.docChanged() }
@@ -586,7 +622,7 @@ final class AppModel {
                 }
             }
             if doc.ref.kind == .object, document === doc, !objectEditor.playing { objectEditor.requestExtras() }
-            if document === doc { agent.syncGhost() }
+            if document === doc { versions.syncGhost() }
         }
     }
 
@@ -643,11 +679,11 @@ final class AppModel {
     }
 
     /// What the stage must hold: the published box, where the cursor has been
-    /// and a proposal's ghost.
+    /// and a version's ghost.
     func neededRect(for doc: DocumentModel) -> CGRect {
         var r = doc.publishBox
         if let reach = doc.reach { r = r.union(reach) }
-        if let ghost = agent.visibleGhost, ghost.ref == doc.ref { r = r.union(ghost.image.viewBox) }
+        if let ghost = versions.visibleGhost, ghost.ref == doc.ref { r = r.union(ghost.image.viewBox) }
         return r
     }
 
@@ -773,12 +809,32 @@ final class AppModel {
 
     // MARK: Commands
 
-    var canSave: Bool { document?.status?.dirty ?? false }
+    /// The open doc has a save pending or blocked.
+    var canSave: Bool { document?.status?.unsaved ?? false }
     var canUndo: Bool { document?.status?.canUndo ?? false }
     var canRedo: Bool { document?.status?.canRedo ?? false }
 
-    /// Saves the open doc. `invalid` and `conflict` become an alert the user
-    /// answers; returns whether it saved.
+    /// The Edit menu's Undo and Redo: "Undo Place Pine (Claude)" (R20).
+    var undoTitle: String { document?.status?.undoLabel.map { "Undo \(Self.titled($0))" } ?? "Undo" }
+    var redoTitle: String { document?.status?.redoLabel.map { "Redo \(Self.titled($0))" } ?? "Redo" }
+
+    /// "pebble placed at column 1" → "Pebble placed at column 1".
+    nonisolated static func titled(_ label: String) -> String { label.prefix(1).uppercased() + label.dropFirst() }
+
+    /// The window's subtitle: Saved, Edited (a save is coming), or why it can't be saved (R3).
+    var saveStateText: String {
+        guard let status = document?.status else { return "" }
+        switch status.saveState {
+        case "problems": let n = status.problems ?? 0; return "Not saved: \(n) problem\(n == 1 ? "" : "s")"
+        case "conflict": return "Not saved: changed on disk"
+        case "pending": return "Edited"
+        case "saved": return "Saved"
+        default: return status.dirty ? "Edited" : "Saved"
+        }
+    }
+
+    /// File › Save (⌘S): saves the open doc now and starts a new version (R5). `invalid` and `conflict`
+    /// become an alert the user answers; returns whether it saved.
     @discardableResult
     func save(force: Bool = false) async -> Bool {
         guard let doc = document else { return false }
@@ -792,13 +848,15 @@ final class AppModel {
             var params: [String: JSONValue] = ["doc": .string(ref.id)]
             if force { params["force"] = true }
             let r: SaveResult = try await connection.call("doc.save", params)
-            let status = DocStatus(doc: r.doc, dirty: r.dirty, canUndo: r.canUndo, canRedo: r.canRedo)
+            let status = DocStatus(doc: r.doc, dirty: r.dirty, canUndo: r.canUndo, canRedo: r.canRedo, saveState: r.dirty ? "pending" : "saved", problems: 0,
+                                   undoLabel: document?.status?.undoLabel, redoLabel: document?.status?.redoLabel)
             if let doc = document, doc.ref == ref { doc.status = status }
             if r.dirty { dirtyDocs.insert(r.doc) } else { dirtyDocs.remove(r.doc) }
+            blockedDocs[r.doc] = nil
             staleDocs.remove(r.doc)
             keptStale.remove(r.doc)
             notice = nil
-            lastEdit = r.wrote == false ? "\(ref.name) was already saved" : "Saved \(r.file ?? ref.name)"
+            lastEdit = r.wrote == false ? "Saved a version of \(ref.name)" : "Saved \(r.file ?? ref.name)"
             return true
         } catch let e as RPCError {
             switch e.dataCode {
@@ -815,39 +873,63 @@ final class AppModel {
         return false
     }
 
+    /// Saves now whatever autosave would save soon (`doc.flush`): before a close, quit, Publish,
+    /// Save As or chat message, and when the window stops being the key window (R1). Returns
+    /// whether everything is saved.
+    @discardableResult
+    func flush() async -> Bool {
+        guard let connection, phase == .ready else { return true }
+        guard let r: FlushResult = try? await connection.call("doc.flush") else { return false }
+        for d in r.docs {
+            if d.saveState == "saved" {
+                dirtyDocs.remove(d.doc)
+                blockedDocs[d.doc] = nil
+            }
+        }
+        return r.saved
+    }
+
     /// An error's `details` as lines (strings, or objects with message/text).
     static func lines(_ details: JSONValue?) -> [String] {
         guard let a = details?.arrayValue else { return details?.stringValue.map { [$0] } ?? [] }
         return a.compactMap { $0.stringValue ?? $0["text"]?.stringValue ?? $0["message"]?.stringValue }
     }
 
-    /// Asks Save / Don't Save / Cancel when open docs have unsaved changes.
+    /// Closing or quitting: everything that can be saved is, and only a doc autosave can't write
+    /// asks: Review (stay, and show the problems), Save Anyway, or Discard Changes (R4).
     /// Returns whether to go on (close or quit).
     func confirmUnsaved(window: NSWindow?) async -> Bool {
-        if discardConfirmed || dirtyDocs.isEmpty || script != nil { return true }
-        let refs = dirtyDocs.sorted().compactMap { DocRef(id: $0) }
-        let names = refs.map(\.name)
+        if discardConfirmed || script != nil { return true }
+        await flush()
+        let blocked = blockedDocs.keys.sorted().compactMap { DocRef(id: $0) }
+        guard !blocked.isEmpty else { return true }
+        let names = blocked.map(\.name)
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = names.count == 1
-            ? "Do you want to save the changes you made to \(names[0])?"
-            : "Do you want to save the changes to \(names.count) documents?"
-        alert.informativeText = (names.count == 1 ? "" : names.joined(separator: ", ") + "\n\n") + "Your changes will be lost if you don't save them."
-        alert.addButton(withTitle: "Save")
-        let dont = alert.addButton(withTitle: "Don't Save")
-        dont.hasDestructiveAction = true
-        alert.addButton(withTitle: "Cancel")
+            ? "\(names[0]) has problems and can't be saved"
+            : "\(names.count) docs have problems and can't be saved"
+        alert.informativeText = (names.count == 1 ? "" : names.joined(separator: ", ") + "\n\n")
+            + "Review them to fix the problems, save them as they are anyway, or discard the changes that haven't been saved."
+        alert.addButton(withTitle: "Review")
+        alert.addButton(withTitle: "Save Anyway")
+        let discard = alert.addButton(withTitle: "Discard Changes")
+        discard.hasDestructiveAction = true
         let response: NSApplication.ModalResponse
         if let window, window.isVisible { response = await alert.beginSheetModal(for: window) } else { response = alert.runModal() }
         switch response {
-        case .alertFirstButtonReturn:
-            for ref in refs where !(await save(ref)) { return false }
+        case .alertSecondButtonReturn:
+            for ref in blocked where !(await save(ref, force: true)) { return false }
             discardConfirmed = true
             return true
-        case .alertSecondButtonReturn:
+        case .alertThirdButtonReturn:
             discardConfirmed = true
             return true
         default:
+            if let ref = blocked.first {
+                if document?.ref != ref { await open(ref) }
+                rightTab = .inspector
+            }
             return false
         }
     }
@@ -868,6 +950,8 @@ final class AppModel {
             folder = picked
         }
         build = BuildState(running: true)
+        // Publish saves first (R1); it still refuses, as before, while a doc has problems.
+        await flush()
         do {
             let params: [String: JSONValue] = folder.map { ["dir": .string($0)] } ?? [:]
             let r: ArtBuildResult = try await connection.call("art.build", params)
@@ -950,6 +1034,7 @@ final class AppModel {
     func saveAs(to path: String? = nil) async {
         guard let connection, phase == .ready else { return }
         guard let path = path ?? SetupView.chooseNewDocument(title: "Save a copy of the document", name: "\(documentName ?? "Untitled").pixellab", start: sessionInfo?.document?.root) else { return }
+        await flush()
         do {
             let r: DocumentCopyResult = try await connection.call("document.copy", ["to": .string(path)])
             await switchDocument(to: r.to)
@@ -970,14 +1055,14 @@ final class AppModel {
         await bootstrap()
     }
 
-    /// A doc's file was written outside the editor (an approved proposal):
+    /// A doc's file was written outside the editor (a restore, or an undo of a version):
     /// the open copy reloads if it was clean (the server says so with
     /// doc.changed); render, check and list again either way.
     func docWritten(_ ref: DocRef) async {
         if ref.kind == .object { thumbnails.invalidate([ref.name]) }
         if let doc = document, doc.ref == ref {
             if let status: DocStatus = try? await connection?.call("doc.status", ["doc": .string(ref.id)]) {
-                doc.status = DocStatus(doc: status.doc, dirty: status.dirty, canUndo: status.canUndo, canRedo: status.canRedo)
+                doc.status = status
                 if status.dirty { dirtyDocs.insert(status.doc) } else { dirtyDocs.remove(status.doc) }
             }
             if ref.kind == .object { objectEditor.docChanged() }
@@ -993,6 +1078,30 @@ final class AppModel {
         await docCommand("doc.revert")
         if let ref = document?.ref.id, document?.status?.dirty == false { staleDocs.remove(ref); keptStale.remove(ref) }
     }
+
+    /// File › Revert To › Last Opened: the document as it was when this window opened it (R13), after a question.
+    func restoreLastOpened() async {
+        guard let connection, let n = sessionInfo?.openedVersion else { return }
+        await flush()
+        await versions.load()
+        guard let newest = versions.versions.first?.number, newest > n || (newest == n && versions.versions.first?.open == true) else {
+            lastEdit = "Nothing has changed since this document was opened"
+            return
+        }
+        guard await versions.confirm("Revert the document to how it was when you opened it?", "Everything goes back as it was then. You can undo this.", button: "Revert") else { return }
+        do {
+            let r: HistoryActionResult = try await connection.call("history.restore", ["version": JSONValue(n)])
+            lastEdit = r.summary
+            for id in r.written { if let ref = DocRef(id: id) { await docWritten(ref) } }
+            if !r.removed.isEmpty { await loadLists() }
+            await versions.load()
+        } catch {
+            notice = "Couldn't revert: \(error.localizedDescription)"
+        }
+    }
+
+    /// File › Save's version: what the menu item says (R5).
+    var saveTitle: String { "Save" }
 
     // MARK: A doc that changed on disk (docs/intents/2026-10-mcp-gaps/spec.md, D5)
 
@@ -1013,7 +1122,7 @@ final class AppModel {
         let ref = doc.ref
         do {
             let r: UndoResult = try await connection.call("doc.merge", ["doc": .string(ref.id)])
-            doc.status = DocStatus(doc: r.doc, dirty: r.dirty, canUndo: r.canUndo, canRedo: r.canRedo)
+            doc.status = DocStatus(doc: r.doc, dirty: r.dirty, canUndo: r.canUndo, canRedo: r.canRedo, saveState: r.dirty ? "pending" : "saved")
             if r.dirty { dirtyDocs.insert(r.doc) } else { dirtyDocs.remove(r.doc) }
             staleDocs.remove(ref.id)
             keptStale.remove(ref.id)
@@ -1028,10 +1137,11 @@ final class AppModel {
     /// Reload: the file as it is now, dropping the unsaved edits (one undoable step, as Revert).
     func reloadFromDisk() async { await revert() }
 
-    /// Keep Mine: hide the banner. Saving later still asks before it overwrites the file.
-    func keepMine() {
-        guard let id = document?.ref.id else { return }
-        keptStale.insert(id)
+    /// Keep Mine: the open copy overwrites the file (R7).
+    func keepMine() async {
+        guard let ref = document?.ref else { return }
+        keptStale.insert(ref.id)
+        if await save(ref, force: true) { staleDocs.remove(ref.id) }
     }
     func undo() async { await docCommand("doc.undo") }
     func redo() async { await docCommand("doc.redo") }
@@ -1043,7 +1153,10 @@ final class AppModel {
         defer { editor.pendingEdits -= 1 }
         do {
             let r: UndoResult = try await connection.call(method, ["doc": .string(doc.ref.id)])
-            doc.status = DocStatus(doc: r.doc, dirty: r.dirty, canUndo: r.canUndo, canRedo: r.canRedo)
+            // doc.changed, sent before the answer, has the full status (labels, save state).
+            if doc.status?.doc != r.doc || doc.status?.dirty != r.dirty || doc.status?.canUndo != r.canUndo || doc.status?.canRedo != r.canRedo {
+                doc.status = DocStatus(doc: r.doc, dirty: r.dirty, canUndo: r.canUndo, canRedo: r.canRedo, saveState: doc.status?.saveState)
+            }
             if r.dirty { dirtyDocs.insert(r.doc) } else { dirtyDocs.remove(r.doc) }
             if let s = r.summary { lastEdit = s }
             // The step may have given items other paths: the selection follows its items.

@@ -85,9 +85,11 @@ enum StepText {
         case "object_new":
             return "Made a new object, \(s("name") ?? "")"
         case "doc_save":
-            if let n = r?["number"]?.doubleValue { return "Saved it as proposal #\(Int(n)) for you to review" }
-            if r?["proposal"]?.stringValue != nil { return "Saved it as a proposal for you to review" }
-            return "Saved \(s("doc") ?? "it")"
+            return "Saved \(s("doc").flatMap { DocRef(id: $0)?.name } ?? "it")"
+        case "history_undo":
+            return "Took back version \(input["version"]?.doubleValue.map { String(Int($0)) } ?? "")"
+        case "history_restore":
+            return "Restored version \(input["version"]?.doubleValue.map { String(Int($0)) } ?? "")"
         case "check":
             let name = r?["target"]?["name"]?.stringValue ?? s("name") ?? "the document"
             let n = count(r?["problems"])
@@ -98,7 +100,7 @@ enum StepText {
         }
     }
 
-    /// `scene_move name=harbor item=134.0 by=1,0` (and `→ proposal #12` after a save).
+    /// `scene_move name=harbor item=134.0 by=1,0`.
     static func raw(tool: String, input: JSONValue, result: String?) -> String {
         var parts = [tool]
         if case .object(let o) = input {
@@ -106,11 +108,7 @@ enum StepText {
                 parts.append("\(key)=\(value(o[key]!))")
             }
         }
-        var text = parts.joined(separator: " ")
-        if tool == "doc_save", let data = result?.data(using: .utf8), let r = try? JSONDecoder().decode(JSONValue.self, from: data), let n = r["number"]?.doubleValue {
-            text += " → proposal #\(Int(n))"
-        }
-        return text
+        return parts.joined(separator: " ")
     }
 
     /// name, doc and item first, the rest alphabetical.
@@ -172,7 +170,7 @@ enum StepText {
         case "scene_set": "change it"
         case "scene_place": "place it"
         case "scene_remove": "remove it"
-        case "doc_save": "save the proposal"
+        case "doc_save": "save it"
         case "object_paint", "object_fill", "object_erase": "paint it"
         case "scene_render", "object_render": "render it"
         default: "run \(tool.replacingOccurrences(of: "_", with: " "))"

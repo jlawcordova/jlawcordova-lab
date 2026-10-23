@@ -202,8 +202,12 @@ struct ChatListView: View {
             }
             Divider().overlay(Theme.border)
             VStack(alignment: .leading, spacing: 8) {
-                Button("All proposals and activity in the Agent window") { model.agent.showWindow() }
-                    .buttonStyle(AccentLinkStyle())
+                HStack(spacing: 14) {
+                    Button("All versions") { Task { await model.versions.open() } }
+                        .buttonStyle(AccentLinkStyle())
+                    Button("Activity in the Agent window") { model.agent.showWindow() }
+                        .buttonStyle(AccentLinkStyle())
+                }
                 ClaudeStatusLine(chat: chat)
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
@@ -212,9 +216,9 @@ struct ChatListView: View {
 
     private func row(_ c: Chat) -> some View {
         let current = c.id == chat.currentID
-        let waiting = c.waiting(in: Set(model.agent.proposals.map(\.id)))
+        let changes = c.changeCount
         let pins = c.pins.count
-        let meta = [chat.docName(of: c), pins > 0 ? "\(pins) pinned" : nil, waiting > 0 ? "\(waiting) waiting" : nil].compactMap { $0 }.joined(separator: " · ")
+        let meta = [chat.docName(of: c), pins > 0 ? "\(pins) pinned" : nil, changes > 0 ? "\(changes) change\(changes == 1 ? "" : "s")" : nil].compactMap { $0 }.joined(separator: " · ")
         return Button { chat.open(c.id) } label: {
             HStack(alignment: .top, spacing: 10) {
                 ClaudeAvatar(size: 36)
@@ -392,6 +396,7 @@ struct ChatView: View {
         case .steps(let steps): StepsRow(rowID: row.id, steps: steps, chat: chat)
         case .question(let m): QuestionCard(message: m, chat: chat)
         case .proposal(let m): ProposalCard(message: m, chat: chat)
+        case .change(let m): ChangeCard(message: m, chat: chat)
         case .typing: TypingBubble()
         default: EmptyView()
         }

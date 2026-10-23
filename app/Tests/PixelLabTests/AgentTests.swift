@@ -88,11 +88,15 @@ import Testing
         #expect(lines.map(\.kind) == [.file, .file, .hunk, .context, .added, .removed])
     }
 
-    @Test func proposalsDecodeFromNotifications() {
-        let value: JSONValue = [["id": "20261019-120000-abcdef", "doc": "scene:hero-island", "summary": ["pine placed"], "createdAt": "2026-10-19T12:00:00.000Z", "agent": "claude-code 2.0", "baseMatches": true]]
-        let list = AgentModel.decode([ProposalSummary].self, value)
-        #expect(list?.first?.ref == DocRef(.scene, "hero-island"))
-        #expect(list?.first?.editsLabel == "1 edit")
+    @Test func R12_versionsDecodeFromHistoryList() throws {
+        let json = #"{"versions":[{"number":3,"startedAt":"2026-10-23T12:00:00.000Z","endedAt":"2026-10-23T12:00:05.000Z","author":{"kind":"agent","name":"claude-code 2.1.0","chat":{"id":"c","title":"Pines"}},"edits":["pine placed"],"files":["scenes/hero-island.json"],"open":true}],"total":1}"#
+        let list = try JSONDecoder().decode(HistoryList.self, from: Data(json.utf8))
+        let v = try #require(list.versions.first)
+        #expect(v.refs == [DocRef(.scene, "hero-island")])
+        #expect(v.author.display == "Claude")
+        #expect(v.author.chat?.title == "Pines")
+        #expect(VersionsModel.spoken(v).hasPrefix("Version 3 at "))
+        #expect(VersionsModel.spoken(v).hasSuffix("by Claude in Pines: pine placed, in hero-island"))
         #expect(AgentTime.date("2026-10-19T12:00:00.000Z") != nil)
         #expect(AgentTime.date("2026-10-19T12:00:00Z") != nil)
     }

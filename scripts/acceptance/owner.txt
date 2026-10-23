@@ -1,0 +1,25 @@
+# One writer per document (docs/intents/2026-10-autosave/spec.md, R17, R20, R22, R26), on a temp harbor copy:
+# the app owns the document, a second copy is refused, and the CLI and an MCP client edit through the app,
+# where their edits show on the stage at once, by their authors. acceptance.sh then quits the app and checks
+# the CLI writes the files itself (R24).
+appearance dark
+open scene:harbor
+expect owner true
+secondapp
+expect items 89
+cli-owned scene place harbor pine --at 2,2,0
+expect cli saved by Pixel Lab: scenes/harbor.json
+expect items 90
+expect undolabel pine placed at column 2, row 2, level 0 (CLI)
+mcpcall scene_place {"name":"harbor","object":"pine","at":[3,3,0]}
+expect items 91
+expect undolabel pine placed at column 3, row 3, level 0 (Claude)
+flush
+versions open
+expect version newest author agent
+snapshot @OUT@/owner-dark.png
+versions close
+# The owner's ⌘Z takes back the latest step, whoever made it
+undo
+expect items 90
+wait saved

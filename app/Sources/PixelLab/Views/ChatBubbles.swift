@@ -232,7 +232,68 @@ struct CapsuleButtonStyle: ButtonStyle {
     }
 }
 
-/// A proposal card (spec D7, R16). PR 3 adds its actions.
+/// What a turn changed (docs/intents/2026-10-autosave/spec.md, R18): CHANGED, the edits and docs, Undo
+/// These Changes and Show in Versions; Undone once taken back.
+struct ChangeCard: View {
+    var message: ChatMessage
+    var chat: ChatModel
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let undone = message.outcome == "undone"
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                SectionLabel(title: "Changed")
+                Spacer()
+                Text(chat.statusText(message)).font(.system(size: 11)).foregroundStyle(Theme.ink)
+                    .lineLimit(1).fixedSize()
+                    .padding(.horizontal, 7).padding(.vertical, 1)
+                    .background(Theme.selection, in: Capsule())
+            }
+            Text(message.text ?? "Changes").font(Theme.nameFont(13)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
+                .strikethrough(undone, color: Theme.inkMuted)
+            EditsList(edits: message.edits ?? [])
+            if let docs = message.docs, !docs.isEmpty {
+                Text(docs.compactMap { DocRef(id: $0)?.name }.joined(separator: ", "))
+                    .font(Theme.monoFont(11)).foregroundStyle(Theme.inkMuted)
+            }
+            FlowLayout(spacing: 6) {
+                if !undone {
+                    Button("Undo These Changes") { Task { await chat.undoChanges(message) } }
+                        .buttonStyle(CapsuleButtonStyle(prominent: true))
+                        .disabled(model.versions.working != nil)
+                        .accessibilityHint("Takes back what Claude changed in this turn, keeping what came after")
+                }
+                Button("Show in Versions") { Task { await chat.showInVersions(message) } }
+                    .buttonStyle(CapsuleButtonStyle())
+            }
+            .padding(.top, 2)
+        }
+        .padding(.horizontal, 13).padding(.vertical, 12)
+        .background(Theme.card, in: BubbleShape(mine: false))
+        .overlay(BubbleShape(mine: false).stroke(Theme.border, lineWidth: 1))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Changed, \(chat.statusText(message)): \(message.text ?? "")")
+    }
+}
+
+/// A card's edits, at most eight.
+struct EditsList: View {
+    var edits: [String]
+
+    var body: some View {
+        if !edits.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(edits.prefix(8).enumerated()), id: \.offset) { _, e in
+                    Text(e).font(Theme.monoFont(11)).foregroundStyle(Theme.inkMuted).fixedSize(horizontal: false, vertical: true)
+                }
+                if edits.count > 8 { Text("… and \(edits.count - 8) more").font(Theme.monoFont(11)).foregroundStyle(Theme.inkMuted) }
+            }
+        }
+    }
+}
+
+/// A proposal card from before edits applied (agent-chat spec D7): kept in old chats as it was, with no actions.
 struct ProposalCard: View {
     var message: ChatMessage
     var chat: ChatModel
@@ -248,16 +309,7 @@ struct ProposalCard: View {
                     .background(Theme.selection, in: Capsule())
             }
             Text(message.text ?? "Proposal").font(Theme.nameFont(13)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
-            let edits = message.edits ?? []
-            if !edits.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(edits.prefix(8).enumerated()), id: \.offset) { _, e in
-                        Text(e).font(Theme.monoFont(11)).foregroundStyle(Theme.inkMuted).fixedSize(horizontal: false, vertical: true)
-                    }
-                    if edits.count > 8 { Text("… and \(edits.count - 8) more").font(Theme.monoFont(11)).foregroundStyle(Theme.inkMuted) }
-                }
-            }
-            ProposalCardActions(message: message, chat: chat)
+            EditsList(edits: message.edits ?? [])
         }
         .padding(.horizontal, 13).padding(.vertical, 12)
         .background(Theme.card, in: BubbleShape(mine: false))
@@ -343,35 +395,6 @@ struct FlowLayout: Layout {
         }
         if !cur.items.isEmpty { rows.append(cur) }
         return rows
-    }
-}
-
-/// A card's buttons (spec R16): Approve, Reject and Show/Hide on stage while it waits, and the diff.
-struct ProposalCardActions: View {
-    var message: ChatMessage
-    var chat: ChatModel
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        let waiting = message.outcome == nil
-        let busy = model.agent.working != nil
-        VStack(alignment: .leading, spacing: 6) {
-            if waiting {
-                FlowLayout(spacing: 6) {
-                    Button("Approve") { Task { await chat.approve(message) } }
-                        .buttonStyle(CapsuleButtonStyle(prominent: true)).disabled(busy)
-                        .accessibilityHint("Writes the proposal to the document")
-                    Button("Reject") { Task { await chat.reject(message) } }
-                        .buttonStyle(CapsuleButtonStyle()).disabled(busy)
-                    Button(chat.ghostOn(message) ? "Hide on stage" : "Show on stage") { Task { await chat.toggleGhost(message) } }
-                        .buttonStyle(CapsuleButtonStyle())
-                        .accessibilityAddTraits(chat.ghostOn(message) ? .isSelected : [])
-                }
-            }
-            Button("Diff in the Agent window") { Task { await chat.showDiff(message) } }
-                .buttonStyle(AccentLinkStyle())
-        }
-        .padding(.top, 2)
     }
 }
 
