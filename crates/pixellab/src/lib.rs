@@ -22,6 +22,7 @@ pub mod help;
 pub mod history;
 pub mod jsonrpc;
 pub mod layer_ops;
+pub mod library;
 pub mod merge;
 pub mod motion_ops;
 pub mod owner;

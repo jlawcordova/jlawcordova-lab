@@ -312,6 +312,28 @@ pub fn category_name_problem(name: &str) -> Option<String> {
     None
 }
 
+/// The Library popover's own tabs can't be a category's outermost name (spec R2).
+pub fn is_reserved_category(name: &str) -> bool {
+    name.eq_ignore_ascii_case("all") || name.eq_ignore_ascii_case("others")
+}
+
+/// Why `names` can't be a category path, if it can't (spec R1, R2): the same
+/// checks `validate` makes of an object's `category`.
+pub fn category_path_problem(names: &[String]) -> Option<String> {
+    if names.is_empty() {
+        return Some("a category needs at least one name".into());
+    }
+    for (i, name) in names.iter().enumerate() {
+        if let Some(why) = category_name_problem(name) {
+            return Some(why);
+        }
+        if i == 0 && is_reserved_category(name) {
+            return Some(format!("{} is a tab of the Library, so it can't be the outermost name", qs(name)));
+        }
+    }
+    None
+}
+
 /// Checks an object's `category` (spec R1, R2): a non-empty list of names,
 /// outermost first, where "All" and "Others" (the popover's own tabs) can't be
 /// the outermost.
@@ -329,7 +351,7 @@ fn category_problems(category: Option<&Value>, add: &mut dyn FnMut(String)) {
         };
         if let Some(why) = category_name_problem(text) {
             add(format!("category: {why}"));
-        } else if i == 0 && (text.eq_ignore_ascii_case("all") || text.eq_ignore_ascii_case("others")) {
+        } else if i == 0 && is_reserved_category(text) {
             add(format!("category: {} is a tab of the Library, so it can't be the outermost name", qs(text)));
         }
     }

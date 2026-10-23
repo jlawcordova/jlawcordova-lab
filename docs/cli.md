@@ -46,6 +46,7 @@
 | [`object action`](#objectaction) | Add, change or delete an action of a sprite map layer | edit |
 | [`object ambient`](#objectambient) | Set or clear a sprite map layer's ambient loop | edit |
 | [`object animate`](#objectanimate) | Turn a still layer into one of the site's frame loops, or switch a loop's kind | edit |
+| [`object category`](#objectcategory) | Set or clear the category of one or more objects | edit |
 | [`object erase`](#objecterase) | Erase pixels of an object (make them transparent), on a layer and frame | edit |
 | [`object fill`](#objectfill) | Flood-fill from a pixel with a palette color, on a layer and frame | edit |
 | [`object footprint`](#objectfootprint) | Set how many tiles a sprite covers (--to w,d), or clear it (--clear) | edit |
@@ -57,14 +58,14 @@
 | [`object layer delete`](#objectlayerdelete) | Delete a layer (not the only one) | edit |
 | [`object layer duplicate`](#objectlayerduplicate) | Duplicate a layer, just above it | edit |
 | [`object layer move`](#objectlayermove) | Move a layer up (--by 1, raise) or down (--by -1, lower) | edit |
-| [`object list`](#objectlist) | List every object with its kind, size, layers, frames and colors | read |
+| [`object list`](#objectlist) | List every object with its kind, category, size, layers, frames and colors | read |
 | [`object map set`](#objectmapset) | Replace a whole map of a sprite's layer (or frame of a loop) from rows, in one undo step | edit |
 | [`object new`](#objectnew) | Make a new object from a starter: a blank sprite, a block, or one that extends another | edit |
 | [`object paint`](#objectpaint) | Paint pixels of an object a palette color, on a layer and frame | edit |
 | [`object pick`](#objectpick) | The color at a pixel of an object, on a layer and frame (the Picker) | read |
 | [`object render`](#objectrender) | Render one object to a transparent PNG | read |
 | [`object resize`](#objectresize) | Pad or crop a sprite's maps to a width and height (at the right and bottom) | edit |
-| [`object show`](#objectshow) | Show an object's kind, size, anchor, footprint, layers, frames, colors and extends | read |
+| [`object show`](#objectshow) | Show an object's kind, category, size, anchor, footprint, layers, frames, colors and extends | read |
 | [`object still`](#objectstill) | Turn a frame loop back into a still layer, keeping one frame | edit |
 | [`palette get`](#paletteget) | List the palette: every color name, hex and tier | read |
 | [`scene action`](#sceneaction) | Add, change or delete a scene item's action: a one-shot move the page plays by name | edit |
@@ -801,6 +802,30 @@ edits docs · MCP tool `object_animate`
 | `--layer` | integer | default `0` | the layer, from 0 at the bottom (at least 0) |
 | `--loop` | `ff` \| `wf` \| `hf` | default `"ff"` | ff: 4 frames, 600 ms; wf: 5, 1 s; hf: 6, 3 s |
 
+#### object.category
+
+Set or clear the category of one or more objects.
+
+```
+pixellab object category <names…> [--category <text>] [--to <text>] [--clear]
+```
+
+A category is a path of names, outermost first (Nature › Trees), that groups an object under a tab and heading in the Library. A name is 1 to 32 letters, digits, spaces, &, ' or -, with no space at either end or doubled, and All and Others can't be the outermost (they are the Library's own tabs). Names compare without regard to case. A category never changes how an object renders or what Publish writes. Give --to on the command line, or category (a list, or null to clear) in JSON. Each object is its own edit and undo step; the command checks every object and the path first.
+
+edits docs · MCP tool `object_category`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `names` (positional) | list of string | required | the objects (names, or objects/<name>) |
+| `--category` | any |  | the category as names, outermost first, or null to clear it |
+| `--to` | string |  | the category as a path: Nature/Trees or Nature › Trees |
+| `--clear` | boolean | default `false` | remove the category |
+
+```sh
+pixellab object category pine tree --to "Nature/Trees"
+pixellab object category pine --clear
+```
+
 #### object.erase
 
 Erase pixels of an object (make them transparent), on a layer and frame.
@@ -993,10 +1018,10 @@ edits docs · MCP tool `object_layer_move`
 
 #### object.list
 
-List every object with its kind, size, layers, frames and colors.
+List every object with its kind, category, size, layers, frames and colors.
 
 ```
-pixellab object list [--kind <sprite|block>]
+pixellab object list [--kind <sprite|block>] [--category <text,…>]
 ```
 
 read-only · MCP tool `object_list`
@@ -1004,6 +1029,7 @@ read-only · MCP tool `object_list`
 | param | type | | description |
 | --- | --- | --- | --- |
 | `--kind` | `sprite` \| `block` |  | only objects of this kind |
+| `--category` | list of string |  | only objects in this category and below it, without regard to case: names outermost first, or a path such as Nature/Trees |
 
 #### object.map.set
 
@@ -1147,7 +1173,7 @@ edits docs · MCP tool `object_resize`
 
 #### object.show
 
-Show an object's kind, size, anchor, footprint, layers, frames, colors and extends.
+Show an object's kind, category, size, anchor, footprint, layers, frames, colors and extends.
 
 ```
 pixellab object show <name> [--doc]

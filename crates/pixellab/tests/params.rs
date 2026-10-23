@@ -336,6 +336,7 @@ fn every_command_is_well_formed_and_has_a_group() {
         "object.action",
         "object.ambient",
         "object.animate",
+        "object.category",
         "object.erase",
         "object.fill",
         "object.frame.add",
