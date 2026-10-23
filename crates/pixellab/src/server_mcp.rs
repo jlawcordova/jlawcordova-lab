@@ -16,6 +16,7 @@ use serde_json::{json, Map, Value};
 
 use crate::activity_summary::activity_summary;
 use crate::author::Author;
+use crate::client::{self, failure, Failed};
 use crate::context::Ctx;
 use crate::document::{Document, Env};
 use crate::errors::Error;
@@ -28,8 +29,9 @@ pub const PROTOCOL_VERSION: &str = "2025-06-18";
 const SUPPORTED: [&str; 3] = [PROTOCOL_VERSION, "2025-03-26", "2024-11-05"];
 
 /// Commands that aren't tools, and why (`LEFT_OUT`).
-pub const LEFT_OUT: [(&str, &str); 3] = [
+pub const LEFT_OUT: [(&str, &str); 4] = [
     ("art.build", "it publishes the SVGs a site inlines; publishing is for a person"),
+    ("doc.adopt", "it's how an MCP server hands its unsaved copy to Pixel Lab, not an edit"),
     ("document.copy", "saving a copy of the document is for a person"),
     ("document.migrate", "migrating the document is for a person, in Pixel Lab or with pixellab document migrate"),
 ];
@@ -118,6 +120,8 @@ pub fn start(document: Document, env: Env, registry: &Registry, input: Box<dyn B
     let mut session = Session::new(document, Options { env, chat, ..Options::default() });
     session.author = Author::agent(None, session.chat.clone());
     let left = LEFT_OUT;
+    // The app's server, while it has the document open (D10).
+    let mut owner: Option<client::Owner> = None;
     let rpc = Output::new(output);
     let mut handle = |method: &str, params: Value, _: &Value| -> Result<Value, Failure> {
         match method {
@@ -136,7 +140,7 @@ pub fn start(document: Document, env: Env, registry: &Registry, input: Box<dyn B
             "notifications/initialized" | "notifications/cancelled" => Ok(Value::Null),
             "ping" => Ok(json!({})),
             "tools/list" => Ok(json!({ "tools": list_tools(registry) })),
-            "tools/call" => call_tool(&mut session, registry, &left, &params),
+            "tools/call" => call_tool(&mut session, &mut owner, registry, &left, &params),
             m if m.starts_with("notifications/") => Ok(Value::Null),
             m => Err(RpcError::new(METHOD_NOT_FOUND, format!("no method {m}")).into()),
         }
@@ -171,8 +175,85 @@ fn save_after(session: &mut Session, cmd: &Command, result: Value) -> Value {
     Value::Object(out)
 }
 
+/// The owner of the document now, connected (D10): kept while it's the same process, found again
+/// when it changes, None when no one owns it. Docs this server couldn't save before an owner
+/// came are handed to it (`doc.adopt`); the rest of its copies go, since the owner's are the ones.
+fn find_owner(session: &mut Session, owner: &mut Option<client::Owner>) -> Result<(), Error> {
+    let holder = crate::owner::holder(&session.state.dir, &session.document.root);
+    let Some(holder) = holder else {
+        *owner = None;
+        return Ok(());
+    };
+    if owner.as_ref().is_some_and(|o| o.holder.get("pid") == holder.get("pid")) {
+        return Ok(());
+    }
+    let hello = json!({ "kind": "mcp", "name": session.agent, "chat": session.chat });
+    let Some(found) = client::Owner::connect(&session.state.dir, &session.document.root, hello) else {
+        *owner = None;
+        return Ok(());
+    };
+    let mut o = found?;
+    if o.accepted {
+        for r in session.dirty_refs() {
+            let Some(entry) = session.entries.get(&r) else { continue };
+            let Some(source) = crate::session::serialize(&entry.doc) else { continue };
+            let base = if entry.base.exists { Value::String(entry.base.text.clone()) } else { Value::Null };
+            match o.call("doc.adopt", json!({ "doc": r, "base": base, "source": source })) {
+                Ok(_) => {
+                    session.entries.delete(&r);
+                }
+                Err(e) => log(&format!("Pixel Lab couldn't take {r}'s unsaved edits: {}", failure(e, "doc.adopt").message())),
+            }
+        }
+        let clean: Vec<String> = session.entries.keys().filter(|r| !session.is_dirty(r)).cloned().collect();
+        for r in clean {
+            session.entries.delete(&r);
+        }
+        session.invalidate();
+    }
+    *owner = Some(o);
+    Ok(())
+}
+
+/// Runs a call: through the owner while there is one, else in this server's session.
+fn run_call(
+    session: &mut Session,
+    owner: &mut Option<client::Owner>,
+    registry: &Registry,
+    cmd: &Command,
+    args: &Value,
+) -> Result<Value, Error> {
+    find_owner(session, owner)?;
+    if let Some(o) = owner.as_mut() {
+        if !o.accepted {
+            // Another protocol: no edits through it; reads see the files once it has saved (R28).
+            if cmd.mutates {
+                return Err(o.version_error());
+            }
+            let _ = o.call("doc.flush", json!({}));
+        } else {
+            return match o.call(cmd.name, args.clone()) {
+                Ok(v) => Ok(v),
+                Err(Failed::Gone) => {
+                    *owner = None;
+                    Err(failure(Failed::Gone, &tool_name(cmd.name)))
+                }
+                Err(f) => Err(failure(f, &tool_name(cmd.name))),
+            };
+        }
+    }
+    session.sync();
+    registry.call(&mut Ctx::new(session), cmd.name, args.clone(), false).map(|r| save_after(session, cmd, r))
+}
+
 /// tools/call (`callTool`).
-fn call_tool(session: &mut Session, registry: &Registry, left: &[(&str, &str)], params: &Value) -> Result<Value, Failure> {
+fn call_tool(
+    session: &mut Session,
+    owner: &mut Option<client::Owner>,
+    registry: &Registry,
+    left: &[(&str, &str)],
+    params: &Value,
+) -> Result<Value, Failure> {
     let name = params.get("name");
     let args = params.get("arguments").filter(|a| !a.is_null()).cloned().unwrap_or(json!({}));
     let name_text = engine::engine::js_string(name);
@@ -206,8 +287,7 @@ fn call_tool(session: &mut Session, registry: &Registry, left: &[(&str, &str)], 
         )
         .into());
     };
-    session.sync();
-    match registry.call(&mut Ctx::new(session), cmd.name, args.clone(), false).map(|r| save_after(session, cmd, r)) {
+    match run_call(session, owner, registry, cmd, &args) {
         Ok(result) => {
             let summary = activity_summary(cmd, &result, args.as_object().unwrap_or(&Map::new()));
             append(session, true, &summary);

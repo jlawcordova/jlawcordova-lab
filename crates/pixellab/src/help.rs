@@ -518,7 +518,7 @@ The server holds a **session**: docs open as in-memory working copies with undo 
 
 | method | result |
 | --- | --- |
-| `session.info` | `{ name: "pixellab", version, protocol, pid, document: { root, name, kind, publishDir, siteRoot }, site, sourceDir, stateDir, saves: "direct", docs: [DocStatus] }` |
+| `session.info` | `{ name: "pixellab", version, protocol, pid, document: { root, name, kind, publishDir, siteRoot }, site, sourceDir, stateDir, saves: "direct", owner: { pid, appPid, socket, … }, openedVersion, docs: [DocStatus] }` (`openedVersion`: the history's newest version when the server opened the document, for Revert To › Last Opened); a server whose document another one owns answers with code `owned` and `{ appPid, pid }` instead, and exits |
 | `shutdown` | `{ ok: true }`, then the server stops reading and exits 0. It also exits when stdin closes. |
 
 ```json

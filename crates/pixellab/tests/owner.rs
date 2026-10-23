@@ -133,3 +133,199 @@ fn r27_a_socket_path_too_long_for_macos_goes_in_tmpdir() {
     assert_eq!(holder["socket"], json!(c.socket.to_str().unwrap()), "the lock says where it listens");
     assert!(UnixStream::connect(&c.socket).is_ok());
 }
+
+// ------------------------------------------------------------- clients (D10)
+
+fn cli(args: &[&str], env: &std::collections::HashMap<String, String>, state: &Path) -> (i32, String, String) {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_pixellab"))
+        .args(args)
+        .env_remove("PIXELLAB_SITE")
+        .env_remove("PIXELLAB_DOC")
+        .envs(env)
+        .env("PIXELLAB_STATE", state)
+        .current_dir(state)
+        .output()
+        .unwrap();
+    (out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned())
+}
+
+fn mcp_call(server: &mut common::server::Server, name: &str, args: Value) -> Value {
+    server.request("tools/call", json!({ "name": name, "arguments": args }))["result"].clone()
+}
+
+fn mcp_server(doc: &common::TempDocument, state: &Path) -> common::server::Server {
+    let mut m = start_server(&["--mcp", "--document", doc.root.to_str().unwrap()], &doc.env(), state);
+    m.request(
+        "initialize",
+        json!({ "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": { "name": "claude-code", "version": "2.1.0" } }),
+    );
+    m
+}
+
+fn sample(doc: &common::TempDocument) -> String {
+    std::fs::read_to_string(doc.root.join("scenes/sample.json")).unwrap()
+}
+
+#[test]
+fn r22_the_cli_edits_through_the_app_and_the_app_saves_before_it_answers() {
+    let doc = make_document();
+    let state = temp_dir("pixellab-state-");
+    let mut env = doc.env();
+    env.insert("PIXELLAB_AUTOSAVE_MS".into(), "60000".into());
+    let mut app = start_server(&["--stdio", "--document", doc.root.to_str().unwrap()], &env, &state);
+    app.request("session.info", json!({}));
+    let since = app.notifications().len();
+    let (code, out, err) =
+        cli(&["scene", "place", "sample", "pebble", "--at", "7,0,0", "--document", doc.root.to_str().unwrap()], &env, &state);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("saved by Pixel Lab: scenes/sample.json"), "{out}");
+    assert!(sample(&doc).contains("[7, 0, 0]"), "on disk before the CLI answered, a minute's pause or not");
+    let changed = app.wait_for(since, "doc.changed by the CLI", |m| m["method"] == "doc.changed" && m["params"]["author"]["kind"] == "cli");
+    assert_eq!(changed["params"]["undoLabel"], "pebble placed at column 7, row 0, level 0 (CLI)");
+    // A read sees the app's copy.
+    let (code, out, _) = cli(&["scene", "items", "sample", "--json", "--document", doc.root.to_str().unwrap()], &env, &state);
+    assert_eq!(code, 0);
+    assert!(out.contains("7,") || out.contains("7, 0, 0"), "{out}");
+    // The version is the CLI's.
+    let v = app.request("history.list", json!({}))["result"]["versions"][0].clone();
+    assert_eq!(v["author"], json!({ "kind": "cli" }));
+}
+
+#[test]
+fn r22_r20_an_agent_edits_through_the_app_and_undoes_only_its_own_step() {
+    let doc = make_document();
+    let state = temp_dir("pixellab-state-");
+    let mut app = start_server(&["--stdio", "--document", doc.root.to_str().unwrap()], &doc.env(), &state);
+    app.request("session.info", json!({}));
+    let mut agent = mcp_server(&doc, &state);
+    let placed = mcp_call(&mut agent, "scene_place", json!({ "name": "sample", "object": "pebble", "at": [8, 0, 0] }));
+    assert!(placed.get("isError").is_none(), "{placed}");
+    assert!(app.request("scene.items", json!({ "name": "sample" })).to_string().contains("[8,0,0]"), "the app has the agent's edit");
+    let undone = mcp_call(&mut agent, "doc_undo", json!({ "doc": "scene:sample" }));
+    assert!(undone.get("isError").is_none(), "its own step: {undone}");
+    mcp_call(&mut agent, "scene_place", json!({ "name": "sample", "object": "pebble", "at": [9, 0, 0] }));
+    // The owner edits after it: the agent's undo would take back the owner's step, so it refuses.
+    app.request("scene.place", json!({ "name": "sample", "object": "pebble", "at": [10, 0, 0] }));
+    let refused = mcp_call(&mut agent, "doc_undo", json!({ "doc": "scene:sample" }));
+    assert_eq!(refused["structuredContent"]["error"]["code"], "not-yours", "{refused}");
+    let revert = mcp_call(&mut agent, "doc_revert", json!({ "doc": "scene:sample" }));
+    assert_eq!(revert["structuredContent"]["error"]["code"], "owned", "{revert}");
+    let close = mcp_call(&mut agent, "doc_close", json!({ "doc": "scene:sample" }));
+    assert_eq!(close["structuredContent"]["closed"], false);
+    // The app's ⌘Z takes the latest step, whoever made it.
+    let u = app.request("doc.undo", json!({ "doc": "scene:sample" }))["result"].clone();
+    assert!(u["summary"].as_str().unwrap().contains("column 10"), "{u}");
+}
+
+#[test]
+fn r24_when_the_app_closes_the_document_the_agent_writes_it_itself() {
+    let doc = make_document();
+    let state = temp_dir("pixellab-state-");
+    let mut app = start_server(&["--stdio", "--document", doc.root.to_str().unwrap()], &doc.env(), &state);
+    app.request("session.info", json!({}));
+    let mut agent = mcp_server(&doc, &state);
+    mcp_call(&mut agent, "scene_place", json!({ "name": "sample", "object": "pebble", "at": [8, 0, 0] }));
+    assert_eq!(app.close(), 0);
+    assert!(sample(&doc).contains("[8, 0, 0]"), "the app saved it on the way out");
+    assert!(owner::holder(&state, &doc.root).is_none());
+    let placed = mcp_call(&mut agent, "scene_place", json!({ "name": "sample", "object": "pebble", "at": [9, 0, 0] }));
+    assert_eq!(placed["structuredContent"]["saved"][0]["doc"], "scene:sample", "written by the agent: {placed}");
+    assert!(sample(&doc).contains("[8, 0, 0]") && sample(&doc).contains("[9, 0, 0]"), "{}", sample(&doc));
+    // And when the app opens it again, the agent goes through it again.
+    let mut again = start_server(&["--stdio", "--document", doc.root.to_str().unwrap()], &doc.env(), &state);
+    again.request("session.info", json!({}));
+    let since = again.notifications().len();
+    mcp_call(&mut agent, "scene_place", json!({ "name": "sample", "object": "pebble", "at": [11, 0, 0] }));
+    again.wait_for(since, "the agent's edit in the app", |m| m["method"] == "doc.changed" && m["params"]["author"]["kind"] == "agent");
+}
+
+/// A stand-in owner in this process: it holds the lock and answers `client.hello` with
+/// `accepted`, then closes each connection on its next request (or answers doc.flush).
+fn fake_owner(state: &Path, root: &Path, accepted: bool) -> std::thread::JoinHandle<()> {
+    let Claimed::Owned(claim) = owner::claim(state, root, None, "9.9.9").unwrap() else { panic!("held") };
+    std::thread::spawn(move || {
+        let claim = claim;
+        for stream in claim.listener.incoming() {
+            let Ok(stream) = stream else { break };
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut out = stream;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                    break;
+                }
+                let m: Value = serde_json::from_str(&line).unwrap();
+                let reply = match m["method"].as_str() {
+                    Some("client.hello") => {
+                        json!({ "jsonrpc": "2.0", "id": m["id"], "result": { "protocol": 99, "version": "9.9.9", "accepted": accepted } })
+                    }
+                    Some("doc.flush") => json!({ "jsonrpc": "2.0", "id": m["id"], "result": { "saved": true, "docs": [] } }),
+                    _ => break, // goes away mid-call
+                };
+                writeln!(out, "{reply}").unwrap();
+            }
+        }
+    })
+}
+
+#[test]
+fn r24_an_owner_that_goes_away_mid_call_is_owner_gone_and_nothing_is_retried() {
+    let doc = make_document();
+    let state = temp_dir("pixellab-state-");
+    let _owner = fake_owner(&state, &doc.root, true);
+    let before = sample(&doc);
+    let (code, _, err) = cli(
+        &["scene", "place", "sample", "pebble", "--at", "7,0,0", "--json", "--document", doc.root.to_str().unwrap()],
+        &doc.env(),
+        &state,
+    );
+    assert_eq!(code, 1);
+    assert!(err.contains("\"code\":\"owner-gone\""), "{err}");
+    assert_eq!(sample(&doc), before, "not run again locally");
+}
+
+#[test]
+fn r28_a_mismatched_owner_refuses_edits_and_reads_come_from_disk() {
+    let doc = make_document();
+    let state = temp_dir("pixellab-state-");
+    let _owner = fake_owner(&state, &doc.root, false);
+    let (code, _, err) = cli(
+        &["scene", "place", "sample", "pebble", "--at", "7,0,0", "--json", "--document", doc.root.to_str().unwrap()],
+        &doc.env(),
+        &state,
+    );
+    assert_eq!(code, 1);
+    assert!(err.contains("\"code\":\"version\"") && err.contains("Pixel Lab (9.9.9)"), "{err}");
+    let (code, out, err) = cli(&["scene", "items", "sample", "--document", doc.root.to_str().unwrap()], &doc.env(), &state);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("block"), "{out}");
+}
+
+#[test]
+fn d10_doc_adopt_merges_a_clients_unsaved_copy_as_one_step() {
+    let doc = make_document();
+    let env = doc.env();
+    let document = pixellab::document::open_document(&pixellab::document::OpenOptions {
+        doc: Some(doc.root.to_string_lossy().into_owned()),
+        site: None,
+        env: env.clone(),
+        cwd: doc.root.clone(),
+    })
+    .unwrap();
+    let mut s = pixellab::session::Session::new(document, pixellab::session::Options { env, ..Default::default() });
+    let base = sample(&doc);
+    let theirs = base.replace("[-16, -16, 64, 48]", "[-16, -16, 96, 48]");
+    let reg = pixellab::registry::registry();
+    let r = reg
+        .call(
+            &mut pixellab::context::Ctx::new(&mut s),
+            "doc.adopt",
+            json!({ "doc": "scene:sample", "base": base, "source": theirs }),
+            false,
+        )
+        .unwrap();
+    assert_eq!(r["adopted"], true);
+    let doc_now = s.doc(pixellab::context::DocKind::Scene, "sample").unwrap();
+    assert_eq!(doc_now["viewBox"], json!([-16, -16, 96, 48]));
+    assert_eq!(s.entries.get("scene:sample").unwrap().undo.len(), 1, "one step");
+}

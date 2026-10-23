@@ -211,14 +211,14 @@ pub fn start(
     drop(tx);
     let mut shutting_down = false;
     let mut reopened = false;
-    let mut hellos: std::collections::HashMap<u64, Author> = std::collections::HashMap::new();
+    let mut hellos: std::collections::HashMap<u64, (Author, bool)> = std::collections::HashMap::new();
     let handle_remote =
-        |session: &mut Session, hellos: &mut std::collections::HashMap<u64, Author>, conn: u64, line: &str, reopened: &mut bool| {
+        |session: &mut Session, hellos: &mut std::collections::HashMap<u64, (Author, bool)>, conn: u64, line: &str, reopened: &mut bool| {
             let Some(clients) = &clients else { return };
             let mut handle = |method: &str, params: Value, _: &Value| -> Result<Value, Failure> {
                 if method == "client.hello" {
                     let protocol = params.get("protocol").and_then(Value::as_i64);
-                    hellos.insert(conn, author_of_hello(&params));
+                    hellos.insert(conn, (author_of_hello(&params), protocol == Some(owner::PROTOCOL)));
                     let d = &session.document;
                     return Ok(json!({
                         "protocol": owner::PROTOCOL,
@@ -227,9 +227,15 @@ pub fn start(
                         "document": { "root": d.root.to_string_lossy(), "name": d.name },
                     }));
                 }
-                let Some(author) = hellos.get(&conn).cloned() else {
+                let Some((author, accepted)) = hellos.get(&conn).cloned() else {
                     return Err(RpcError::new(-32600, "say client.hello first").with_data(json!({ "code": "usage" })).into());
                 };
+                // A client of another protocol may ask for a save, so it can read the files (R28).
+                if !accepted && method != "doc.flush" {
+                    return Err(RpcError::new(-32000, "this pixellab speaks another protocol than Pixel Lab's")
+                        .with_data(json!({ "code": "version" }))
+                        .into());
+                }
                 if method == "shutdown" || method == "session.info" {
                     return Err(RpcError::new(METHOD_NOT_FOUND, format!("{method} is the app's"))
                         .with_data(json!({ "code": "not_found" }))

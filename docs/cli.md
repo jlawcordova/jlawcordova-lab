@@ -22,6 +22,7 @@
 | [`chat ask`](#chatask) | Ask the owner a question with two to four answers, shown as buttons in Pixel Lab's Agent chat | read |
 | [`chat context`](#chatcontext) | Build the selection block an Agent chat message carries: what's selected, as the saved document has it | read |
 | [`check`](#check) | Validate the sources with the engine, all of them or one doc | read |
+| [`doc adopt`](#docadopt) | Merge a client's unsaved copy of a doc into this one, as one step | edit, session |
 | [`doc close`](#docclose) | Close an open doc (refused with unsaved changes unless --force) | session |
 | [`doc flush`](#docflush) | Save every open doc with changes now (or one), as autosave would soon | edit, session |
 | [`doc merge`](#docmerge) | Merge the changes to a doc's file on disk into its working copy, keeping the unsaved edits | edit, session |
@@ -130,7 +131,7 @@ The server holds a **session**: docs open as in-memory working copies with undo 
 
 | method | result |
 | --- | --- |
-| `session.info` | `{ name: "pixellab", version, protocol, pid, document: { root, name, kind, publishDir, siteRoot }, site, sourceDir, stateDir, saves: "direct", docs: [DocStatus] }` |
+| `session.info` | `{ name: "pixellab", version, protocol, pid, document: { root, name, kind, publishDir, siteRoot }, site, sourceDir, stateDir, saves: "direct", owner: { pid, appPid, socket, … }, openedVersion, docs: [DocStatus] }` (`openedVersion`: the history's newest version when the server opened the document, for Revert To › Last Opened); a server whose document another one owns answers with code `owned` and `{ appPid, pid }` instead, and exits |
 | `shutdown` | `{ ok: true }`, then the server stops reading and exits 0. It also exits when stdin closes. |
 
 ```json
@@ -183,7 +184,7 @@ An open doc without unsaved changes reloads from disk when its file changes; one
 
 **Edits apply.** An agent's edit changes the document as it's made, with the agent as its author in the version history: nothing waits for approval. While Pixel Lab has the document open, the server sends every call to the app (the owner sees the edit on the stage, and the app saves it); without the app, it saves each edit itself when the call is done (the result lists `saved`, and `unsaved` for a doc with problems, which stays in memory until they're fixed). `doc_undo` takes back the agent's own latest step and refuses (`not-yours`) when someone else has edited the doc since; `history_undo` takes back a whole version. `--direct` is accepted and ignored.
 
-**The session follows disk.** Before every `tools/call` in a server of its own, a clean doc whose file changed reloads, so the next edit starts from the file. `doc_reload` reloads a doc only when nothing unsaved is lost (code `dirty` with the edits otherwise); `doc_revert`, which drops edits, is annotated destructive. When the app closes the document mid-call, the call fails with `owner-gone` and isn't retried. Left out of the tools: `art_build` (it publishes the SVGs a site inlines; publishing is for a person); `document_copy` (saving a copy of the document is for a person); `document_migrate` (migrating the document is for a person, in Pixel Lab or with pixellab document migrate).
+**The session follows disk.** Before every `tools/call` in a server of its own, a clean doc whose file changed reloads, so the next edit starts from the file. `doc_reload` reloads a doc only when nothing unsaved is lost (code `dirty` with the edits otherwise); `doc_revert`, which drops edits, is annotated destructive. When the app closes the document mid-call, the call fails with `owner-gone` and isn't retried. Left out of the tools: `art_build` (it publishes the SVGs a site inlines; publishing is for a person); `doc_adopt` (it's how an MCP server hands its unsaved copy to Pixel Lab, not an edit); `document_copy` (saving a copy of the document is for a person); `document_migrate` (migrating the document is for a person, in Pixel Lab or with pixellab document migrate).
 
 ### Setup for Claude Code
 
@@ -369,6 +370,24 @@ pixellab check objects/pine --json
 ```
 
 ### doc
+
+#### doc.adopt
+
+Merge a client's unsaved copy of a doc into this one, as one step.
+
+```
+pixellab doc adopt <doc> [--base <text>] --source <text>
+```
+
+For an MCP server that edited a doc it couldn't save before Pixel Lab opened the document: base is the text it started from (null for a new doc), source its own. One undo step by that client; refuses with merge_conflict when both changed the same lines.
+
+edits docs · session only (`serve`) · not an MCP tool
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `doc` (positional) | string | required | the doc: scene:<name>, object:<name>, or a name (scenes/<name>, objects/<name>) |
+| `--base` | any |  | the text the copy started from |
+| `--source` | string | required | the copy's text |
 
 #### doc.close
 

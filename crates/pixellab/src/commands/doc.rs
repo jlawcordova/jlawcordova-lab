@@ -4,7 +4,7 @@ use serde_json::{json, Map, Value};
 
 use super::common::{doc_param, flag, opt_str, resolve_doc, str_of};
 use crate::context::Ctx;
-use crate::errors::Result;
+use crate::errors::{CommandError, Result};
 use crate::registry::{Command, Params};
 
 fn doc_params(more: Vec<(&str, Value)>) -> Value {
@@ -71,14 +71,41 @@ fn status_format(r: &Value, _: &Params) -> String {
     format!("{}{}", status_line(r), if r["stale"] == json!(true) { ", changed on disk" } else { "" })
 }
 
+/// A client of the owner undoes or redoes only its own latest step (docs/intents/2026-10-autosave/spec.md, D7).
+fn own_step(session: &mut crate::session::Session, ref_: &str, undo: bool) -> Result<()> {
+    if !session.remote {
+        return Ok(());
+    }
+    let author = session.author.clone();
+    let entry = session.entry(ref_)?;
+    let top = if undo { entry.undo.last() } else { entry.redo.last() };
+    match top {
+        Some(step) if !step.author.same(&author) => Err(CommandError::new(
+            format!(
+                "{} was edited since by {}; {} takes back only your own latest step. Use history_undo to take back your version.",
+                ref_,
+                step.author.display(),
+                if undo { "doc_undo" } else { "doc_redo" }
+            ),
+            "not-yours",
+        )
+        .into()),
+        _ => Ok(()),
+    }
+}
+
 fn undo_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let ref_ = entry_of(ctx, doc_of(&params), false)?;
-    ctx.session()?.step(&ref_, true)
+    let session = ctx.session()?;
+    own_step(session, &ref_, true)?;
+    session.step(&ref_, true)
 }
 
 fn redo_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let ref_ = entry_of(ctx, doc_of(&params), false)?;
-    ctx.session()?.step(&ref_, false)
+    let session = ctx.session()?;
+    own_step(session, &ref_, false)?;
+    session.step(&ref_, false)
 }
 
 fn summary_format(r: &Value, _: &Params) -> String {
@@ -92,6 +119,52 @@ fn save_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     // Saving by hand (⌘S) closes the version, as a Mac app's Save saves a version (R5).
     let _ = session.history.mark(None);
     Ok(saved)
+}
+
+/// doc.adopt: a client's unsaved copy of a doc, merged into this session's as one step by that
+/// client (D10): the text it started from (`base`, null for a new doc) and its own (`source`).
+fn adopt_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
+    use crate::context::DocKind;
+    use crate::merge::{fold_scene, merge3, trailing, untrailing, Folded};
+    use crate::session::{canonical, import_source};
+    let query = doc_of(&params).to_string();
+    let found = resolve_doc(ctx, &query).ok();
+    let source = opt_str(&params, "source").unwrap_or("").to_string();
+    let base = opt_str(&params, "base").map(str::to_string);
+    let session = ctx.session()?;
+    let (kind, name) = match &found {
+        Some(f) => (f.kind, f.name.clone()),
+        None => match query.split_once(':').and_then(|(k, n)| DocKind::parse(k).map(|k| (k, n.to_string()))) {
+            Some(pair) => pair,
+            None => return Err(CommandError::not_found(format!("no doc {query}")).into()),
+        },
+    };
+    let mine = session.current_text(kind, &name);
+    let canon = |t: &str| canonical(t).unwrap_or_else(|| t.to_string());
+    let text = match (&base, &mine) {
+        (_, None) => source.clone(),
+        (Some(b), Some(m)) if canon(b) == canon(m) => source.clone(),
+        (Some(b), Some(m)) => {
+            let is_scene = kind == DocKind::Scene;
+            let merged = merge3(&trailing(&canon(b)), &trailing(&canon(m)), &trailing(&canon(&source)), is_scene);
+            let folded = if is_scene { fold_scene(&merged.text) } else { Folded { text: merged.text.clone(), clashes: vec![] } };
+            if !merged.conflicts.is_empty() || !folded.clashes.is_empty() {
+                return Err(CommandError::new(
+                    format!("your copy of {query} and Pixel Lab's changed the same lines; nothing merged"),
+                    "merge_conflict",
+                )
+                .into());
+            }
+            untrailing(&folded.text)
+        }
+        (None, Some(_)) => {
+            return Err(CommandError::new(format!("{query} was made in both places; nothing merged"), "merge_conflict").into());
+        }
+    };
+    let data = import_source(&text).map_err(|e| CommandError::new(format!("{query} doesn't load: {e}"), "load_error"))?;
+    let label = format!("Brought in {}'s unsaved edits", session.author.display());
+    let ref_ = session.set_doc(kind, &name, data, &label)?;
+    Ok(json!({ "doc": ref_, "adopted": true, "summary": label }))
 }
 
 /// doc.flush: saves now what autosave would save soon (docs/intents/2026-10-autosave/spec.md, D1).
@@ -152,7 +225,17 @@ fn save_format(r: &Value, _: &Params) -> String {
 
 fn revert_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let ref_ = entry_of(ctx, doc_of(&params), false)?;
-    ctx.session()?.revert(&ref_)
+    let session = ctx.session()?;
+    if session.remote {
+        return Err(CommandError::new(
+            format!(
+                "{ref_} is open in Pixel Lab, where reverting would drop the owner's edits; use history_undo to take back your version"
+            ),
+            "owned",
+        )
+        .into());
+    }
+    session.revert(&ref_)
 }
 
 fn reload_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
@@ -167,6 +250,10 @@ fn merge_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
 
 fn close_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let ref_ = entry_of(ctx, doc_of(&params), false)?;
+    if ctx.session()?.remote {
+        // The app's copy stays open (D7).
+        return Ok(json!({ "doc": ref_, "closed": false, "summary": format!("{ref_} stays open in Pixel Lab") }));
+    }
     let r = ctx.session()?.close(&ref_, flag(&params, "force"))?;
     ctx.invalidate();
     Ok(r)
@@ -252,6 +339,27 @@ pub fn commands() -> Vec<Command> {
             save_run,
             save_format,
         ),
+        {
+            let mut c = session_command(
+                "doc.adopt",
+                "Merge a client's unsaved copy of a doc into this one, as one step",
+                Some("For an MCP server that edited a doc it couldn't save before Pixel Lab opened the document: base is the text it started from (null for a new doc), source its own. One undo step by that client; refuses with merge_conflict when both changed the same lines."),
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "doc": doc_param(),
+                        "base": { "type": ["string", "null"], "description": "the text the copy started from" },
+                        "source": { "type": "string", "description": "the copy's text" }
+                    },
+                    "required": ["doc", "source"]
+                }),
+                true,
+                adopt_run,
+                summary_format,
+            );
+            c.args = vec!["doc"];
+            c
+        },
         session_command(
             "doc.flush",
             "Save every open doc with changes now (or one), as autosave would soon",

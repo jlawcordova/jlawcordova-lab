@@ -12,6 +12,7 @@ pub mod argv;
 pub mod author;
 pub mod chat_context;
 pub mod cli;
+pub mod client;
 pub mod commands;
 pub mod context;
 pub mod diff;
