@@ -266,6 +266,11 @@ fn serve_stdio_a_render_png_scale_view_box_size_and_item_bounds() {
     assert_eq!(k, ["at", "bounds", "object", "path"]);
 }
 
+/// A doc.changed's status fields, without the labels and author the app shows (autosave spec, D11).
+fn status_core(v: &Value) -> Value {
+    json!({ "doc": v["doc"], "dirty": v["dirty"], "canUndo": v["canUndo"], "canRedo": v["canRedo"] })
+}
+
 #[test]
 fn serve_stdio_place_undo_redo_save_with_doc_changed_after_each() {
     let mut f = stdio_fixture();
@@ -276,7 +281,7 @@ fn serve_stdio_place_undo_redo_save_with_doc_changed_after_each() {
     let placed = f.server.request("scene.place", json!({ "name": "sample", "object": "pebble", "at": [1, 0, 0] }));
     assert_eq!(placed["result"]["changed"], true);
     assert_eq!(
-        f.server.wait_for(since, "doc.changed", changed)["params"],
+        status_core(&f.server.wait_for(since, "doc.changed", changed)["params"]),
         json!({ "doc": "scene:sample", "dirty": true, "canUndo": true, "canRedo": false })
     );
     assert_eq!(fs::read_to_string(&file).unwrap(), disk, "nothing written before doc.save");
@@ -285,14 +290,14 @@ fn serve_stdio_place_undo_redo_save_with_doc_changed_after_each() {
     let undo = f.server.request("doc.undo", json!({ "doc": "scene:sample" }));
     assert!(str_of(&undo["result"]["summary"]).starts_with("Undid: pebble placed"), "{undo}");
     assert_eq!(
-        f.server.wait_for(since, "doc.changed", changed)["params"],
+        status_core(&f.server.wait_for(since, "doc.changed", changed)["params"]),
         json!({ "doc": "scene:sample", "dirty": false, "canUndo": false, "canRedo": true })
     );
 
     since = f.server.notifications().len();
     f.server.request("doc.redo", json!({ "doc": "scene:sample" }));
     assert_eq!(
-        f.server.wait_for(since, "doc.changed", changed)["params"],
+        status_core(&f.server.wait_for(since, "doc.changed", changed)["params"]),
         json!({ "doc": "scene:sample", "dirty": true, "canUndo": true, "canRedo": false })
     );
 
@@ -302,7 +307,9 @@ fn serve_stdio_place_undo_redo_save_with_doc_changed_after_each() {
     assert_eq!(
         summary,
         json!({
-            "doc": "scene:sample", "dirty": true, "canUndo": true, "canRedo": false, "file": "scenes/sample.json", "exists": true, "stale": false,
+            "doc": "scene:sample", "dirty": true, "canUndo": true, "canRedo": false,
+            "undoLabel": "pebble placed at column 1, row 0, level 0", "redoLabel": null, "author": { "kind": "owner" },
+            "file": "scenes/sample.json", "exists": true, "stale": false,
             "undo": 1, "redo": [], "edits": ["pebble placed at column 1, row 0, level 0"], "unsavedInApp": false,
         })
     );
@@ -311,7 +318,7 @@ fn serve_stdio_place_undo_redo_save_with_doc_changed_after_each() {
     let saved = f.server.request("doc.save", json!({ "doc": "scene:sample" }));
     assert_eq!(saved["result"]["wrote"], true);
     assert_eq!(
-        f.server.wait_for(since, "doc.changed", changed)["params"],
+        status_core(&f.server.wait_for(since, "doc.changed", changed)["params"]),
         json!({ "doc": "scene:sample", "dirty": false, "canUndo": true, "canRedo": false })
     );
     // The session sorted the scene as part of the edit, so the pebble is where it stands, not last.
