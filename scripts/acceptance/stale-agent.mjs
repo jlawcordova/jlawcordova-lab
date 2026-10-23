@@ -1,5 +1,6 @@
-// node scripts/acceptance/stale-agent.mjs <site> <state>: an agent over MCP proposes a tree on
-// footer-grass, for stale.txt to approve into the app's unsaved copy (docs/intents/2026-10-mcp-gaps).
+// node scripts/acceptance/stale-agent.mjs <site> <state>: an agent over MCP places a tree on
+// footer-grass with no app open: it applies and saves (docs/intents/2026-10-autosave/spec.md, R23),
+// and stale.txt finds it there as the agent's version.
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 const [site, state] = process.argv.slice(2);

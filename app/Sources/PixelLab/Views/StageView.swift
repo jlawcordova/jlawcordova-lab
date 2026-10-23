@@ -32,7 +32,9 @@ struct StageView: View {
             if model.versions.previewing, model.versions.ghostShown, let v = model.versions.selected {
                 VersionBanner(versions: model.versions, version: v)
                     .padding(.top, 10)
-                    .padding(.horizontal, 12)
+                    .padding(.leading, 12)
+                    // Clear of the Versions panel beside it (380 wide, 12 from the edge).
+                    .padding(.trailing, model.versions.sheetShown ? 404 : 12)
             }
         }
         // Where you are in the scene's layers, and Done while inside one (docs/intents/2026-10-scene-layers/spec.md, D6).

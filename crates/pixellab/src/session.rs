@@ -145,6 +145,8 @@ pub struct Entry {
     pub changed_at: Option<f64>,
     /// Why autosave last couldn't write it, until it changes again.
     pub blocked: Option<Blocked>,
+    /// Who changed it last: its next write is that author's version, whoever saves it (D3, D8).
+    pub changed_by: Option<Author>,
 }
 
 /// Why autosave couldn't write a doc (D1).
@@ -500,6 +502,7 @@ impl Session {
                 created: None,
                 changed_at: None,
                 blocked: None,
+                changed_by: None,
             };
             self.entries.set(ref_.clone(), entry);
             self.invalidate();
@@ -526,6 +529,7 @@ impl Session {
             created: Some(label.to_string()),
             changed_at: None,
             blocked: None,
+            changed_by: None,
         };
         self.entries.set(ref_.clone(), entry);
         self.invalidate();
@@ -691,6 +695,15 @@ impl Session {
         out
     }
 
+    /// A change on disk clashed with the doc's pending edits: autosave stops until it changes, and
+    /// the status says why (R7).
+    pub fn block_conflict(&mut self, ref_: &str) {
+        if let Some(e) = self.entries.get_mut(ref_) {
+            e.blocked = Some(Blocked::Conflict);
+        }
+        self.notify(ref_);
+    }
+
     /// One autosave of a doc (D1).
     pub fn save_now(&mut self, ref_: &str) -> Value {
         let mut result = self.save(ref_, false);
@@ -729,7 +742,11 @@ impl Session {
     /// Tells whoever listens that a doc's status changed, and notes when, for autosave.
     fn changed(&mut self, ref_: &str) {
         let now = (self.now)();
+        let author = self.author.clone();
         if let Some(e) = self.entries.get_mut(ref_) {
+            if serialize(&e.doc).as_deref() != Some(e.clean.as_str()) {
+                e.changed_by = Some(author);
+            }
             e.changed_at = Some(now);
             e.blocked = None;
         }
@@ -801,6 +818,7 @@ impl Session {
         entry.undone.clear();
         entry.last = None;
         entry.created = None;
+        entry.changed_by = None;
     }
 
     /// Replaces the working copy with the file, clearing its history, then
@@ -917,7 +935,12 @@ impl Session {
     /// written doesn't fail the save that's already on disk.
     pub fn record(&mut self, change: Change, labels: &[String]) {
         let author = self.author.clone();
-        if let Err(e) = self.history.record(&[change], &author, labels, (self.now)()) {
+        self.record_as(&author, change, labels);
+    }
+
+    /// Records a write in the version history, by an author.
+    pub fn record_as(&mut self, author: &Author, change: Change, labels: &[String]) {
+        if let Err(e) = self.history.record(&[change], author, labels, (self.now)()) {
             eprintln!("pixellab: can't record the version: {}", e.message());
         }
     }
@@ -971,9 +994,12 @@ impl Session {
         let wrote = plan.text != plan.disk.text || !plan.disk.exists;
         if wrote {
             write_atomic(&plan.disk.path, &plan.text)?;
-            let labels = edits(self.entry(ref_)?);
+            let entry = self.entry(ref_)?;
+            let labels = edits(entry);
+            // The version is the last editor's, not whoever runs the save (the app's autosave of an agent's edit).
+            let author = entry.changed_by.clone().unwrap_or_else(|| self.author.clone());
             let before = plan.disk.exists.then(|| plan.disk.text.clone());
-            self.record(Change { file: file.clone(), before, after: Some(plan.text.clone()) }, &labels);
+            self.record_as(&author, Change { file: file.clone(), before, after: Some(plan.text.clone()) }, &labels);
         }
         let hash = hash_text(&plan.text);
         self.match_disk(ref_, Base { exists: true, hash: Some(hash.clone()), text: plan.text.clone() }, plan.text.clone(), None);

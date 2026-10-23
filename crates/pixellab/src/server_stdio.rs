@@ -322,6 +322,7 @@ pub fn start(
                             // A doc with a save pending takes the change, three ways, and autosave
                             // writes the result (R7); only a clash is left to the owner.
                             if is_stale(entry, &disk) && session.merge(&ref_).is_err() {
+                                session.block_conflict(&ref_);
                                 rpc.notify("doc.stale", json!({ "doc": ref_, "file": file }));
                             }
                         }

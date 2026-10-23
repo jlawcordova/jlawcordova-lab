@@ -35,6 +35,7 @@ import Foundation
 ///     settings open|close   snapshot settings <file.png>   (the Settings window)
 ///     cli <args…>  (the bundled program on the script's document, from another state dir: an outside edit to the files)
 ///     cli-owned <args…>  (the bundled program on the script's document, from the app's state dir: it edits through the app)
+///     outside <file> <field.path> <json>  (an editor sets one field of a source file, e.g. `outside scenes/harbor.json items.0.object "no-such"`)
 ///     stale reload|keep     (the changed-on-disk banner's buttons)   secondapp  (a second server on the document: refused, owned)
 ///     expect dirty|selected|object|at|items|problems|build|outputs|publishdir|document|tool|time <value>
 ///     expect scenes|objects|zoom|badge|theme|ghosttime <value>   expect scenepixel <x>,<y> <#RRGGBB|empty>
@@ -97,7 +98,8 @@ import Foundation
 ///     agent open|close|size <w>x<h>   snapshot agent <file.png>   menus (logs the File, Edit, View and Window menus)
 ///     versions open|close   version select <n>|newest|next|prev|none   version restore [doc]   version undo [<n>]
 ///     version answer yes|no  (the next restore question)   ghost on|off
-///     expect versions <n>   expect version <n> author|edits|files|open <value>   expect ghost on|off   expect ghostchanges <n>
+///     expect versions <n>   expect version <n>|newest author|edits|files|open <value>   expect ghost on|off   expect ghostchanges <n>
+///     mcpcall <tool> <json args>  (an MCP client, the bundled program's serve --mcp on the app's state dir: it edits through the app)
 ///     expect versionresult <text>   (contains)   expect retired <n|none>   expect activity <n>
 ///
 /// The Agent tab's chat (docs/intents/2026-10-agent-chat/spec.md, D15; with PIXELLAB_CLAUDE_HOME
@@ -486,6 +488,35 @@ final class ScriptRunner {
             try? await Task.sleep(for: .milliseconds(300))
             lastCLIOutput = out
             return out.split(separator: "\n").last.map(String.init)
+        case "outside":
+            // An editor outside Pixel Lab changes one field of a file in the document, valid or not.
+            guard let root = model.sessionInfo?.document?.root else { throw Failure("no document") }
+            let url = URL(fileURLWithPath: root).appendingPathComponent(try arg(words, 1))
+            let path = try arg(words, 2).split(separator: ".").map(String.init)
+            let value = try JSONSerialization.jsonObject(with: Data(words.dropFirst(3).joined(separator: " ").utf8), options: .fragmentsAllowed)
+            let data = try Data(contentsOf: url)
+            guard var top = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw Failure("\(url.lastPathComponent) isn't an object") }
+            func set(_ node: Any, _ keys: ArraySlice<String>) throws -> Any {
+                guard let key = keys.first else { return value }
+                if var a = node as? [Any], let i = Int(key), a.indices.contains(i) { a[i] = try set(a[i], keys.dropFirst()); return a }
+                if var o = node as? [String: Any] { o[key] = try set(o[key] ?? [String: Any](), keys.dropFirst()); return o }
+                throw Failure("no \(key) in \(url.lastPathComponent)")
+            }
+            top = try set(top, path[...]) as? [String: Any] ?? top
+            try JSONSerialization.data(withJSONObject: top, options: [.prettyPrinted, .sortedKeys]).write(to: url, options: .atomic)
+            // The server's watcher sees it and the app follows.
+            try? await Task.sleep(for: .milliseconds(900))
+            return "wrote \(url.lastPathComponent)"
+        case "mcpcall":
+            // One tool call from an MCP client, as Claude Code would make it while the app has the document open (R22).
+            guard let program = Locator.findProgram() else { throw Failure("no program") }
+            let tool = try arg(words, 1)
+            let args = words.dropFirst(2).joined(separator: " ")
+            let reply = try await Self.mcpCall(program: program, location: model.documentLocation, tool: tool, arguments: args.isEmpty ? "{}" : args)
+            try? await Task.sleep(for: .milliseconds(300))
+            lastCLIOutput = reply
+            if reply.contains("\"isError\":true") { throw Failure("\(tool) failed: \(reply.prefix(300))") }
+            return String(reply.prefix(200))
         case "secondapp":
             // A second server on the same document, as a second copy of the app would start (R26): it's refused.
             guard let program = Locator.findProgram() else { throw Failure("no program") }
@@ -1357,6 +1388,29 @@ final class ScriptRunner {
         }
     }
 
+    /// Runs `pixellab serve --mcp` on the document, initializes, makes one tool call and returns its result line.
+    nonisolated static func mcpCall(program: URL, location: DocumentLocation, tool: String, arguments: String) async throws -> String {
+        try await Task.detached {
+            let p = Process()
+            p.executableURL = program
+            p.arguments = ["serve", "--mcp"] + location.arguments
+            let input = Pipe(), output = Pipe()
+            p.standardInput = input
+            p.standardOutput = output
+            p.standardError = FileHandle.nullDevice
+            try p.run()
+            let lines = [
+                #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"claude-code","version":"2.1.0"}}}"#,
+                #"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"\#(tool)","arguments":\#(arguments)}}"#,
+            ]
+            input.fileHandleForWriting.write(Data((lines.joined(separator: "\n") + "\n").utf8))
+            try? input.fileHandleForWriting.close()
+            let out = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            p.waitUntilExit()
+            return out.split(separator: "\n").last.map(String.init) ?? ""
+        }.value
+    }
+
     /// The Settings window, when it is up.
     static func settingsWindow() -> NSWindow? {
         NSApp.windows.first { $0.isVisible && ($0.identifier?.rawValue.lowercased().contains("settings") == true || $0.title == "Settings" || $0.title.hasSuffix(" Settings")) }
@@ -1474,7 +1528,8 @@ final class ScriptRunner {
         case "versions": got = String(model.versions.versions.count)
         case "version":
             // expect version <n> author|edits|files|open <value>
-            guard words.count >= 4, let n = Int(words[2]), let v = model.versions.versions.first(where: { $0.number == n }) else { throw Failure("expect version <n> author|edits|files|open <value> (no such version)") }
+            let n = words.count > 2 ? (words[2] == "newest" ? model.versions.versions.first?.number : Int(words[2])) : nil
+            guard words.count >= 4, let n, let v = model.versions.versions.first(where: { $0.number == n }) else { throw Failure("expect version <n>|newest author|edits|files|open <value> (no such version)") }
             let field = words[3]
             let value = words.dropFirst(4).joined(separator: " ")
             let have: String

@@ -697,6 +697,8 @@ final class ChatModel {
     /// what the chat's versions since the turn began changed (R18).
     func makeChangeCard(chatID: String, after start: Int?) async {
         guard let app, let connection = app.connection else { return }
+        // The turn's edits are saved first, so they're in its version.
+        await app.flush()
         _ = try? await connection.call("history.mark", [:])
         await app.versions.load()
         let mine = app.versions.versions.filter { v in

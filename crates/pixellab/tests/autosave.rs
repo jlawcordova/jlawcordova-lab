@@ -230,3 +230,21 @@ fn r24_the_apps_server_saves_what_is_pending_when_it_stops() {
     assert_eq!(server.close(), 0);
     assert_ne!(file(&doc), before, "saved on the way out");
 }
+
+#[test]
+fn d8_an_agents_edit_saved_by_the_apps_autosave_is_the_agents_version() {
+    let doc = common::make_document();
+    let clock = Rc::new(Cell::new(1000.0));
+    let mut s = timed(&doc, &clock);
+    // A client's request: its author while it runs.
+    s.author = Author::agent(Some("claude-code".into()), None);
+    s.remote = true;
+    place(&mut s, 4, None);
+    s.author = Author::owner();
+    s.remote = false;
+    // The app's tick saves it later, as the owner's process.
+    clock.set(3000.0);
+    s.autosave(clock.get(), false);
+    let v = s.history.versions().last().cloned().unwrap();
+    assert_eq!(v["author"], json!({ "kind": "agent", "name": "claude-code" }));
+}

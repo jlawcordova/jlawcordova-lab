@@ -1,58 +1,46 @@
-# Acceptance 7 (docs/intents/2026-10-mcp-gaps): a doc with unsaved edits whose file changes on disk
-# shows a banner: Merge, Reload, Keep Mine. An approved proposal merges into an unsaved copy.
+# Acceptance 7 (docs/intents/2026-10-autosave/spec.md, R7): a change on disk merges into a doc with a save
+# pending, without asking; only a clash with the open copy shows the banner, with Reload and Keep Mine.
+# acceptance.sh runs this with a long autosave pause, so the edits wait for a save.
 appearance dark
 open scene:footer-dirt
 expect stale false
 library pine
 place 0 1 0
-expect dirty true
+expect savestate pending
 expect items 2
-# an outside editor writes the file
+# an outside editor writes the file: it merges in
 cli scene place footer-dirt tree-small --px 40,30
+expect stale false
+expect items 3
+flush
+expect savestate saved
+# a clash: the open copy and the file move the same item
+select 0
+move 1 0
+cli scene move footer-dirt 0 --by 0,1
 expect stale true
+expect savestate conflict
+expect subtitle Not saved: changed on disk
 snapshot @OUT@/a6-stale-dark.png
 appearance light
 snapshot @OUT@/a6-stale-light.png
-stale merge
-expect stale false
-expect dirty true
-expect items 3
-save
-expect dirty false
-# Reload drops the unsaved edit and takes the file
-place 1 1 0
-expect items 4
-cli scene place footer-dirt pine --px 50,30
-expect stale true
 stale reload
 expect stale false
-expect dirty false
-expect items 4
-# Keep Mine hides the banner and keeps the edit
-place 2 1 0
-cli scene place footer-dirt pine --px 10,30
+expect savestate saved
+# Keep Mine saves the open copy over the file
+select 0
+move 1 0
+cli scene move footer-dirt 0 --by 0,1
 expect stale true
 stale keep
 expect stale false
-expect dirty true
-revert
-expect dirty false
-expect items 5
-# Approving the agent's proposal merges it into the open copy's unsaved edits
+expect savestate saved
+expect items 3
+# The agent's tree (stale-agent.mjs, with no app open) is in the file, as its version
 appearance dark
 open scene:footer-grass
-place 0 1 0
-expect dirty true
-agent open
-expect proposals 1
-proposal select 1
-expect proposal scene:footer-grass
-approve
-expect question dirty
-expect proposals 0
-expect stale false
-expect dirty true
 expect items 3
-snapshot agent @OUT@/a6-approved-dark.png
-save
-expect dirty false
+versions open
+expect version newest author agent
+expect version newest edits pine placed
+versions close
