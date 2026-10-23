@@ -333,12 +333,9 @@ pub struct Session {
 impl Session {
     pub fn new(document: Document, options: Options) -> Session {
         let state = create_state(state_dir(&options.env));
-        let history = History::new(&state.dir, &document.root);
-        // Version 0: the document as it is before this session writes anything. A history that
-        // can't be written never stops an edit; saves say so in the debug log only.
-        if let Err(e) = history.ensure_base(&document.source_dir, (options.now)()) {
-            eprintln!("pixellab: can't start the version history: {}", e.message());
-        }
+        // The version history starts at the first write (version 0 is the document before it), so
+        // a session that only reads writes nothing. One that can't be written never stops an edit.
+        let history = History::new(&state.dir, &document.root, &document.source_dir);
         if let Err(e) = history.thin((options.now)()) {
             eprintln!("pixellab: can't thin the version history: {}", e.message());
         }

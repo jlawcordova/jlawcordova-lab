@@ -42,16 +42,21 @@ fn save(s: &mut Session) {
 const T0: f64 = 1_790_000_000_000.0;
 
 #[test]
-fn r8_version_0_holds_the_document_as_first_opened() {
+fn r8_version_0_holds_the_document_as_it_was_before_the_first_write_and_reading_writes_nothing() {
     let doc = common::make_document();
     let clock = Rc::new(Cell::new(T0));
-    let s = session(&doc, &clock);
+    let mut s = session(&doc, &clock);
+    s.doc(DocKind::Scene, "sample").unwrap();
+    assert!(!s.history.dir.exists(), "a session that only reads writes nothing");
+    let sample = std::fs::read_to_string(doc.root.join("scenes/sample.json")).unwrap();
+    place(&mut s, 1);
+    save(&mut s);
     let versions = s.history.versions();
-    assert_eq!(versions.len(), 1);
+    assert_eq!(versions.len(), 2);
     assert_eq!(versions[0]["number"], 0);
     assert_eq!(versions[0]["author"], json!({ "kind": "opened" }));
-    let sample = std::fs::read_to_string(doc.root.join("scenes/sample.json")).unwrap();
-    assert_eq!(s.history.text_at(0, "scenes/sample.json"), Some(Some(sample)));
+    assert_eq!(s.history.text_at(0, "scenes/sample.json"), Some(Some(sample)), "the scene before the write");
+    assert!(s.history.text_at(0, "objects/pebble.json").is_some(), "and every other doc as it is");
 }
 
 #[test]
@@ -191,10 +196,10 @@ fn walk(dir: &std::path::Path) -> Vec<String> {
 fn r11_history_is_keyed_by_the_documents_real_path() {
     let doc = common::make_document();
     let state = common::temp_dir("pixellab-state-");
-    let a = History::new(&state, &doc.root);
-    let b = History::new(&state, &doc.root.join("..").join("sample.pixellab"));
+    let a = History::new(&state, &doc.root, &doc.root);
+    let b = History::new(&state, &doc.root.join("..").join("sample.pixellab"), &doc.root);
     assert_eq!(a.dir, b.dir);
-    a.ensure_base(&doc.root, T0).unwrap();
+    a.ensure_base(T0).unwrap();
     a.record(&[Change { file: "scenes/x.json".into(), before: None, after: Some("{}".into()) }], &Author::cli(), &[], T0).unwrap();
     assert_eq!(b.latest(), Some(1));
 }

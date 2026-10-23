@@ -10,8 +10,9 @@
 //!
 //! A version is `{ number, startedAt, endedAt, endedMs, author, edits, changes: [{ file, before, after }], open }`,
 //! `before` and `after` being blob hashes or null for a file that didn't exist. Version 0 (author
-//! `opened`) holds every scene and object as it was when the document was first opened with no
-//! history, so the state at any version is version 0 plus the changes up to it.
+//! `opened`) holds every scene and object as it was before the first write Pixel Lab recorded,
+//! so the state at any version is version 0 plus the changes up to it. Nothing is written for a
+//! document nobody has edited: reading never touches the state dir.
 //!
 //! Every writer records here: the app's server, an MCP server and the CLI when no app owns the
 //! document. Writes by one author run into one open version until someone else writes, the author
@@ -59,6 +60,8 @@ pub struct Change {
 pub struct History {
     pub dir: PathBuf,
     pub root: PathBuf,
+    /// The document's sources (its scenes/ and objects/).
+    pub source: PathBuf,
 }
 
 /// Holds a history folder's lock while it lives.
@@ -66,8 +69,8 @@ struct Locked(#[allow(dead_code)] fs::File);
 
 impl History {
     /// The history of the document at `root`, in `state_dir`. Nothing is written until a version is.
-    pub fn new(state_dir: &Path, root: &Path) -> History {
-        History { dir: state_dir.join("history").join(key_of(root)), root: crate::state::real_path(root) }
+    pub fn new(state_dir: &Path, root: &Path, source: &Path) -> History {
+        History { dir: state_dir.join("history").join(key_of(root)), root: crate::state::real_path(root), source: source.to_path_buf() }
     }
 
     fn versions_file(&self) -> PathBuf {
@@ -122,16 +125,24 @@ impl History {
     }
 
     /// Writes version 0 from the document's sources when there's no history yet.
-    pub fn ensure_base(&self, source_dir: &Path, now: f64) -> Result<()> {
+    pub fn ensure_base(&self, now: f64) -> Result<()> {
+        let _lock = self.lock()?;
+        self.write_base(&[], now)
+    }
+
+    /// Version 0, under the lock, unless there is one: the sources as they are, but each changed
+    /// file as it was before its change (the write it records has already happened).
+    fn write_base(&self, changes: &[Change], now: f64) -> Result<()> {
         if self.versions_file().exists() {
             return Ok(());
         }
-        let _lock = self.lock()?;
-        if self.versions_file().exists() {
-            return Ok(());
+        let mut files: BTreeMap<String, Option<String>> = source_files(&self.source).into_iter().map(|(f, t)| (f, Some(t))).collect();
+        for c in changes {
+            files.insert(c.file.clone(), c.before.clone());
         }
         let mut changes = Vec::new();
-        for (file, text) in source_files(source_dir) {
+        for (file, text) in files {
+            let Some(text) = text else { continue };
             changes.push(json!({ "file": file, "before": Value::Null, "after": self.put_blob(&text)? }));
         }
         write_atomic(
@@ -155,6 +166,7 @@ impl History {
     /// they haven't paused; otherwise a new version starts. Returns the version.
     pub fn record(&self, changes: &[Change], author: &Author, edits: &[String], now: f64) -> Result<Value> {
         let _lock = self.lock()?;
+        self.write_base(changes, now)?;
         let mut versions = self.versions();
         let extend = versions.last().is_some_and(|last| {
             last["open"] == json!(true)
