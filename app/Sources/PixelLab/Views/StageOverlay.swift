@@ -243,13 +243,13 @@ struct SelectionOutline: View {
     }
 }
 
-/// A proposal on the stage (the Agent window's preview): the proposed doc's
-/// render at 60% over the current one, and what it changes outlined in gold:
-/// added and moved items solid with a small tag, removed items dashed, and
-/// for objects every changed pixel.
-struct ProposalGhostLayer: View {
+/// A version on the stage (the Versions panel's preview, docs/intents/2026-10-autosave/spec.md, D5): the
+/// doc as it was then at 60% over the current one, and what differs outlined in gold: items there and
+/// not now ("added"), moved, or here now and not then ("removed", dashed), and for objects every
+/// changed pixel.
+struct VersionGhostLayer: View {
     var geometry: StageGeometry
-    var ghost: ProposalGhost
+    var ghost: VersionGhost
     /// The stage's current render (removed items' boxes are in it).
     var current: StageImage
     var changes: (items: [GhostChange], pixels: [PixelPoint])
@@ -297,7 +297,7 @@ struct ProposalGhostLayer: View {
         .accessibilityLabel(summary)
     }
 
-    /// A change's box in view points: from the proposed render, or the current one for removed items.
+    /// A change's box in view points: from the version's render, or the current one for removed items.
     private func rect(_ change: GhostChange) -> CGRect? {
         guard let b = change.bounds, b.count == 4 else { return nil }
         let image = change.kind == .removed ? current : ghost.image
@@ -307,46 +307,45 @@ struct ProposalGhostLayer: View {
 
     /// VoiceOver: what the ghost changes, with the objects named (the tags' text).
     private var summary: String {
-        if ghost.ref.kind == .object { return "Proposal ghost: \(changes.pixels.count) pixel\(changes.pixels.count == 1 ? "" : "s") change" }
+        if ghost.ref.kind == .object { return "Version \(ghost.version) ghost: \(changes.pixels.count) pixel\(changes.pixels.count == 1 ? "" : "s") differ" }
         let parts = [GhostChange.Kind.added, .moved, .removed].compactMap { k -> String? in
             let objects = changes.items.filter { $0.kind == k }.map(\.object)
             guard !objects.isEmpty else { return nil }
             let names = objects.prefix(5).joined(separator: ", ") + (objects.count > 5 ? " and \(objects.count - 5) more" : "")
             return "\(objects.count) \(k.rawValue): \(names)"
         }
-        return "Proposal ghost: " + (parts.isEmpty ? "no item changes" : parts.joined(separator: "; "))
+        return "Version \(ghost.version) ghost: " + (parts.isEmpty ? "no item changes" : parts.joined(separator: "; "))
     }
 }
 
-/// Over the stage while a proposal is ghosted: who proposed it, and Approve,
-/// Reject and Hide (Esc).
-struct ProposalBanner: View {
-    var agent: AgentModel
-    var proposal: ProposalSummary
+/// Over the stage while a version is ghosted: whose it is and when, and Hide (Esc), Undo These Changes and
+/// Restore This Version (R12–R14).
+struct VersionBanner: View {
+    var versions: VersionsModel
+    var version: VersionSummary
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "sparkles").foregroundStyle(Theme.gold)
+            Image(systemName: "clock.arrow.circlepath").foregroundStyle(Theme.gold).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                 Text(detail).font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(1)
             }
             Spacer(minLength: 12)
-            Button("Hide") { agent.setGhostShown(false) }
-                .keyboardShortcut(.escape, modifiers: [])
-                .help("Hide the ghost (Esc)")
-            Button("Reject") { Task { await agent.reject() } }
-                .disabled(agent.working != nil)
-                .help("Reject the proposal (asks first)")
-            Button("Approve") { Task { await agent.approve() } }
+            Button("Hide") { versions.setGhostShown(false) }
+                .help("Hide the version on the stage (Esc closes Versions)")
+            Button("Undo These Changes") { Task { _ = await versions.undoChanges() } }
+                .disabled(versions.working != nil || version.number == 0)
+                .help("Take back what this version changed, keeping everything since")
+            Button("Restore") { Task { await versions.restore() } }
                 .buttonStyle(AccentButtonStyle())
-                .disabled(agent.working != nil)
-                .help("Approve: write the proposal to \(proposal.ref?.file ?? "the file")")
+                .disabled(versions.working != nil)
+                .help("Restore the document as it was after this version (asks first)")
         }
         .padding(.leading, 12)
         .padding(.trailing, 8)
         .padding(.vertical, 7)
-        .frame(maxWidth: 640)
+        .frame(maxWidth: 680)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
         .shadow(color: .black.opacity(0.18), radius: 8, y: 2)
@@ -354,14 +353,13 @@ struct ProposalBanner: View {
         .accessibilityLabel(title)
     }
 
-    private var title: String { proposal.bannerTitle }
+    private var title: String { "Version \(version.number) · \(version.author.display) · \(VersionsModel.time(version.endedAt))" }
 
     private var detail: String {
-        // "2 edits · pine moved to column 4, …" (docs/intents/2026-10-agent-chat/spec.md, D7).
-        var parts = [proposal.editsLabel + (proposal.summary.first.map { " · \($0)\(proposal.summary.count > 1 ? ", …" : "")" } ?? "")]
-        if !proposal.baseMatches { parts.append("the file changed since") }
-        if let e = agent.ghostError { parts.append("couldn't render: \(e)") }
-        if let r = agent.working { parts.append(r) }
+        var parts = [version.edits.first.map { "\($0)\(version.edits.count > 1 ? " and \(version.edits.count - 1) more" : "")" } ?? "No edits listed"]
+        if !versions.touchesDocOnStage { parts.append("didn't change this doc") }
+        if let e = versions.ghostError { parts.append(e) }
+        if let w = versions.working { parts.append(w) }
         return parts.joined(separator: " · ")
     }
 }

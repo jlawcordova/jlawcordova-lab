@@ -29,7 +29,7 @@
 - `app/Sources/PixelLab/Model/ProposalGhost.swift` → `VersionGhost.swift` (renamed): the ghost fed by `history.render`.
 - `app/Sources/PixelLab/Model/AgentModel.swift`: proposals, ghost and badges removed; the retirement notice.
 - `app/Sources/PixelLab/Chat/ChatModel.swift`, `ChatStore.swift`, `ChatRows.swift`, `StepText.swift`, `ClaudeTurn.swift`, `ChatPrompt.swift`: change cards, `history.mark` at a turn's end, flush before send.
-- `app/Sources/PixelLab/Views/VersionsSheet.swift` (new): D5.
+- `app/Sources/PixelLab/Views/VersionsSheet.swift` (new): D5, as a panel over the stage's trailing edge (see Departures).
 - `app/Sources/PixelLab/Views/ChatBubbles.swift`: `ChangeCard` replacing the proposal card.
 - `app/Sources/PixelLab/Views/AgentWindow.swift`, `AgentTab.swift`, `RightColumn.swift`, `StageOverlay.swift`, `StageView.swift`, `StaleBanner.swift`, `InspectorView.swift`, `MainWindow.swift`: proposals out, Save out, the problems row, the subtitle and edited dot, Reload and Keep Mine.
 - `app/Sources/PixelLab/PixelLabApp.swift`, `app/Sources/PixelLab/Support/WindowGuard.swift`: File › Save (a version), Revert To › Last Opened / Browse All Versions…, flush on resign, quit and close.
@@ -102,6 +102,16 @@ main ─────────────────────────
 - **Autosave timing in the script hook.** Waiting a second per edit would slow scripts down and make them flaky. `wait saved` waits on `saveState`, and the hook's own runs pass a short `PIXELLAB_AUTOSAVE_MS` (100).
 - **Retiring proposals** sets unapproved agent work aside (concern 4, decided): moved, never deleted, with a notice.
 - **Other options considered.** Autosave in the app, not the session: rejected, because agents' and the CLI's edits wouldn't autosave the same way. macOS Versions (`NSFileVersion`): rejected in the spec, because writes come from the program. Each process writing directly with merges (no owner): rejected, because autosaving every second would make clashes constant.
+
+## Departures
+
+What was built differently from the steps above, and why:
+
+- **Versions is a panel, not a sheet** (D5). On the Mac a sheet comes down over the window and hides the stage, where the selected version's ghost is drawn. The panel sits over the stage's trailing edge instead, with the same list, detail, buttons and keys (Esc closes it). `VersionsSheet` keeps the spec's name.
+- **Steps 10–14 landed as one commit.** The protocol, model, views, the panel, the chat and the script hook change the same types (`DocStatus`, the ghost, the chat's cards), so none of them builds without the others.
+- **The script hook's `cli`** runs the program with a state dir of its own, so it stays what scripts use it for: an edit from outside Pixel Lab, which doesn't find the app's lock. `cli-owned` is the CLI as a terminal runs it, through the app.
+- **`sync.rs` is trimmed, not deleted** (step 6), and **`open_docs.rs` goes in step 7** with the owner lock that replaces it.
+- **History starts at the first write** (step 9): version 0 is written with the first recorded write, as the document was just before it, so commands that only read leave the state dir alone.
 
 ## Proof
 

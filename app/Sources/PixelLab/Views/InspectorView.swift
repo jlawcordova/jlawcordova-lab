@@ -13,6 +13,7 @@ struct InspectorView: View {
         // Only the checks list scrolls.
         VStack(alignment: .leading, spacing: 18) {
             if let doc = model.document {
+                if let status = doc.status, status.blocked { NotSavedRow(status: status) }
                 documentCard(doc)
                 if doc.ref.kind == .scene {
                     // A layer, several things, or an item (docs/intents/2026-10-scene-layers/spec.md, D12).
@@ -225,5 +226,29 @@ struct AskClaudeButton: View {
         }
         .buttonStyle(.plain)
         .help("Chat with Claude about the selection (⌥⌘A)")
+    }
+}
+
+/// At the top of the Inspector while autosave can't write the open doc (docs/intents/2026-10-autosave/spec.md, R2,
+/// D2): why, in gold, and Check, which lists the problems below. Nothing pops up while you edit.
+struct NotSavedRow: View {
+    @Environment(AppModel.self) private var model
+    var status: DocStatus
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.gold).accessibilityHidden(true)
+            Text(model.saveStateText).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Theme.ink)
+            Spacer(minLength: 6)
+            if status.saveState == "problems" {
+                Button("Check") { model.requestCheck() }
+                    .help("List the problems in Checks below; the doc saves itself once they're fixed")
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .background(Theme.gold.opacity(0.16), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Theme.gold.opacity(0.6), lineWidth: 1))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(model.saveStateText). It saves itself once the problems are fixed.")
     }
 }

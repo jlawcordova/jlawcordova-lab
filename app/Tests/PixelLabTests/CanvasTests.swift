@@ -291,22 +291,30 @@ import Testing
 }
 
 @MainActor @Suite struct RightPanelTests {
-    @Test("R14: Save is disabled when clean and its label says so")
-    func testR14SaveIsDisabledWhenCleanAndItsLabelSaysSo() {
+    @Test("Autosave R3: the subtitle says Saved, Edited or why it can't be saved")
+    func testAutosaveR3TheSubtitleSaysSavedEditedOrWhy() {
         let app = AppModel()
         app.document = DocumentModel(ref: DocRef(.scene, "a"))
+        app.document?.status = DocStatus(doc: "scene:a", dirty: false, canUndo: false, canRedo: false, saveState: "saved")
+        #expect(app.saveStateText == "Saved")
         #expect(!app.canSave)
-        #expect(RightColumn.saveLabel(unsaved: app.canSave) == "Save, all saved")
-        app.document?.status = DocStatus(doc: "scene:a", dirty: true, canUndo: true, canRedo: false)
+        app.document?.status = DocStatus(doc: "scene:a", dirty: true, canUndo: true, canRedo: false, saveState: "pending")
+        #expect(app.saveStateText == "Edited")
         #expect(app.canSave)
-        #expect(RightColumn.saveLabel(unsaved: app.canSave) == "Save, unsaved changes")
+        app.document?.status = DocStatus(doc: "scene:a", dirty: true, canUndo: true, canRedo: false, saveState: "problems", problems: 2)
+        #expect(app.saveStateText == "Not saved: 2 problems")
+        app.document?.status = DocStatus(doc: "scene:a", dirty: true, canUndo: true, canRedo: false, saveState: "problems", problems: 1)
+        #expect(app.saveStateText == "Not saved: 1 problem")
     }
 
-    @Test("R14: the Agent tab shows the waiting count")
-    func testR14TheAgentTabShowsTheWaitingCount() {
-        #expect(RightColumn.tabLabel("Agent", pending: 0) == "Agent")
-        #expect(RightColumn.tabLabel("Agent", pending: 1) == "Agent, 1 proposal to review")
-        #expect(RightColumn.tabLabel("Agent", pending: 3) == "Agent, 3 proposals to review")
+    @Test("Autosave R20: the Edit menu says whose step it undoes")
+    func testAutosaveR20TheEditMenuSaysWhoseStep() {
+        let app = AppModel()
+        app.document = DocumentModel(ref: DocRef(.scene, "a"))
+        #expect(app.undoTitle == "Undo")
+        app.document?.status = DocStatus(doc: "scene:a", dirty: true, canUndo: true, canRedo: true, undoLabel: "pine placed at column 1 (Claude)", redoLabel: "rock moved")
+        #expect(app.undoTitle == "Undo Pine placed at column 1 (Claude)")
+        #expect(app.redoTitle == "Redo Rock moved")
     }
 }
 

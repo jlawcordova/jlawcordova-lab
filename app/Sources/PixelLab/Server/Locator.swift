@@ -91,11 +91,16 @@ enum Locator {
     /// Runs the program once (`pixellab <args>`), for the commands the app
     /// needs before or outside the server: `document new`, `document migrate`.
     /// Returns stdout; throws with stderr on a non-zero exit.
-    static func runCli(program: URL, _ args: [String]) async throws -> String {
+    static func runCli(program: URL, _ args: [String], environment: [String: String] = [:]) async throws -> String {
         try await Task.detached {
             let p = Process()
             p.executableURL = program
             p.arguments = args
+            if !environment.isEmpty {
+                var env = ProcessInfo.processInfo.environment
+                for (k, v) in environment { env[k] = v }
+                p.environment = env
+            }
             let out = Pipe(), err = Pipe()
             p.standardOutput = out
             p.standardError = err

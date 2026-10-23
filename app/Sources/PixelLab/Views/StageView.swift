@@ -20,28 +20,36 @@ struct StageView: View {
                 .strokeBorder(Theme.accent.opacity(model.editor.stageFocused ? 0.55 : 0), lineWidth: 2)
                 .allowsHitTesting(false)
         }
+        // The Versions panel beside the stage, so the ghost of the selected version stays in sight (D5).
+        .overlay(alignment: .trailing) {
+            if model.versions.sheetShown {
+                VersionsSheet()
+                    .padding(12)
+                    .transition(reduceMotion ? .identity : .move(edge: .trailing).combined(with: .opacity))
+            }
+        }
         .overlay(alignment: .top) {
-            if model.agent.previewing, model.agent.ghostShown, let p = model.agent.selected {
-                ProposalBanner(agent: model.agent, proposal: p)
+            if model.versions.previewing, model.versions.ghostShown, let v = model.versions.selected {
+                VersionBanner(versions: model.versions, version: v)
                     .padding(.top, 10)
                     .padding(.horizontal, 12)
             }
         }
         // Where you are in the scene's layers, and Done while inside one (docs/intents/2026-10-scene-layers/spec.md, D6).
         .overlay(alignment: .topLeading) {
-            if model.document?.ref.kind == .scene, model.mode == .scene, !(model.agent.previewing && model.agent.ghostShown) {
+            if model.document?.ref.kind == .scene, model.mode == .scene, !(model.versions.previewing && model.versions.ghostShown) {
                 BreadcrumbPill().padding(12)
             } else if model.document?.ref.kind == .object {
                 BackPill().padding(12)
             }
         }
         .overlay(alignment: .topTrailing) {
-            if model.document?.ref.kind == .scene, model.mode == .scene, model.editor.isPlacing, !(model.agent.previewing && model.agent.ghostShown) {
+            if model.document?.ref.kind == .scene, model.mode == .scene, model.editor.isPlacing, !(model.versions.previewing && model.versions.ghostShown) {
                 PlacePill().padding(12)
             }
         }
         .overlay(alignment: .bottom) {
-            if model.document != nil, !(model.agent.previewing && model.agent.ghostShown) {
+            if model.document != nil, !(model.versions.previewing && model.versions.ghostShown) {
                 VStack(spacing: 8) {
                     if model.libraryOpen, model.document?.ref.kind == .scene { LibraryPopover() }
                     FloatingBar()
@@ -118,9 +126,9 @@ struct StageView: View {
                             .accessibilityHidden(true)
                             .transition(reduceMotion ? .identity : .opacity)
                     }
-                    if let ghost = model.agent.visibleGhost {
-                        ProposalGhostLayer(geometry: geometry, ghost: ghost, current: render,
-                                           changes: model.agent.changes(current: render, renderCount: doc.renderCount))
+                    if let ghost = model.versions.visibleGhost {
+                        VersionGhostLayer(geometry: geometry, ghost: ghost, current: render,
+                                          changes: model.versions.changes(current: render, renderCount: doc.renderCount))
                     }
                     if doc.ref.kind == .object {
                         ObjectStageOverlay(geometry: geometry, objects: model.objectEditor, focused: model.editor.stageFocused,

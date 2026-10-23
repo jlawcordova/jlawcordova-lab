@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// The inspector column (docs/intents/2026-10-agent-chat/spec.md, D12): a tab row, **Inspector | ✦ Agent ⟨n⟩ …
-/// Publish · Save**, over the Inspector or the Agent tab. Publish and Save are here, in either tab, in scenes
-/// and objects (docs/intents/2026-10-floating-library/spec.md, R14, D8).
+/// The inspector column (docs/intents/2026-10-agent-chat/spec.md, D12): a tab row, **Inspector | ✦ Agent …
+/// Publish**, over the Inspector or the Agent tab. Publish is here, in either tab, in scenes and objects
+/// (docs/intents/2026-10-floating-library/spec.md, R14, D8). There is no Save: edits save themselves
+/// (docs/intents/2026-10-autosave/spec.md, R5), and ⌘S saves a version.
 struct RightColumn: View {
     @Environment(AppModel.self) private var model
 
@@ -19,7 +20,6 @@ struct RightColumn: View {
                 .accessibilityLabel("Right column tabs")
                 Spacer(minLength: 4)
                 publishButton
-                saveButton
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
             Rectangle().fill(Theme.border).frame(height: 1)
@@ -35,22 +35,12 @@ struct RightColumn: View {
 
     private func tab(_ t: RightTab, _ title: String, sparkle: Bool = false) -> some View {
         let on = model.rightTab == t
-        let n = t == .agent ? model.agent.pendingCount : 0
         return Button {
             if t == .agent { model.showAgentTab() } else { model.rightTab = .inspector }
         } label: {
             HStack(spacing: 5) {
                 if sparkle { Image(systemName: "sparkle").font(.system(size: 11)).foregroundStyle(Theme.accent) }
                 Text(title).font(.system(size: 12.5, weight: on ? .semibold : .regular)).foregroundStyle(on ? Theme.ink : Theme.inkMuted)
-                if n > 0 {
-                    // The waiting proposals, as the toolbar's Agent button showed them.
-                    Text("\(n)")
-                        .font(.system(size: 10, weight: .bold).monospacedDigit())
-                        .foregroundStyle(Theme.onAccent)
-                        .padding(.horizontal, 5)
-                        .frame(minWidth: 16, minHeight: 16)
-                        .background(Theme.gold, in: Capsule())
-                }
             }
             .padding(.horizontal, 10)
             .frame(minHeight: 26)
@@ -58,14 +48,9 @@ struct RightColumn: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(Self.tabLabel(title, pending: n))
+        .accessibilityLabel(title)
         .accessibilityAddTraits(on ? [.isSelected, .isButton] : .isButton)
-        .help(t == .agent ? (n == 0 ? "Chat with Claude about the scene (⌥⌘A)" : "\(n) proposal\(n == 1 ? "" : "s") to review (⌥⌘A)") : "The selection, its position and the checks")
-    }
-
-    /// "Agent", or "Agent, 2 proposals to review".
-    static func tabLabel(_ title: String, pending n: Int) -> String {
-        n == 0 ? title : "\(title), \(n) proposal\(n == 1 ? "" : "s") to review"
+        .help(t == .agent ? "Chat with Claude about the scene (⌥⌘A)" : "The selection, its position and the checks")
     }
 
     private var publishButton: some View {
@@ -83,15 +68,4 @@ struct RightColumn: View {
         .help("Publish (⌘B)")
         .accessibilityLabel("Publish")
     }
-
-    private var saveButton: some View {
-        Button("Save") { Task { await model.save() } }
-            .buttonStyle(AccentButtonStyle(height: 26))
-            .disabled(!model.canSave)
-            .help("Save the source (⌘S)")
-            .accessibilityLabel(Self.saveLabel(unsaved: model.canSave))
-    }
-
-    /// Save's VoiceOver label says whether anything is unsaved.
-    static func saveLabel(unsaved: Bool) -> String { unsaved ? "Save, unsaved changes" : "Save, all saved" }
 }
