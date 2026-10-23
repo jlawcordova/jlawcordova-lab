@@ -292,6 +292,49 @@ fn notes_ok(v: Option<&Value>) -> bool {
     matches!(v, Some(Value::Array(list)) if list.iter().all(Value::is_string))
 }
 
+/// The most characters in a category name (spec R2).
+pub const MAX_CATEGORY_NAME: usize = 32;
+
+/// Why `name` can't be a category name, if it can't (spec R2): 1 to 32
+/// letters, digits, spaces, `&`, `'` and `-`, with no leading, trailing or
+/// doubled spaces.
+pub fn category_name_problem(name: &str) -> Option<String> {
+    let len = name.chars().count();
+    if len == 0 || len > MAX_CATEGORY_NAME {
+        return Some(format!("{} is {len} characters; a name is 1 to {MAX_CATEGORY_NAME}", qs(name)));
+    }
+    if let Some(c) = name.chars().find(|c| !(c.is_alphanumeric() || matches!(c, ' ' | '&' | '\'' | '-'))) {
+        return Some(format!("{} has {}; use letters, digits, spaces, & ' and -", qs(name), qs(&c.to_string())));
+    }
+    if name.starts_with(' ') || name.ends_with(' ') || name.contains("  ") {
+        return Some(format!("{} has a leading, trailing or doubled space", qs(name)));
+    }
+    None
+}
+
+/// Checks an object's `category` (spec R1, R2): a non-empty list of names,
+/// outermost first, where "All" and "Others" (the popover's own tabs) can't be
+/// the outermost.
+fn category_problems(category: Option<&Value>, add: &mut dyn FnMut(String)) {
+    let Some(Value::Array(names)) = category else {
+        return add("category must be a list of names, outermost first".into());
+    };
+    if names.is_empty() {
+        return add("category must have at least one name".into());
+    }
+    for (i, name) in names.iter().enumerate() {
+        let Some(text) = name.as_str() else {
+            add(format!("category: {} is not a name", q(Some(name))));
+            continue;
+        };
+        if let Some(why) = category_name_problem(text) {
+            add(format!("category: {why}"));
+        } else if i == 0 && (text.eq_ignore_ascii_case("all") || text.eq_ignore_ascii_case("others")) {
+            add(format!("category: {} is a tab of the Library, so it can't be the outermost name", qs(text)));
+        }
+    }
+}
+
 fn validate_palette(sources: &Sources, problems: &mut Vec<String>) {
     let file = crate::format::PALETTE_FILE;
     let Some(palette) = sources.palette.as_object() else {
@@ -347,8 +390,8 @@ fn validate_palette(sources: &Sources, problems: &mut Vec<String>) {
     }
 }
 
-const OBJECT_PROPS: [&str; 8] = ["notes", "kind", "extends", "anchor", "footprint", "keys", "rows", "layers"];
-const BLOCK_PROPS: [&str; 6] = ["notes", "kind", "size", "faces", "surface", "sides"];
+const OBJECT_PROPS: [&str; 9] = ["notes", "category", "kind", "extends", "anchor", "footprint", "keys", "rows", "layers"];
+const BLOCK_PROPS: [&str; 7] = ["notes", "category", "kind", "size", "faces", "surface", "sides"];
 const SIDES_PROPS: [&str; 3] = ["keys", "left", "right"];
 const FACES: [&str; 4] = ["top", "left", "right", "edge"];
 const MAP_LAYER_PROPS: [&str; 4] = ["class", "map", "ambient", "actions"];
@@ -397,6 +440,9 @@ fn validate_object_shape(sources: &Sources, name: &str, problems: &mut Vec<Strin
     }
     if has(o, "notes") && !notes_ok(o.get("notes")) {
         add("notes must be a list of strings".into());
+    }
+    if has(o, "category") {
+        category_problems(o.get("category"), &mut add);
     }
     if o.get("kind").and_then(Value::as_str) != Some("sprite") {
         add(format!("kind must be 'sprite' or 'block', got {}", q(o.get("kind"))));
@@ -533,6 +579,9 @@ fn validate_block_shape(sources: &Sources, o: &Map<String, Value>, add: &mut dyn
     }
     if has(o, "notes") && !notes_ok(o.get("notes")) {
         add("notes must be a list of strings".into());
+    }
+    if has(o, "category") {
+        category_problems(o.get("category"), add);
     }
     let size = o.get("size");
     let sized = is_whole(size, 3) && {

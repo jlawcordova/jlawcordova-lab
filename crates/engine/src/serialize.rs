@@ -59,9 +59,9 @@ pub fn ordered(map: &Map<String, Value>) -> Map<String, Value> {
 /// The palette: notes first (R7), the two tiers, then the notes on colors.
 pub const PALETTE: &[&str] = &["notes", "world", "outfit", "colorNotes"];
 /// A sprite object.
-pub const SPRITE: &[&str] = &["notes", "kind", "extends", "anchor", "footprint", "keys", "rows", "layers"];
+pub const SPRITE: &[&str] = &["notes", "category", "kind", "extends", "anchor", "footprint", "keys", "rows", "layers"];
 /// A block object.
-pub const BLOCK: &[&str] = &["notes", "kind", "size", "faces", "surface", "sides"];
+pub const BLOCK: &[&str] = &["notes", "category", "kind", "size", "faces", "surface", "sides"];
 /// A map layer, a frame layer, and a block's surface (keys first).
 pub const LAYER: &[&str] = &["keys", "class", "loop", "prefix", "frames", "map", "ambient", "actions"];
 /// A block's sides.
