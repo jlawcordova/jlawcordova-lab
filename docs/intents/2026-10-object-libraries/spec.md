@@ -1,5 +1,5 @@
 # Spec: Object libraries and palette files (from intent.md 2026-10-23)
-Status: draft.
+Status: approved (the owner asked in chat on 2026-10-23 for the spec and plan to be made and the change built, without settling the Areas of concern first; each concern below is settled with Claude's recommendation, marked **Settled**, for the owner to confirm or change in the final PR's review).
 
 This spec is for the intent as revised on 2026-10-23 for autosave (`../2026-10-autosave/spec.md`) and the floating Library (`../2026-10-floating-library/spec.md`): edits apply as they're made, and the Library is the popover above the floating bar.
 
@@ -88,6 +88,8 @@ Every new action is a command in the registry, so the CLI, the app (`serve --std
   - When an imported object's name is already taken, the imported one gets the first free suffix: `pine-2`, `pine-3`, and so on.
   - Every reference inside the import follows the renamed object, so an imported object that extends `pine` extends `pine-2`.
   - The document's own objects are never renamed or changed.
+  - An imported object identical to the document's same-named one, apart from its category, isn't copied: the import uses the document's (Areas of concern 3).
+  - A library's `character` that differs from the document's isn't copied either: its figures extend the document's `character`, and the import warns about it as it does about colors (R14, Areas of concern 2).
   - Before an import that renames, the app lists the renames. The command reports them in its result.
 - **R14. Colors that differ are a warning.**
   - The document's palette colors the imported objects, by color name.
@@ -136,7 +138,7 @@ Every new action is a command in the registry, so the CLI, the app (`serve --std
 - **R24. Recommended categories for the site's document and the explainer document.**
   - Appendix A gives a category for every object in the site's document (`jlawcordova.pixellab`).
   - Appendix B gives one for every object in the explainer document (`art/explainer-library.pixellab`).
-  - The owner approves or changes both with this spec.
+  - The owner confirms or changes both in the final PR's review.
   - Setting them is a change in the site repo (Areas of concern 1).
   - This repo carries the mapping as data the acceptance pass uses (R26).
   - One `object.category` call per category sets a document's categories.
@@ -219,16 +221,17 @@ explainer.pixellib/
 
 ### D5. Library import (R12–R16)
 - **`library.import`:**
-  - `{ from, acceptColors?: bool, convert?: { missing: existing }, dryRun?: bool }`
+  - `{ from, acceptDifferences?: bool, convert?: { missing: existing }, dryRun?: bool }`
   - **Plan:** read the library and validate it (D3). Compute the renames (R13), the differing colors (R14) and the missing colors (R15).
   - **Refusals:**
-    - With differences and no `acceptColors`, it refuses `palette_differs`.
+    - With differences (differing colors, or a `character` swap) and no `acceptDifferences`, it refuses `differs`.
     - With missing colors not all in `convert`, it refuses `missing_colors`, with each one's tier and nearest same-tier color.
     - A conversion to a color of the other tier refuses `wrong_tier`.
     - `dryRun` returns the plan and changes nothing. The app uses it to fill its sheet.
   - **Apply:** add each object under its final name, rewrite `extends` through the rename map, rewrite converted keys (and a block's face colors), and keep `category`. It's one `session.record` with one label.
 - **Nearest color:** the smallest squared RGB distance within the tier. Ties go to the palette's order.
-- **`character`:** the engine treats the object named `character` as the figure base (only figures that extend it may use outfit colors). A library's own `character` that clashes is renamed like any other object, but then its figures no longer extend `character`, and their outfit colors would be problems. So an imported object whose JSON equals the document's same-named object, apart from `category`, isn't copied. References to it point at the document's object. This takes care of the common case: the explainer and site documents share their `character` lineage. Areas of concern 2 covers what happens when they differ, and asks the owner.
+- **Identical objects:** an imported object whose JSON equals the document's same-named object, apart from `category`, isn't copied. References to it point at the document's object, and the result lists it as `same` (Areas of concern 3).
+- **`character`:** the engine treats the object named `character` as the figure base (only figures that extend it may use outfit colors). When the library has a `character` that differs from the document's, it isn't copied. The imported figures extend the document's `character`, and the import counts that as a difference: the app's sheet says "Figures will use this document's character, so they may look different", and the command needs `acceptDifferences` (Areas of concern 2). A library `character` imported into a document without one keeps its name.
 - **In the app:** File › Import Library… (an NSOpenPanel for `.pixellib`) runs the dry run, then:
   - With no renames, differences or missing colors, it imports at once and announces "Imported 12 objects".
   - Otherwise a sheet shows the renames, then the differing colors (swatch pairs), then the missing colors, each with a color menu set to the nearest one.
@@ -287,7 +290,7 @@ explainer.pixellib/
    - **The pin:** the site pins a `pixellab` release. Engines before this change refuse `category` as an unknown property. So the site must bump its pin to this release before either of its documents gets categories (as with scene layers).
    - **Setting the categories:** applying Appendices A and B is a site-repo change under its own intent, after the bump. The site's `explainer-library.test.mjs` compares objects only by their art, so categories shouldn't break it. The site's change confirms that.
    - **Where the library lives:** whether the site keeps an exported `art/explainer.pixellib` beside the document, or exports it on demand, is the site repo's decision.
-   - **The owner decides:** does that site change follow this one straight after release?
+   - **Settled:** this change makes no edit to the site repo. The site's change (bump the pin, apply the appendices, decide where the explainer library lives) follows this release under the site's own intent.
 2. **`character` is special by name** (D5).
    - Two documents' `character` objects already differ: the explainer's and the site's differ at line 58.
    - Importing the explainer library into the site's document today would rename the explainer's base to `character-2`. Its chef, waiter, staff and robots would then fail the outfit rule.
@@ -296,21 +299,24 @@ explainer.pixellib/
      - **(a)** Figures stay valid when they extend any object that itself extends or is named `character`, including a renamed `character-2`. This changes the engine rule to "a figure base is an object named `character`, or imported from one". It needs a marker in the object, such as `"base": "character"`.
      - **(b)** When the import would rename `character`, the imported figures extend the document's `character` instead, with a warning that they may look different.
      - **(c)** Such an import is refused until the two match.
-   - Claude recommends (b): it follows the intent's "warn, never silently change", and adds no engine concept.
+   - **Settled: (b).** It follows the intent's "warn, never silently change", and adds no engine concept (D5).
 3. **Skipping identical objects departs from "both are kept"** (the intent's name-clash rule).
    - Skipping a byte-identical copy (apart from category) avoids `pine-2` duplicates when the same library is imported twice, or when documents share bases.
-   - The owner decides whether identical objects are skipped (recommended) or always duplicated. If they're always duplicated, concern 2 has no common-case answer.
+   - **Settled:** identical objects are skipped (D5).
 4. **Palette caps are tight.**
    - The site's world tier is full: 32 of 32.
    - So any palette import that brings a new world color is refused (R23), and any library using a world color the site lacks must be converted (R15).
    - This follows the intent and the engine's caps. Raising the caps is a site and engine art-rules question, out of scope here.
+   - **Settled:** no change; R15 and R23 handle it.
 5. **The extension `.pixelpal`** is Claude's choice, a short sibling of `.pixellib`. The owner may prefer another name, such as `.pixelpalette`.
+   - **Settled:** `.pixelpal`. Renaming later is a constant and the bundle's type declaration.
 6. **Recommended categories** (Appendices A and B) are Claude's proposal from the objects' names, the explainer's contact sheets and the site's scenes. The owner approves or edits them here.
+   - **Settled:** as written, to be confirmed in the final PR's review.
 
 ## Open questions
 
 - The intent had none.
-- New questions are Areas of concern 1–3, 5 and 6, each for the owner.
+- New questions were Areas of concern 1–3, 5 and 6, each settled with Claude's recommendation for the owner to confirm.
 - Carried forward for a later intent: should a library import offer to add a missing color to the palette, when there's room, instead of only converting it? The intent's answer today is "convert"; this spec doesn't add it.
 
 ## Appendix A: the site's document (`jlawcordova.pixellab`)

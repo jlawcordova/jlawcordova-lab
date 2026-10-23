@@ -1,5 +1,5 @@
 # Intent: Object libraries and palette files
-Author: J. Law Cordova (owner). Status: draft (a revision of the intent accepted in PR #42, for the autosave and floating Library changes that merged since).
+Author: J. Law Cordova (owner). Status: accepted (in chat on 2026-10-23; a revision of the intent accepted in PR #42, for the autosave and floating Library changes that merged since).
 
 ## Problem
 In the owner's words:
