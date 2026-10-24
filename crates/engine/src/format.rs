@@ -276,6 +276,8 @@ fn inline_into(v: &Value, table: Option<&[&str]>, out: &mut String) {
                     (Some(t), "actions") if t == order::ITEM => Some(ACTIONS),
                     (Some(t), _) if t == ACTIONS => Some(order::LOOP),
                     (Some(t), "keys") if t == order::LOOP => Some(order::KEY),
+                    // A state's move is a list of keys, as a loop's.
+                    (Some(t), "move") if t == order::STATE => Some(order::MOVE_KEY),
                     _ => None,
                 };
                 inline_into(value, inner, out);
@@ -346,6 +348,8 @@ fn object_key(k: &str) -> Shape {
         "layers" => Shape::List(|_| Shape::Record(order::LAYER, layer_key)),
         "surface" => Shape::Record(order::LAYER, layer_key),
         "sides" => Shape::Record(order::SIDES, pretty),
+        // Each state on one line, as the document format shows them.
+        "states" => Shape::Record(&[], |_| Shape::InlineRecord(order::STATE)),
         _ => Shape::Pretty,
     }
 }
@@ -406,6 +410,67 @@ pub fn serialize_file(file: &str, doc: &Value) -> String {
 /// Parses JSON text, keeping the order of keys as written.
 pub fn parse(text: &str) -> Result<Value, String> {
     serde_json::from_str(text).map_err(|e| e.to_string())
+}
+
+/// The state names an object's text writes twice in its `states` (object-states spec, R7). JSON keeps
+/// the last of a key, so the parsed source can't tell; this reads the text, which `parse` accepted.
+pub fn duplicate_states(text: &str) -> Vec<String> {
+    struct Frame {
+        object: bool,
+        expect_key: bool,
+        key: Option<String>,
+        states: bool,
+        seen: Vec<String>,
+    }
+    let b = text.as_bytes();
+    let mut stack: Vec<Frame> = Vec::new();
+    let mut out: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'"' => {
+                let start = i;
+                i += 1;
+                while i < b.len() && b[i] != b'"' {
+                    i += if b[i] == b'\\' { 2 } else { 1 };
+                }
+                let Some(f) = stack.last_mut().filter(|f| f.object && f.expect_key) else {
+                    i += 1;
+                    continue;
+                };
+                let key: String = text.get(start..=i).and_then(|raw| serde_json::from_str(raw).ok()).unwrap_or_default();
+                if f.states {
+                    if !f.seen.contains(&key) {
+                        f.seen.push(key.clone());
+                    } else if !out.contains(&key) {
+                        out.push(key.clone());
+                    }
+                }
+                f.key = Some(key);
+                f.expect_key = false;
+            }
+            open @ (b'{' | b'[') => {
+                let states = open == b'{' && stack.len() == 1 && stack[0].key.as_deref() == Some("states");
+                stack.push(Frame { object: open == b'{', expect_key: true, key: None, states, seen: Vec::new() });
+            }
+            b'}' | b']' => {
+                stack.pop();
+            }
+            b',' => {
+                if let Some(f) = stack.last_mut() {
+                    f.expect_key = f.object;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    out
+}
+
+/// What a check says of a state written twice, after the file's name.
+pub fn duplicate_problem(name: &str) -> String {
+    format!("states.{name}: written twice; the last one counts, and saving keeps only it, so remove or rename one")
 }
 
 /// A file's size and modification time, as `fs.stat` gives them.
@@ -470,7 +535,14 @@ pub fn read_docs(dir: &Path) -> Docs {
             }
         };
         match parse(&text) {
-            Ok(v) => Some(v),
+            Ok(v) => {
+                if file.starts_with("objects/") {
+                    for name in duplicate_states(&text) {
+                        docs.load_errors.push(format!("{file}: {}", duplicate_problem(&name)));
+                    }
+                }
+                Some(v)
+            }
             Err(e) => {
                 docs.load_errors.push(format!("{file}: cannot be loaded: {}", e.lines().next().unwrap_or("")));
                 None

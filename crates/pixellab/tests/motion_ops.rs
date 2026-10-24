@@ -102,7 +102,22 @@ fn r12_add_a_track_an_item_needs_an_id_set_move_show_and_pose_keys_move_and_dele
 fn r12_add_a_track_an_item_needs_an_id_set_move_show_and_pose_keys_move_and_delete_them_remove_the_track_through_the_commands() {
     let fx = Fx::new();
     let mut s = fx.session();
-    assert_eq!(rejects(call(&mut s, "scene.track.add", json!({ "item": "3" }), "moving")), "no_id");
+    // An item without an id gets one when it is given a track (R23): its object's name, made unique.
+    {
+        let fx2 = Fx::new();
+        let mut s2 = fx2.session();
+        let r = call(&mut s2, "scene.track.add", json!({ "item": "3" }), "moving").unwrap();
+        assert_eq!(r["id"], "pebble");
+        assert_eq!(r["track"], json!({ "item": "pebble", "keys": [{ "t": 0 }] }));
+        assert!(r["summary"].as_str().unwrap().contains("the item had no id, so it got pebble"));
+        assert_eq!(
+            rejects(
+                call(&mut s2, "scene.key.set", json!({ "item": "pebble", "time": 100, "move": [1, 0] }), "moving")
+                    .and(Err(Error::Internal("ok".into())))
+            ),
+            "ok"
+        );
+    }
     assert_eq!(rejects(call(&mut s, "scene.track.add", json!({ "item": "cart" }), "moving")), "track_exists");
     let added = call(&mut s, "scene.track.add", json!({ "item": "bird" }), "moving").unwrap();
     assert_eq!(added["track"], json!({ "item": "bird", "keys": [{ "t": 0 }] }));
@@ -379,7 +394,11 @@ fn motion_ops_messages_and_codes_match_node() {
             "out_of_range",
             "2000 ms is past the loop, which is 2000 ms long (0 to 1999)",
         ),
-        (motion_ops::set_key(&mut s, "bird", 5.0, &vals(|v| v.clear = vec!["x".into()])), "usage", "clear takes move, show or pose, not x"),
+        (
+            motion_ops::set_key(&mut s, "bird", 5.0, &vals(|v| v.clear = vec!["x".into()])),
+            "usage",
+            "clear takes move, show, pose or state, not x",
+        ),
         (
             motion_ops::move_key(&mut s, "bird", 0.0, 100.0),
             "first_key",

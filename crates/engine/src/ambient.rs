@@ -54,7 +54,7 @@ fn num(v: Option<&Value>) -> Option<f64> {
     v.and_then(Value::as_f64)
 }
 
-fn keys_of(v: Option<&Value>) -> Option<Vec<Key>> {
+pub(crate) fn keys_of(v: Option<&Value>) -> Option<Vec<Key>> {
     let list = v?.as_array()?;
     let keys: Option<Vec<Key>> = list
         .iter()
@@ -91,7 +91,7 @@ pub fn moves_of(v: &Value) -> Option<Rc<Moves>> {
 
 /// Where the element is from each percentage of the loop on, as the CSS
 /// steps it: the keys, then `end` at `duration`, whole pixels at a time.
-fn runs(keys: &[Key], end: [f64; 2], duration: f64) -> Vec<(f64, [f64; 2])> {
+pub(crate) fn runs(keys: &[Key], end: [f64; 2], duration: f64) -> Vec<(f64, [f64; 2])> {
     let mut all: Vec<Key> = keys.to_vec();
     all.push(Key { t: duration, moved: end });
     let mut out: Vec<(f64, [f64; 2])> = Vec::new();
@@ -121,7 +121,7 @@ fn runs(keys: &[Key], end: [f64; 2], duration: f64) -> Vec<(f64, [f64; 2])> {
     out
 }
 
-fn at_percent(runs: &[(f64, [f64; 2])], p: f64) -> [f64; 2] {
+pub(crate) fn at_percent(runs: &[(f64, [f64; 2])], p: f64) -> [f64; 2] {
     let mut found = runs.first().map_or([0.0, 0.0], |r| r.1);
     for &(at, moved) in runs {
         if at > p {
@@ -169,12 +169,18 @@ fn is_whole(v: Option<&Value>) -> bool {
 }
 
 fn validate_keys(place: &str, what: &str, keys_value: Option<&Value>, duration: Option<f64>, add: &mut dyn FnMut(String)) {
-    let Some(list) = keys_value.and_then(Value::as_array).filter(|l| !l.is_empty()) else {
-        return add(format!("{place}: {what}.keys must be a list of at least one key"));
+    validate_key_list(place, &format!("{what}.keys"), keys_value, duration, add);
+}
+
+/// Checks a list of `{ t, move }` keys: the first at 0, rising, below `duration`. `list` names the
+/// list in each problem (`ambient.keys`, or a state's `states.hop.move`).
+pub(crate) fn validate_key_list(place: &str, list: &str, keys_value: Option<&Value>, duration: Option<f64>, add: &mut dyn FnMut(String)) {
+    let Some(items) = keys_value.and_then(Value::as_array).filter(|l| !l.is_empty()) else {
+        return add(format!("{place}: {list} must be a list of at least one key"));
     };
     let mut last: Option<f64> = None;
-    for (i, key) in list.iter().enumerate() {
-        let at = format!("{place}: {what}.keys[{i}]");
+    for (i, key) in items.iter().enumerate() {
+        let at = format!("{place}: {list}[{i}]");
         let Some(k) = key.as_object() else {
             add(format!("{at}: must be {{ t, move }}"));
             continue;
@@ -270,7 +276,7 @@ pub fn validate(place: &str, element: &Map<String, Value>, add: &mut dyn FnMut(S
 
 // ----------------------------------------------------------------------- CSS
 
-fn frames(keys: &[Key], end: [f64; 2], duration: f64) -> String {
+pub(crate) fn frames(keys: &[Key], end: [f64; 2], duration: f64) -> String {
     let mut all: Vec<Key> = keys.to_vec();
     all.push(Key { t: duration, moved: end });
     (0..all.len())

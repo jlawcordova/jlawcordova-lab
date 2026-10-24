@@ -63,14 +63,27 @@
 | [`object layer delete`](#objectlayerdelete) | Delete a layer (not the only one) | edit |
 | [`object layer duplicate`](#objectlayerduplicate) | Duplicate a layer, just above it | edit |
 | [`object layer move`](#objectlayermove) | Move a layer up (--by 1, raise) or down (--by -1, lower) | edit |
-| [`object list`](#objectlist) | List every object with its kind, category, size, layers, frames and colors | read |
+| [`object list`](#objectlist) | List every object with its kind, category, size, layers, frames, colors and states | read |
 | [`object map set`](#objectmapset) | Replace a whole map of a sprite's layer (or frame of a loop) from rows, in one undo step | edit |
 | [`object new`](#objectnew) | Make a new object from a starter: a blank sprite, a block, or one that extends another | edit |
 | [`object paint`](#objectpaint) | Paint pixels of an object a palette color, on a layer and frame | edit |
 | [`object pick`](#objectpick) | The color at a pixel of an object, on a layer and frame (the Picker) | read |
 | [`object render`](#objectrender) | Render one object to a transparent PNG | read |
 | [`object resize`](#objectresize) | Pad or crop a sprite's maps to a width and height (at the right and bottom) | edit |
-| [`object show`](#objectshow) | Show an object's kind, category, size, anchor, footprint, layers, frames, colors and extends | read |
+| [`object show`](#objectshow) | Show an object's kind, category, size, anchor, footprint, layers, frames, colors, states and extends | read |
+| [`object state add`](#objectstateadd) | Add a state to a sprite: frames played at one frame length, that loops or plays once | edit |
+| [`object state delete`](#objectstatedelete) | Delete a state | edit |
+| [`object state duplicate`](#objectstateduplicate) | Copy a state, just after it | edit |
+| [`object state frame add`](#objectstateframeadd) | Add a frame of the sprite to a state's frames | edit |
+| [`object state frame delete`](#objectstateframedelete) | Take a position out of a state's frames (not the only one) | edit |
+| [`object state frame move`](#objectstateframemove) | Move a position of a state's frames later (--by 1) or earlier (--by -1) | edit |
+| [`object state key delete`](#objectstatekeydelete) | Delete a key of a state's move (the last one takes the move off) | edit |
+| [`object state key move`](#objectstatekeymove) | Move a key of a state's move to another time | edit |
+| [`object state key set`](#objectstatekeyset) | Set a key of a state's move: where the whole sprite stands at a time (made if there's no key there) | edit |
+| [`object state move`](#objectstatemove) | Move a state later (--by 1) or earlier (--by -1) in the list | edit |
+| [`object state run`](#objectstaterun) | What a state plays: the states it leads through, where it settles, and when its frame or move changes | read |
+| [`object state set`](#objectstateset) | Change a state: rename it, its frames, frame length, how it ends, or make it the start | edit |
+| [`object states make`](#objectstatesmake) | Turn a sprite's layer ambient loop and actions into states | edit |
 | [`object still`](#objectstill) | Turn a frame loop back into a still layer, keeping one frame | edit |
 | [`palette export`](#paletteexport) | Export the document's palette to a new .pixelpal file | writes files |
 | [`palette get`](#paletteget) | List the palette: every color name, hex and tier | read |
@@ -84,7 +97,7 @@
 | [`scene items`](#sceneitems) | List a scene's items in depth order (back to front), with stable paths | read |
 | [`scene key delete`](#scenekeydelete) | Delete a key of an item's track (not the one at 0: remove the track for that) | edit |
 | [`scene key move`](#scenekeymove) | Move a key of an item's track to another time | edit |
-| [`scene key set`](#scenekeyset) | Set a key of an item's track: its move, show and pose at a time (made if there's no key there) | edit |
+| [`scene key set`](#scenekeyset) | Set a key of an item's track: its move, show, pose and state at a time (made if there's no key there) | edit |
 | [`scene layer assign`](#scenelayerassign) | Move items and layers into a layer, or to the top level | edit |
 | [`scene layer move`](#scenelayermove) | Move layers (every item in them, and in the layers inside them) and items by tiles, together | edit |
 | [`scene layer new`](#scenelayernew) | Make a layer (a named, nestable part of a scene) and move items and layers into it | edit |
@@ -98,11 +111,11 @@
 | [`scene place`](#sceneplace) | Place an object on a tile (or at a pixel point) in a scene | edit |
 | [`scene remove`](#sceneremove) | Remove an item (and its motion track, if it has an id) | edit |
 | [`scene render`](#scenerender) | Render a scene to a transparent PNG, with item bounds | read |
-| [`scene set`](#sceneset) | Set an item's tile or pixel point, one coordinate, its level, depth override, class or id | edit |
+| [`scene set`](#sceneset) | Set an item's tile or pixel point, one coordinate, its level, depth override, class, id or state | edit |
 | [`scene show`](#sceneshow) | Show a scene's settings, size, objects and motion | read |
 | [`scene snap`](#scenesnap) | Snap a pixel-placed item to the tile under its placement point, at the level it stands on | edit |
 | [`scene sort`](#scenesort) | Put a scene's items (or every scene's) in depth order, and say what moved | edit |
-| [`scene track add`](#scenetrackadd) | Add a motion track for an item (it needs an id): one key at 0, the rest frame | edit |
+| [`scene track add`](#scenetrackadd) | Add a motion track for an item: one key at 0, the rest frame | edit |
 | [`scene track remove`](#scenetrackremove) | Remove an item's motion track, with all its keys | edit |
 
 ## The command line
@@ -303,7 +316,7 @@ Bytes each object and each color adds to a compiled scene, against the document'
 pixellab art sizes <name>
 ```
 
-The bytes a compiled scene loses, raw and gzip, when an object's items are left out or a color's paths are dropped (costs overlap a little), now and as committed at HEAD of the repository the document is in. Returns { scene, output, now: { raw, gzip }, head: { raw, gzip } | { reason }, objects: [{ object, placed, raw, gzip, headRaw, headGzip }], colors: [{ color, raw, gzip, headRaw, headGzip }] }.
+The bytes a compiled scene loses, raw and gzip, when an object's items are left out or a color's paths are dropped (costs overlap a little), now and as committed at HEAD of the repository the document is in. Returns { scene, output, now: { raw, gzip }, head: { raw, gzip } | { reason }, objects: [{ object, placed, raw, gzip, headRaw, headGzip }], colors: [{ color, raw, gzip, headRaw, headGzip }], states?: { raw, gzip, headRaw?, headGzip? }, warnings }. A scene with sprites that have states also gets states, a line of its own: the bytes of the rules in its style that play them (the objects' costs include them), as the style alone.
 
 read-only · MCP tool `art_sizes`
 
@@ -372,7 +385,7 @@ Validate the sources with the engine, all of them or one doc.
 pixellab check [name] [--kind <object|scene>] [--library <text>]
 ```
 
-Problems are the engine's "<file>: <where>: <rule>" lines. With a name, only the problems in that doc and the files it uses (palette.json, the objects it places or extends) are listed. On the command line, the exit code is 1 when there are problems. Warnings don't fail the check, and each has a code. off_grid: a scene's key-to-key moves (the loop back to the first key included) whose steps aren't 1 px straight, 1:1 or 2:1, so the item jumps instead of walking the grid; scene.motion.path makes on-grid keys. out_of_order: a scene whose file lists its items out of depth order (it still publishes in depth order; scene.sort writes the file in order), with how many items would move. copies: a moving item that takes several places among the others as it moves is drawn once for each place in the SVG, which adds to its size; the warning says how many. cropped: a scene with a fixed viewBox paints pixels outside it, which the published SVG cuts off; the warning says how many (scene.frame --fit fits it to its content). empty: a scene with nothing in it and no viewBox, which publishes one tile around the origin. With library, it checks an object library instead (no document needed): its objects against the colors it recorded at export, extends resolving inside it, and categories.
+Problems are the engine's "<file>: <where>: <rule>" lines. With a name, only the problems in that doc and the files it uses (palette.json, the objects it places or extends) are listed. On the command line, the exit code is 1 when there are problems. Warnings don't fail the check, and each has a code. off_grid: a scene's key-to-key moves (the loop back to the first key included) whose steps aren't 1 px straight, 1:1 or 2:1, so the item jumps instead of walking the grid; scene.motion.path makes on-grid keys. out_of_order: a scene whose file lists its items out of depth order (it still publishes in depth order; scene.sort writes the file in order), with how many items would move. copies: a moving item that takes several places among the others as it moves is drawn once for each place in the SVG, which adds to its size; the warning says how many. cropped: a scene with a fixed viewBox paints pixels outside it, which the published SVG cuts off; the warning says how many (scene.frame --fit fits it to its content). empty: a scene with nothing in it and no viewBox, which publishes one tile around the origin. states_and_loops: a sprite with states that also has layer ambient loops or actions, which never play since the states decide what plays (object.states.make turns them into states). scene_owns_state: an item whose motion track keys a state sits in a group with data-state or data-play: the scene plays it, so the page's attribute can't switch it. With library, it checks an object library instead (no document needed): its objects against the colors it recorded at export, extends resolving inside it, and categories.
 
 read-only · MCP tool `check`
 
@@ -1132,7 +1145,7 @@ edits docs · MCP tool `object_layer_move`
 
 #### object.list
 
-List every object with its kind, category, size, layers, frames and colors.
+List every object with its kind, category, size, layers, frames, colors and states.
 
 ```
 pixellab object list [--kind <sprite|block>] [--category <text,…>]
@@ -1248,10 +1261,10 @@ read-only · MCP tool `object_pick`
 Render one object to a transparent PNG.
 
 ```
-pixellab object render <name> [--scale <n>] [--frame <n>] [--time <n>] [--play <text>] [--layers <n,…>] [--out <file.png>]
+pixellab object render <name> [--scale <n>] [--frame <n>] [--time <n>] [--state <text>] [--play <text>] [--layers <n,…>] [--out <file.png>]
 ```
 
-The anchor is at (0, 0). A sprite's viewBox is its whole map, so at scale 1 PNG pixel (x, y) is map column x, row y; a block's is the box around its pixels. Returns the same shape as scene.render, with one item. --time also places the layers' ambient loops, and --play <action>@<ms> (with --time) places the layers that have that action where it has them <ms> into it; with --time the viewBox grows to hold the moved layers (the map's box, plus what moved outside it), and viewBox says where. On the command line, --out <file.png> writes the PNG.
+The anchor is at (0, 0). A sprite's viewBox is its whole map, so at scale 1 PNG pixel (x, y) is map column x, row y; a block's is the box around its pixels. Returns the same shape as scene.render, with one item. A sprite with states shows the one it starts in --time ms after time 0, or --state's from its first frame, and the item says its state and frame. --time also places the layers' ambient loops, and --play <action>@<ms> (with --time) places the layers that have that action where it has them <ms> into it; with --time the viewBox grows to hold the moved layers (the map's box, plus what moved outside it), and viewBox says where. On the command line, --out <file.png> writes the PNG.
 
 read-only · MCP tool `object_render`
 
@@ -1260,7 +1273,8 @@ read-only · MCP tool `object_render`
 | `name` (positional) | string | required | object name (or objects/<name>) |
 | `--scale` | integer | default `1` | whole-pixel zoom of the PNG (1 to 16) |
 | `--frame` | integer | default `0` | the frame every loop shows (loops shorter than this show nothing) (at least 0) |
-| `--time` | integer |  | ms into the loops; overrides frame (at least 0) |
+| `--time` | integer |  | ms into the loops; overrides frame. With state, ms after entering it (at least 0) |
+| `--state` | string |  | a sprite's state: shows what it shows --time ms after entering it (0 by default), the frame it has and how far it has moved |
 | `--play` | string |  | an action and the ms into it, like hop@120: the elements that have it are placed where it has them then, instead of on their ambient loop |
 | `--layers` | list of integer |  | only these layers of a sprite, each at --frame or its last frame, as the lab's stage shows them (hidden layers, onion skin) |
 
@@ -1287,7 +1301,7 @@ edits docs · MCP tool `object_resize`
 
 #### object.show
 
-Show an object's kind, category, size, anchor, footprint, layers, frames, colors and extends.
+Show an object's kind, category, size, anchor, footprint, layers, frames, colors, states and extends.
 
 ```
 pixellab object show <name> [--doc]
@@ -1299,6 +1313,255 @@ read-only · MCP tool `object_show`
 | --- | --- | --- | --- |
 | `name` (positional) | string | required | object name (or objects/<name>) |
 | `--doc` | boolean | default `false` | also return the object's source data as doc |
+
+#### object.state.add
+
+Add a state to a sprite: frames played at one frame length, that loops or plays once.
+
+```
+pixellab object state add <name> <state> [--frames <n,…>] [--ms <n>] [--once] [--then <text>] [--after <text>]
+```
+
+A state is the sprite's frames played at one frame length; it loops, or plays once and then holds its last frame or hands over to another state (--once --then). Without --frames it plays every frame, and without --ms it uses the frame length the sprite's frame loop plays at today (150 ms for ff, 200 ms for wf, 500 ms for hf, 200 ms for any other loop and for a still sprite), so the first state looks and plays as the sprite did. The first state is the start: every placement plays it unless an item says otherwise. A sprite has at most 32 states, and a block or a sprite that extends another has none of its own. The names clear and start are the scene commands' words and can't be state names, and neither can names that start as the compiler's own do (mv-, am-, a or s and a number, like s2).
+
+edits docs · MCP tool `object_state_add`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | object name (or objects/<name>) |
+| `state` (positional) | string | required | the new state's name: lowercase words joined by hyphens |
+| `--frames` | list of integer |  | the frames it plays, in order: frame numbers of the sprite, repeats allowed (on the command line 0,1,2) |
+| `--ms` | integer |  | how long each frame shows, in ms (20 to 10000) |
+| `--once` | boolean | default `false` | play once, then hold the last frame (or hand over, with --then) |
+| `--then` | string |  | with --once: the state that follows |
+| `--after` | string |  | the state it goes after in the list (default: last) |
+
+```sh
+pixellab object state add lamp idle
+pixellab object state add lamp flicker --frames 0,1,0,1 --ms 80 --once --then idle
+```
+
+#### object.state.delete
+
+Delete a state.
+
+```
+pixellab object state delete <name> <state>
+```
+
+Refused, with the list, while it is the start, a then names it, or a scene item or key names it. Deleting the last state takes states and start off, and the frame loops play on their own again.
+
+edits docs · MCP tool `object_state_delete`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | object name (or objects/<name>) |
+| `state` (positional) | string | required | the state |
+
+#### object.state.duplicate
+
+Copy a state, just after it.
+
+```
+pixellab object state duplicate <name> <state> [--as <text>]
+```
+
+edits docs · MCP tool `object_state_duplicate`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | object name (or objects/<name>) |
+| `state` (positional) | string | required | the state |
+| `--as` | string |  | the copy's name (default: <state>-2) |
+
+#### object.state.frame.add
+
+Add a frame of the sprite to a state's frames.
+
+```
+pixellab object state frame add <name> <state> [--frame <n>] [--at <n>]
+```
+
+edits docs · MCP tool `object_state_frame_add`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | object name (or objects/<name>) |
+| `state` (positional) | string | required | the state |
+| `--frame` | integer |  | the sprite's frame (default: the one the state ends on) (at least 0) |
+| `--at` | integer |  | a position in the state's frames, from 0 (at least 0) |
+
+#### object.state.frame.delete
+
+Take a position out of a state's frames (not the only one).
+
+```
+pixellab object state frame delete <name> <state> --at <n>
+```
+
+edits docs · MCP tool `object_state_frame_delete`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | object name (or objects/<name>) |
+| `state` (positional) | string | required | the state |
+| `--at` | integer | required | a position in the state's frames, from 0 (at least 0) |
+
+#### object.state.frame.move
+
+Move a position of a state's frames later (--by 1) or earlier (--by -1).
+
+```
+pixellab object state frame move <name> <state> --at <n> --by <n>
+```
+
+edits docs · MCP tool `object_state_frame_move`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | object name (or objects/<name>) |
+| `state` (positional) | string | required | the state |
+| `--at` | integer | required | a position in the state's frames, from 0 (at least 0) |
+| `--by` | integer | required | places later (positive) or earlier (negative) |
+
+#### object.state.key.delete
+
+Delete a key of a state's move (the last one takes the move off).
+
+```
+pixellab object state key delete <name> <state> --time <n>
+```
+
+edits docs · MCP tool `object_state_key_delete`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | object name (or objects/<name>) |
+| `state` (positional) | string | required | the state |
+| `--time` | integer | required | ms after entering the state (at least 0) |
+
+#### object.state.key.move
+
+Move a key of a state's move to another time.
+
+```
+pixellab object state key move <name> <state> --time <n> --to <n>
+```
+
+edits docs · MCP tool `object_state_key_move`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | object name (or objects/<name>) |
+| `state` (positional) | string | required | the state |
+| `--time` | integer | required | ms after entering the state (at least 0) |
+| `--to` | integer | required | its new time, ms after entering the state (at least 0) |
+
+#### object.state.key.set
+
+Set a key of a state's move: where the whole sprite stands at a time (made if there's no key there).
+
+```
+pixellab object state key set <name> <state> --time <n> [--move <n,…>]
+```
+
+The move is one for the whole sprite, in pixels from where it is drawn, a whole pixel at a time as an action's is. The first key is at 0 and is made with the move. With no --move, the key pins the sprite where it is at that time (pinned: true), and a time that already has a key is left alone (changed: false).
+
+edits docs · MCP tool `object_state_key_set`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | object name (or objects/<name>) |
+| `state` (positional) | string | required | the state |
+| `--time` | integer | required | ms after entering the state (at least 0) |
+| `--move` | list of integer |  | pixels the whole sprite is moved: x,y |
+
+#### object.state.move
+
+Move a state later (--by 1) or earlier (--by -1) in the list.
+
+```
+pixellab object state move <name> <state> --by <n>
+```
+
+The list's order is the order the states are shown in, and a page that names two states gets the one listed later.
+
+edits docs · MCP tool `object_state_move`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | object name (or objects/<name>) |
+| `state` (positional) | string | required | the state |
+| `--by` | integer | required | places later (positive) or earlier (negative) |
+
+#### object.state.run
+
+What a state plays: the states it leads through, where it settles, and when its frame or move changes.
+
+```
+pixellab object state run <name> <state> [--horizon <n>]
+```
+
+The run is what an item shows after it enters the state, and it is the same every time: segments are the states that then leads through (each from and to, in ms after entering), settle says where it ends up (a loop from some ms with its period, or a hold of one frame), and changes lists every time the frame or the whole sprite's move (x,y pixels) changes, from 0 up to horizon. The app, the renders and the published SVG all play this one run.
+
+read-only · MCP tool `object_state_run`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | object name (or objects/<name>) |
+| `state` (positional) | string | required | a state of the object |
+| `--horizon` | integer |  | list changes up to this many ms after entering (default: the settle plus one period) (at least 1) |
+
+```sh
+pixellab object state run character hop
+pixellab object state run lamp flicker --horizon 3000
+```
+
+#### object.state.set
+
+Change a state: rename it, its frames, frame length, how it ends, or make it the start.
+
+```
+pixellab object state set <name> <state> [--rename <text>] [--frames <n,…>] [--ms <n>] [--loop] [--once] [--then <text>] [--hold] [--start]
+```
+
+Renaming updates the start, every then, and every scene item and motion key that names it, in every scene: all of it is one version (and one undo step for each doc it touches). Changing the frames or the length is refused when the state's move would be cut off. The result lists the scenes it changed.
+
+edits docs · MCP tool `object_state_set`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | object name (or objects/<name>) |
+| `state` (positional) | string | required | the state |
+| `--rename` | string |  | its new name |
+| `--frames` | list of integer |  | the frames it plays, in order: frame numbers of the sprite, repeats allowed (on the command line 0,1,2) |
+| `--ms` | integer |  | how long each frame shows, in ms (20 to 10000) |
+| `--loop` | boolean | default `false` | make it loop |
+| `--once` | boolean | default `false` | make it play once |
+| `--then` | string |  | the state that follows a state that plays once |
+| `--hold` | boolean | default `false` | a state that plays once holds its last frame (takes the then off) |
+| `--start` | boolean | default `false` | make it the state items start in |
+
+```sh
+pixellab object state set lamp flicker --ms 60
+pixellab object state set character hop --rename jump
+```
+
+#### object.states.make
+
+Turn a sprite's layer ambient loop and actions into states.
+
+```
+pixellab object states make <name>
+```
+
+For moving a sprite over to states (the site's character, for one). The ambient loop becomes the start state, idle: it loops, the layer's move is the sprite's move and its length the loop's duration. Each action becomes a state of the same name that plays once with the action's move and then hands over to idle. The sprite's frames carry over, and the layer's ambient and actions are taken off. It refuses, and says why, when it couldn't keep the art the same: an ambient loop that starts part-way in (an offset), moves on more than one layer, a move on a layer while another has pixels, or a duration that isn't a whole number of the frame loop's cycles. A scene item's own ambient and actions stay as they are.
+
+edits docs · MCP tool `object_states_make`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | object name (or objects/<name>) |
 
 #### object.still
 
@@ -1572,13 +1835,13 @@ edits docs · MCP tool `scene_key_move`
 
 #### scene.key.set
 
-Set a key of an item's track: its move, show and pose at a time (made if there's no key there).
+Set a key of an item's track: its move, show, pose and state at a time (made if there's no key there).
 
 ```
-pixellab scene key set <name> <item> --time <n> [--move <n,…>] [--show] [--pose <text>] [--clear <move|show|pose,…>]
+pixellab scene key set <name> <item> --time <n> [--move <n,…>] [--show] [--pose <text>] [--state <text>] [--clear <move|show|pose|state,…>]
 ```
 
---move x,y is pixels from where the scene places the item; --show false hides it from that key on; --pose <object> draws another object from that key on. --clear move,show,pose removes those values from the key, so they carry on from the key before. Returns the key and the track's off-grid warnings (moves whose steps aren't 1 px straight, 1:1 or 2:1).
+--move x,y is pixels from where the scene places the item; --show false hides it from that key on; --pose <object> draws another object from that key on; --state <name> puts it in that state of the object it shows (a state is entered from its first frame and plays by itself, the same every time; --state clear takes it off the key). With none of them, the key pins the item where it is at that time: { t, move } with the move it has then, pinned: true, and a time that already has a key is left alone (changed: false). --clear move,show,pose,state removes those values from the key, so they carry on from the key before. A page's data-state doesn't change an item whose track keys a state. Returns the key and the track's off-grid warnings (moves whose steps aren't 1 px straight, 1:1 or 2:1).
 
 edits docs · MCP tool `scene_key_set`
 
@@ -1590,12 +1853,15 @@ edits docs · MCP tool `scene_key_set`
 | `--move` | list of integer |  | pixels from where the scene places the item: x,y |
 | `--show` | boolean |  | whether the item shows from this key on |
 | `--pose` | string |  | the object the item draws from this key on |
+| `--state` | string |  | a state of the object the item shows, which it plays from its first frame from this key on; clear takes the state off the key |
 | `--clear` | list of string |  | values to remove from the key |
 
 ```sh
 pixellab scene key set hero-island truck-a --time 4200 --move 32,16
 pixellab scene key set hero-island crane-hook --time 9000 --pose crane-hook-down
 pixellab scene key set hero-island parcel --time 12000 --no-show
+pixellab scene key set town lamp-1 --time 1000 --state flicker
+pixellab scene key set hero-island truck-a --time 4200
 ```
 
 #### scene.layer.assign
@@ -1892,13 +2158,13 @@ pixellab scene render meadow --play hop@120 --out /tmp/hop.png
 
 #### scene.set
 
-Set an item's tile or pixel point, one coordinate, its level, depth override, class or id.
+Set an item's tile or pixel point, one coordinate, its level, depth override, class, id or state.
 
 ```
-pixellab scene set <name> <item> [--keep-group] [--tile <n,…>] [--px <n,…>] [--col <n>] [--row <n>] [--level <n>] [--x <n>] [--y <n>] [--depth <front|back|auto>] [--class <text>] [--id <text>]
+pixellab scene set <name> <item> [--keep-group] [--tile <n,…>] [--px <n,…>] [--col <n>] [--row <n>] [--level <n>] [--x <n>] [--y <n>] [--depth <front|back|auto>] [--class <text>] [--id <text>] [--state <text>]
 ```
 
---tile col,row,level or --px x,y place the item there (changing how it's placed if need be; a pixel point keeps the level the item stands on); --col, --row, --level (an item on a tile) and --x, --y (a pixel-placed item) set one coordinate, like the lab's Selected fields. --level also sets how high a pixel-placed item stands, which only matters for depth order. --depth is the override: front draws the item over everything else in its list, back under everything, auto takes the override off so it draws by where it stands. It also takes a group's path, as the only field (a group's attributes are scene.group.set). --class sets the class list and --id the id; an empty value removes it. An id's motion track follows it when it's renamed and goes with it when it's removed. All in one undo step, after which the scene is in depth order (the result has the item's path after that; reordered says what moved). Moving it keeps its group's data-x/data-y and data-col/data-row in step, as scene.move does (--no-keep-group leaves them).
+--tile col,row,level or --px x,y place the item there (changing how it's placed if need be; a pixel point keeps the level the item stands on); --col, --row, --level (an item on a tile) and --x, --y (a pixel-placed item) set one coordinate, like the lab's Selected fields. --level also sets how high a pixel-placed item stands, which only matters for depth order. --depth is the override: front draws the item over everything else in its list, back under everything, auto takes the override off so it draws by where it stands. It also takes a group's path, as the only field (a group's attributes are scene.group.set). --class sets the class list and --id the id; an empty value removes it. --state sets the state of its object the item starts in (the object's start otherwise; --state start puts it back). An id's motion track follows it when it's renamed and goes with it when it's removed. All in one undo step, after which the scene is in depth order (the result has the item's path after that; reordered says what moved). Moving it keeps its group's data-x/data-y and data-col/data-row in step, as scene.move does (--no-keep-group leaves them).
 
 edits docs · MCP tool `scene_set`
 
@@ -1917,6 +2183,7 @@ edits docs · MCP tool `scene_set`
 | `--depth` | `front` \| `back` \| `auto` |  | front or back draws it over or under everything else in its list; auto clears the override |
 | `--class` | string |  | a class list, or '' to remove it |
 | `--id` | string |  | an id, or '' to remove it |
+| `--state` | string |  | the state a sprite with states starts in, or start for the object's own start state |
 
 ```sh
 pixellab scene set hero-island 0.0 --tile 3,4,0
@@ -1981,13 +2248,13 @@ pixellab scene sort --all
 
 #### scene.track.add
 
-Add a motion track for an item (it needs an id): one key at 0, the rest frame.
+Add a motion track for an item: one key at 0, the rest frame.
 
 ```
 pixellab scene track add <name> <item> [--duration <n>]
 ```
 
-Makes the scene's motion (one loop of --duration ms) when it has none. Then scene.key.set or scene.motion.path keys it.
+Makes the scene's motion (one loop of --duration ms) when it has none. An item without an id gets one, its object's name made unique in the scene (cart, cart-2), and the result says which (id). Then scene.key.set or scene.motion.path keys it.
 
 edits docs · MCP tool `scene_track_add`
 

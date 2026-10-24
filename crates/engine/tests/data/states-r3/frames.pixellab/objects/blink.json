@@ -1,0 +1,50 @@
+{
+  "kind": "sprite",
+  "anchor": [2, 3],
+  "keys": {
+    "a": "grass-4",
+    "b": "grass-2",
+    "c": "ink"
+  },
+  "layers": [
+    {
+      "class": "body",
+      "map": [
+        "cccc",
+        "c..c",
+        "c..c",
+        "cccc"
+      ]
+    },
+    {
+      "loop": "ff",
+      "prefix": "f",
+      "frames": [
+        [
+          "ab.a",
+          "b.ab",
+          ".ab.",
+          "ab.a"
+        ],
+        [
+          "b.ab",
+          ".ab.",
+          "ab.a",
+          "b.ab"
+        ],
+        [
+          ".ab.",
+          "ab.a",
+          "b.ab",
+          ".ab."
+        ],
+        [
+          "ab.a",
+          "b.ab",
+          ".ab.",
+          "ab.a"
+        ]
+      ]
+    }
+  ]
+}

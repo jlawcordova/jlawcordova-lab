@@ -395,9 +395,144 @@ fn frame_params(more: Vec<(&str, Value)>) -> Value {
     json!({ "type": "object", "properties": props, "required": ["name"] })
 }
 
+/// A sprite with states: its frames are the same frame on every frame-loop layer (R2), so an edit of a frame is an edit of its
+/// column, and the states that play frames follow it (R30).
+fn has_states(doc: &Value) -> bool {
+    doc.get("states").is_some()
+}
+
+/// The layers that are frame loops.
+fn loop_layers(doc: &Value) -> Vec<usize> {
+    doc.get("layers")
+        .and_then(Value::as_array)
+        .map(|l| l.iter().enumerate().filter(|(_, l)| l.get("frames").is_some()).map(|(i, _)| i).collect())
+        .unwrap_or_default()
+}
+
+/// What a column edit does to frame `k`.
+enum Column {
+    Add(usize),
+    Duplicate(usize),
+    Delete(usize),
+    Move(usize, i64),
+}
+
+/// What a frame's number becomes (None: it is gone).
+type Renumber = Box<dyn Fn(usize) -> Option<usize>>;
+
+/// One edit of a frame of every frame-loop layer of a sprite with states, with the states renumbered to follow it (R2, R30).
+fn column_edit(doc: &mut Value, op: Column) -> Result<Edit> {
+    let layers = loop_layers(doc);
+    let first = layers
+        .first()
+        .copied()
+        .ok_or_else(|| failed("this sprite has no frame loop, so one frame (object.animate makes a layer a frame loop)", "not_a_loop"))?;
+    let (count, _) = crate::states_ops::timing(doc);
+    let k = match op {
+        Column::Add(k) | Column::Duplicate(k) | Column::Delete(k) | Column::Move(k, _) => k,
+    };
+    if k >= count {
+        return Err(usage(format!("there's no frame {k}; the sprite has {count}")));
+    }
+    let prefix = str_of(doc["layers"][first].get("prefix"));
+    let (renumber, next, message): (Renumber, usize, String) = match op {
+        Column::Add(k) => (
+            Box::new(move |f| Some(if f > k { f + 1 } else { f })),
+            k + 1,
+            format!("Added a blank frame, {prefix}{}, in every frame loop", k + 1),
+        ),
+        Column::Duplicate(k) => (
+            Box::new(move |f| Some(if f > k { f + 1 } else { f })),
+            k + 1,
+            format!("Frame {prefix}{k} duplicated as {prefix}{}, in every frame loop", k + 1),
+        ),
+        Column::Delete(k) => {
+            if count == 1 {
+                return Err(failed("A loop keeps at least one frame", "last_frame"));
+            }
+            (
+                Box::new(move |f| match f.cmp(&k) {
+                    std::cmp::Ordering::Less => Some(f),
+                    std::cmp::Ordering::Equal => None,
+                    std::cmp::Ordering::Greater => Some(f - 1),
+                }),
+                k.min(count - 2),
+                format!("Frame {prefix}{k} deleted from every frame loop"),
+            )
+        }
+        Column::Move(k, by) => {
+            let to = k as i64 + by;
+            if by == 0 {
+                return Err(usage("--by must not be 0"));
+            }
+            if to < 0 || to >= count as i64 {
+                return Err(failed(
+                    format!(
+                        "frame {k} can't move {} {}: there are {count} (0 to {})",
+                        if by > 0 { "up" } else { "down" },
+                        by.abs(),
+                        count - 1
+                    ),
+                    "out_of_range",
+                ));
+            }
+            let to = to as usize;
+            (
+                Box::new(move |f| {
+                    Some(if f == k {
+                        to
+                    } else if by > 0 && f > k && f <= to {
+                        f - 1
+                    } else if by < 0 && f < k && f >= to {
+                        f + 1
+                    } else {
+                        f
+                    })
+                }),
+                to,
+                format!("Frame {prefix}{k} moved {}, to {prefix}{to}, in every frame loop", if by > 0 { "later" } else { "earlier" }),
+            )
+        }
+    };
+    // The states first: a state left with no frames refuses the whole edit, before any layer changes.
+    let changed = op_result(crate::states_ops::remap_frames(doc, &*renumber))?;
+    for li in layers {
+        if k >= doc["layers"][li]["frames"].as_array().map_or(0, Vec::len) {
+            continue;
+        }
+        match op {
+            Column::Add(k) => {
+                edit::add_frame(doc, li, k);
+            }
+            Column::Duplicate(k) => {
+                edit::duplicate_frame(doc, li, k);
+            }
+            Column::Delete(k) => {
+                edit::delete_frame(doc, li, k);
+            }
+            Column::Move(k, by) => {
+                let list = doc["layers"][li]["frames"].as_array_mut().expect("frames");
+                move_by(list, k, by, "frame")?;
+            }
+        }
+    }
+    let mut pairs = vec![("frame", json!(next))];
+    if !changed.is_empty() {
+        pairs.push(("states", json!(changed)));
+    }
+    Ok(result_of(pairs, message))
+}
+
+fn op_result<T>(r: std::result::Result<T, CommandError>) -> Result<T> {
+    r.map_err(Into::into)
+}
+
 fn frame_add_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let (layer, frame) = (index(&params, "layer"), index(&params, "frame"));
     layer_edit(ctx, opt_str(&params, "name").unwrap_or(""), |doc| {
+        if has_states(doc) {
+            return column_edit(doc, Column::Add(frame));
+        }
         let l = frame_of(doc, layer, frame)?;
         let next = edit::add_frame(doc, layer, frame);
         Ok(result_of(vec![("frame", json!(next))], format!("Added a blank frame, {}{next}", l.prefix)))
@@ -407,6 +542,9 @@ fn frame_add_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
 fn frame_duplicate_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let (layer, frame) = (index(&params, "layer"), index(&params, "frame"));
     layer_edit(ctx, opt_str(&params, "name").unwrap_or(""), |doc| {
+        if has_states(doc) {
+            return column_edit(doc, Column::Duplicate(frame));
+        }
         let l = frame_of(doc, layer, frame)?;
         let next = edit::duplicate_frame(doc, layer, frame);
         Ok(result_of(vec![("frame", json!(next))], format!("Frame {p}{frame} duplicated as {p}{next}", p = l.prefix)))
@@ -416,6 +554,9 @@ fn frame_duplicate_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
 fn frame_delete_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let (layer, frame) = (index(&params, "layer"), index(&params, "frame"));
     layer_edit(ctx, opt_str(&params, "name").unwrap_or(""), |doc| {
+        if has_states(doc) {
+            return column_edit(doc, Column::Delete(frame));
+        }
         let l = frame_of(doc, layer, frame)?;
         if l.frames == 1 {
             return Err(failed("A loop keeps at least one frame", "last_frame"));
@@ -428,6 +569,9 @@ fn frame_delete_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
 fn frame_move_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let (layer, frame, by) = (index(&params, "layer"), index(&params, "frame"), int(&params, "by"));
     layer_edit(ctx, opt_str(&params, "name").unwrap_or(""), |doc| {
+        if has_states(doc) {
+            return column_edit(doc, Column::Move(frame, by));
+        }
         let l = frame_of(doc, layer, frame)?;
         let list = doc["layers"][layer]["frames"].as_array_mut().expect("frames");
         let next = move_by(list, frame, by, "frame")?;
@@ -443,10 +587,24 @@ fn animate_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let loop_name = opt_str(&params, "loop").unwrap_or("ff").to_string();
     layer_edit(ctx, opt_str(&params, "name").unwrap_or(""), |doc| {
         layer_of(doc, layer)?;
+        let states = has_states(doc);
+        let others = loop_layers(doc).into_iter().filter(|l| *l != layer).count();
+        // In a sprite with states every frame loop is as long as the others (R2): the new loop is, and a switch keeps its length.
+        let keep = states.then(|| crate::states_ops::timing(doc).0);
         if doc["layers"][layer].get("frames").is_some() {
-            edit::set_loop(doc, layer, &loop_name);
+            if states {
+                let prefix = SITE_LOOPS.iter().find(|l| l.name == loop_name).map_or("f", |l| l.prefix);
+                let frames = doc["layers"][layer]["frames"].clone();
+                doc["layers"][layer] = json!({ "loop": loop_name, "prefix": prefix, "frames": frames });
+            } else {
+                edit::set_loop(doc, layer, &loop_name);
+            }
         } else {
             edit::animate_layer(doc, layer, &loop_name);
+            if let (Some(count), true) = (keep, others > 0) {
+                let map = doc["layers"][layer]["frames"][0].clone();
+                doc["layers"][layer]["frames"] = Value::Array(vec![map; count]);
+            }
         }
         let frames = SITE_LOOPS.iter().find(|l| l.name == loop_name).map_or(0, |l| l.frames);
         let count = doc["layers"][layer]["frames"].as_array().map_or(0, Vec::len);
@@ -458,8 +616,14 @@ fn still_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let (layer, frame) = (index(&params, "layer"), index(&params, "frame"));
     layer_edit(ctx, opt_str(&params, "name").unwrap_or(""), |doc| {
         frame_of(doc, layer, frame)?;
+        // The last frame loop of a sprite with states leaves it one frame: the states' frames follow (R30).
+        let mut changed: Vec<String> = Vec::new();
+        if has_states(doc) && loop_layers(doc).len() == 1 {
+            changed = op_result(crate::states_ops::remap_frames(doc, &|f| (f == frame).then_some(0)))?;
+        }
         edit::still_layer(doc, layer, frame);
-        Ok(result_of(vec![], format!("Still, keeping frame {frame}")))
+        let pairs = if changed.is_empty() { vec![] } else { vec![("states", json!(changed))] };
+        Ok(result_of(pairs, format!("Still, keeping frame {frame}")))
     })
 }
 

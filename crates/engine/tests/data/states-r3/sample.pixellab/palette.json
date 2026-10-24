@@ -1,0 +1,17 @@
+{
+  "world": {
+    "ink": "#2E2418",
+    "cream": "#F4EDE0",
+    "grass-1": "#B5C79C",
+    "grass-2": "#8FA56E",
+    "grass-3": "#6F8F55",
+    "grass-4": "#4E6B3A",
+    "soil-2": "#8A5A34",
+    "soil-3": "#5A3E2B",
+    "wood-3": "#7A4E2D",
+    "water-2": "#6FA4C9"
+  },
+  "outfit": {
+    "teal-1": "#7FA89B"
+  }
+}

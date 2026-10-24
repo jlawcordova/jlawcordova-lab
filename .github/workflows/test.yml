@@ -40,5 +40,17 @@ jobs:
         run: cargo fmt --check
       - name: cargo test
         run: cargo test
+      # The states' browser check (scripts/test/states-browser.test.mjs) runs in WebKit, Chromium and
+      # Firefox: Playwright's, installed here, with their system libraries on Linux. The browsers are
+      # cached on the lockfile, so a run downloads them only when Playwright's version changes.
+      - name: Install the repo's Node dependencies
+        run: npm ci
+      - name: Cache the browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install the browsers
+        run: npx playwright install --with-deps
       - name: npm test
         run: npm test

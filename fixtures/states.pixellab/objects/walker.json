@@ -1,0 +1,53 @@
+{
+  "kind": "sprite",
+  "anchor": [2, 3],
+  "keys": {
+    "a": "grass-4",
+    "b": "grass-2",
+    "c": "ink"
+  },
+  "layers": [
+    {
+      "class": "cap",
+      "map": [
+        "c..c",
+        "....",
+        "....",
+        "...."
+      ]
+    },
+    {
+      "loop": "wk",
+      "prefix": "w",
+      "frames": [
+        [
+          "aa..",
+          "aa..",
+          "....",
+          "bbbb"
+        ],
+        [
+          ".aa.",
+          ".aa.",
+          "....",
+          "bbbb"
+        ],
+        [
+          "..aa",
+          "..aa",
+          "....",
+          "bbbb"
+        ]
+      ]
+    }
+  ],
+  "start": "idle",
+  "states": {
+    "idle": { "frames": [0], "ms": 1000, "move": [{ "t": 0, "move": [0, 0] }, { "t": 500, "move": [0, -1] }] },
+    "walk": { "frames": [0, 1, 2, 1], "ms": 150 },
+    "dead": { "frames": [1, 2], "ms": 100, "loop": false },
+    "hop": { "frames": [1], "ms": 480, "loop": false, "then": "idle", "move": [{ "t": 0, "move": [0, 0] }, { "t": 44, "move": [0, -2] }] },
+    "ping": { "frames": [0, 1], "ms": 100, "loop": false, "then": "pong" },
+    "pong": { "frames": [1, 0], "ms": 100, "loop": false, "then": "ping" }
+  }
+}

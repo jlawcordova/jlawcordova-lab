@@ -1,0 +1,27 @@
+{
+  "output": "frames.svg",
+  "viewBox": [-32, -32, 96, 80],
+  "items": [
+    { "object": "block", "at": { "tile": [0, 0, 0] } },
+    { "object": "blink", "at": { "tile": [0, 0, 1] } },
+    { "object": "wave", "at": { "tile": [1, 0, 0] } },
+    { "object": "torch", "at": { "tile": [0, 1, 0] } },
+    { "object": "bobber", "id": "bob", "at": { "tile": [1, 1, 0] } },
+    { "object": "post", "id": "walker", "at": { "px": [8, 8] } },
+    { "object": "post", "at": { "px": [20, 4] }, "ambient": { "duration": 800, "keys": [{ "t": 0, "move": [0, 0] }, { "t": 400, "move": [1, 0] }] }, "actions": { "hop": { "duration": 400, "keys": [{ "t": 0, "move": [0, 0] }, { "t": 100, "move": [2, -2] }] } } },
+    { "object": "blink", "at": { "px": [30, 12] } }
+  ],
+  "motion": {
+    "duration": 2000,
+    "tracks": [
+      {
+        "item": "walker",
+        "keys": [
+          { "t": 0, "move": [0, 0] },
+          { "t": 500, "move": [8, 4], "pose": "blink" },
+          { "t": 1500, "move": [16, 8], "show": true, "pose": "wave" }
+        ]
+      }
+    ]
+  }
+}

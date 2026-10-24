@@ -1,0 +1,41 @@
+{
+  "kind": "sprite",
+  "anchor": [2, 3],
+  "keys": {
+    "a": "grass-4",
+    "b": "grass-2",
+    "c": "ink"
+  },
+  "layers": [
+    {
+      "loop": "ff",
+      "prefix": "f",
+      "frames": [
+        [
+          "aa..",
+          "aa..",
+          "....",
+          "bbbb"
+        ],
+        [
+          ".aa.",
+          ".aa.",
+          "....",
+          "bbbb"
+        ],
+        [
+          "..aa",
+          "..aa",
+          "....",
+          "bbbb"
+        ],
+        [
+          "...a",
+          "...a",
+          "....",
+          "bbbb"
+        ]
+      ]
+    }
+  ]
+}

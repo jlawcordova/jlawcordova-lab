@@ -1,7 +1,7 @@
 //! Scene motion edits: tracks, keys, the duration and paths on the grid (ports cli/lib/motion-ops.mjs).
 //!
-//! A key is `{ t, move?, show?, pose? }`: move is pixels from where the scene
-//! places the item, show and pose hold from their key on. Between two keys an
+//! A key is `{ t, move?, show?, pose?, state? }`: move is pixels from where the scene
+//! places the item, show, pose and state hold from their key on (a state is entered from its first frame). Between two keys an
 //! item steps `steps_for(dx, dy)` times; it's on the grid when each step is 1 px
 //! straight, 1:1 or 2:1, so the art never lands between pixels of its lines.
 //!
@@ -17,7 +17,7 @@ use crate::errors::CommandError;
 /// Each step of an on-grid move, in absolute pixels: straight, 1:1 or 2:1.
 pub const ON_GRID: [[f64; 2]; 4] = [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [2.0, 1.0]];
 
-const KEY_ORDER: [&str; 4] = ["t", "move", "show", "pose"];
+const KEY_ORDER: [&str; 5] = ["t", "move", "show", "pose", "state"];
 
 fn err(message: impl Into<String>, code: &str) -> CommandError {
     CommandError::new(message, code)
@@ -35,7 +35,7 @@ fn tnum(key: &Value) -> f64 {
     key.get("t").and_then(Value::as_f64).unwrap_or(f64::NAN)
 }
 
-/// Rebuilds a key's props in the canonical order: t, move, show, pose.
+/// Rebuilds a key's props in the canonical order: t, move, show, pose, state.
 fn canonical_key(key: &Value) -> Value {
     let mut out = Map::new();
     for prop in KEY_ORDER {
@@ -211,6 +211,7 @@ pub struct KeyValues {
     pub move_: Option<[f64; 2]>,
     pub show: Option<bool>,
     pub pose: Option<String>,
+    pub state: Option<String>,
     pub clear: Vec<String>,
 }
 
@@ -233,8 +234,8 @@ pub fn set_key(doc: &mut Value, id: &str, t: f64, values: &KeyValues) -> Result<
     };
     let mut key = keys[idx].clone();
     for prop in &values.clear {
-        if !["move", "show", "pose"].contains(&prop.as_str()) {
-            return Err(err(format!("clear takes move, show or pose, not {prop}"), "usage"));
+        if !["move", "show", "pose", "state"].contains(&prop.as_str()) {
+            return Err(err(format!("clear takes move, show, pose or state, not {prop}"), "usage"));
         }
         if let Some(o) = key.as_object_mut() {
             o.shift_remove(prop.as_str());
@@ -249,6 +250,9 @@ pub fn set_key(doc: &mut Value, id: &str, t: f64, values: &KeyValues) -> Result<
     if let Some(p) = &values.pose {
         key["pose"] = Value::String(p.clone());
     }
+    if let Some(st) = &values.state {
+        key["state"] = Value::String(st.clone());
+    }
     keys[idx] = canonical_key(&key);
     let mut said = vec![];
     if let Some(m) = values.move_ {
@@ -260,6 +264,9 @@ pub fn set_key(doc: &mut Value, id: &str, t: f64, values: &KeyValues) -> Result<
     if let Some(p) = values.pose.as_deref().filter(|p| !p.is_empty()) {
         said.push(format!("pose {p}"));
     }
+    if let Some(st) = &values.state {
+        said.push(format!("state {st}"));
+    }
     if !values.clear.is_empty() {
         said.push(format!("cleared {}", values.clear.join(", ")));
     }
@@ -268,6 +275,22 @@ pub fn set_key(doc: &mut Value, id: &str, t: f64, values: &KeyValues) -> Result<
         "key": keys[idx].clone(),
         "message": format!("{} {id}'s key at {}{tail}", if made { "Made" } else { "Set" }, ms(t)),
     }))
+}
+
+/// Keys an item where it is at `t` (a key `{ t, move }` with the move the track gives it then), so its motion doesn't change until
+/// the key is edited. A time that already has a key is left alone. Returns `{ key, pinned, message }`; `object` is the item's own object.
+pub fn pin_key(doc: &mut Value, id: &str, object: &str, t: f64) -> Result<Value, CommandError> {
+    need_track(doc, id)?;
+    check_time(doc, t)?;
+    let track = track_of(doc, id).expect("a track");
+    if let Some(existing) = track.get("keys").and_then(Value::as_array).and_then(|k| k.iter().find(|k| tnum(k) == t)) {
+        return Ok(json!({ "key": existing.clone(), "pinned": false, "message": format!("{id} already has a key at {}", ms(t)) }));
+    }
+    let moved = motion::state_at(track, object, duration_of(doc), t).moved;
+    let r = set_key(doc, id, t, &KeyValues { move_: Some(moved), ..KeyValues::default() })?;
+    Ok(
+        json!({ "key": r["key"].clone(), "pinned": true, "message": format!("Pinned {id} at {}: move {}, {}", ms(t), s(moved[0]), s(moved[1])) }),
+    )
 }
 
 /// Moves a key to another time (not the first key, not onto another). Returns `{ key, message }`.

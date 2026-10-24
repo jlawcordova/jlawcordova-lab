@@ -9,7 +9,7 @@ use crate::context::{Ctx, DocKind};
 use crate::errors::{CommandError, Result};
 use crate::library::{category_from_param, category_of, category_within};
 use crate::registry::{Command, Params};
-use crate::render::{parse_play, render_object_image, ObjectImageOptions, MAX_SCALE};
+use crate::render::{parse_play, render_object_image_in, ObjectImageOptions, MAX_SCALE};
 
 fn name_param() -> Value {
     json!({ "type": "string", "description": "object name (or objects/<name>)" })
@@ -44,7 +44,40 @@ fn summary(sources: &Sources, name: &str) -> (Map<String, Value>, Option<engine:
     base.insert("frames".into(), json!(frames));
     base.insert("colors".into(), json!(used_colors(sources, &resolved).len()));
     base.insert("description".into(), json!(describe_object(sources, &resolved)));
+    // A sprite's states: the one it starts in, and each with how long it lasts (object.show says more).
+    if let Some(states) = &resolved.states {
+        base.insert("start".into(), json!(states.start));
+        base.insert(
+            "states".into(),
+            Value::Array(states.list.iter().map(|s| json!({ "name": s.name, "length": engine::jsnum::num(s.length()) })).collect()),
+        );
+    }
     (base, Some(resolved))
+}
+
+/// What object.show says of each state: its frames, frame length, length, how it ends and its move's keys.
+fn state_details(states: &engine::states::States) -> Vec<Value> {
+    states
+        .list
+        .iter()
+        .map(|s| {
+            let n = engine::jsnum::num;
+            let mut m = obj(vec![("name", json!(s.name)), ("frames", json!(s.frames)), ("ms", n(s.ms)), ("length", n(s.length()))]);
+            match &s.end {
+                engine::states::End::Loop => m.insert("end".into(), json!("loop")),
+                engine::states::End::Hold => m.insert("end".into(), json!("hold")),
+                engine::states::End::Then(next) => {
+                    m.insert("then".into(), json!(next));
+                    m.insert("end".into(), json!("then"))
+                }
+            };
+            let keys: Vec<Value> = s.moves.iter().map(|k| json!({ "t": n(k.t), "move": [n(k.moved[0]), n(k.moved[1])] })).collect();
+            if !keys.is_empty() {
+                m.insert("move".into(), Value::Array(keys));
+            }
+            Value::Object(m)
+        })
+        .collect()
 }
 
 fn list_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
@@ -78,7 +111,11 @@ fn list_format(r: &Value, _: &Params) -> String {
         .map(|o| {
             let what = match o.get("error") {
                 Some(e) => format!("error: {}", str_of(Some(e))),
-                None => str_of(o.get("description")),
+                None => {
+                    let states = o.get("states").and_then(Value::as_array).map_or(0, Vec::len);
+                    let more = if states > 0 { format!(" · {states} state{}", if states == 1 { "" } else { "s" }) } else { String::new() };
+                    format!("{}{more}", str_of(o.get("description")))
+                }
             };
             let ext = o.get("extends").map(|e| format!("  (extends {})", str_of(Some(e)))).unwrap_or_default();
             let cat = o.get("category").map(|c| format!("  [{}]", join(Some(c), " › "))).unwrap_or_default();
@@ -169,6 +206,9 @@ fn show_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
         out.insert("block".into(), json!({ "size": block.size, "faces": faces, "sides": sides }));
     }
     out.insert("layers".into(), Value::Array(layers));
+    if let Some(states) = &resolved.states {
+        out.insert("states".into(), Value::Array(state_details(states)));
+    }
     out.insert("keys".into(), Value::Array(keys));
     out.insert("usedColors".into(), json!(used_colors(sources, &resolved)));
     if params.get("doc").and_then(Value::as_bool).unwrap_or(false) {
@@ -228,6 +268,25 @@ fn show_format(r: &Value, _: &Params) -> String {
             if frames == 1.0 { "" } else { "s" }
         ));
     }
+    if let Some(states) = r.get("states").and_then(Value::as_array).filter(|s| !s.is_empty()) {
+        let start = str_of(r.get("start"));
+        lines.push(format!(
+            "states    {}",
+            states
+                .iter()
+                .map(|s| {
+                    let name = str_of(s.get("name"));
+                    let end = match s["end"].as_str() {
+                        Some("hold") => ", plays once".to_string(),
+                        Some("then") => format!(", plays once then {}", str_of(s.get("then"))),
+                        _ => String::new(),
+                    };
+                    format!("{name}{} ({} ms{end})", if name == start { " (start)" } else { "" }, str_of(s.get("length")))
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
     let keys = r["keys"].as_array().cloned().unwrap_or_default();
     if !keys.is_empty() {
         lines.push(format!(
@@ -251,9 +310,23 @@ fn render_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let name = ctx.find(query, Some(DocKind::Object))?.name;
     ctx.doc(DocKind::Object, &name)?;
     let loaded = ctx.sources()?;
+    // A state to be in, and `time` ms after entering it (R6): from its first frame unless a time says later.
+    let state = opt_str(&params, "state");
+    if let Some(s) = state {
+        let states = resolve(&loaded.sources, &name).ok().and_then(|r| r.states);
+        match states {
+            None => return Err(CommandError::new(format!("object {name} has no states"), "not_found").into()),
+            Some(st) if !st.has(s) => {
+                return Err(
+                    CommandError::new(format!("object {name} has no state {s} (it has {})", st.names().join(", ")), "not_found").into()
+                )
+            }
+            Some(_) => {}
+        }
+    }
     let options = ObjectImageOptions {
         scale: opt_num(&params, "scale").unwrap_or(1.0) as u32,
-        time: opt_num(&params, "time"),
+        time: opt_num(&params, "time").or(state.map(|_| 0.0)),
         frame: opt_num(&params, "frame").unwrap_or(0.0) as usize,
         layers: params.get("layers").and_then(Value::as_array).map(|l| l.iter().filter_map(Value::as_u64).map(|n| n as usize).collect()),
         play: match opt_str(&params, "play") {
@@ -261,7 +334,7 @@ fn render_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
             None => None,
         },
     };
-    let image = render_object_image(&loaded.sources, &name, &options)?;
+    let image = render_object_image_in(&loaded.sources, &name, &options, state)?;
     let mut out = obj(vec![("object", json!(name))]);
     if let Value::Object(m) = image {
         out.extend(m);
@@ -284,7 +357,7 @@ fn render_format(r: &Value, _: &Params) -> String {
 pub fn commands() -> Vec<Command> {
     let mut list = Command::new(
         "object.list",
-        "List every object with its kind, category, size, layers, frames and colors",
+        "List every object with its kind, category, size, layers, frames, colors and states",
         json!({
             "type": "object",
             "properties": {
@@ -303,7 +376,7 @@ pub fn commands() -> Vec<Command> {
 
     let mut show = Command::new(
         "object.show",
-        "Show an object's kind, category, size, anchor, footprint, layers, frames, colors and extends",
+        "Show an object's kind, category, size, anchor, footprint, layers, frames, colors, states and extends",
         json!({
             "type": "object",
             "properties": {
@@ -327,7 +400,8 @@ pub fn commands() -> Vec<Command> {
                 "name": name_param(),
                 "scale": { "type": "integer", "minimum": 1, "maximum": MAX_SCALE, "default": 1, "description": "whole-pixel zoom of the PNG" },
                 "frame": { "type": "integer", "minimum": 0, "default": 0, "description": "the frame every loop shows (loops shorter than this show nothing)" },
-                "time": { "type": "integer", "minimum": 0, "description": "ms into the loops; overrides frame" },
+                "time": { "type": "integer", "minimum": 0, "description": "ms into the loops; overrides frame. With state, ms after entering it" },
+                "state": { "type": "string", "description": "a sprite's state: shows what it shows --time ms after entering it (0 by default), the frame it has and how far it has moved" },
                 "play": super::scene::play_param(),
                 "layers": {
                     "type": "array",
@@ -341,7 +415,7 @@ pub fn commands() -> Vec<Command> {
         render_run,
     );
     render.description = Some(
-        "The anchor is at (0, 0). A sprite's viewBox is its whole map, so at scale 1 PNG pixel (x, y) is map column x, row y; a block's is the box around its pixels. Returns the same shape as scene.render, with one item. --time also places the layers' ambient loops, and --play <action>@<ms> (with --time) places the layers that have that action where it has them <ms> into it; with --time the viewBox grows to hold the moved layers (the map's box, plus what moved outside it), and viewBox says where. On the command line, --out <file.png> writes the PNG.",
+        "The anchor is at (0, 0). A sprite's viewBox is its whole map, so at scale 1 PNG pixel (x, y) is map column x, row y; a block's is the box around its pixels. Returns the same shape as scene.render, with one item. A sprite with states shows the one it starts in --time ms after time 0, or --state's from its first frame, and the item says its state and frame. --time also places the layers' ambient loops, and --play <action>@<ms> (with --time) places the layers that have that action where it has them <ms> into it; with --time the viewBox grows to hold the moved layers (the map's box, plus what moved outside it), and viewBox says where. On the command line, --out <file.png> writes the PNG.",
     );
     render.args = vec!["name"];
     render.writes_png = true;

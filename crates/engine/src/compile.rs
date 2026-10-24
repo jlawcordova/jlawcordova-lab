@@ -692,6 +692,8 @@ pub struct SceneSizes {
     pub gzip: u64,
     pub objects: OMap<String, ObjectCost>,
     pub colors: OMap<String, Cost>,
+    /// What the rules that play the scene's sprites with states take, on their own: None when it has none.
+    pub states: Option<Cost>,
 }
 
 /// What each object and color costs in a compiled scene (`sceneSizes`).
@@ -756,7 +758,9 @@ pub fn scene_sizes(sources: &Sources, name: &str) -> Result<SceneSizes> {
         let key = format!("{} {hex}", names.get(hex).map_or("?", String::as_str));
         colors.set(key, Cost { raw: raw as i64 - less.len() as i64, gzip: gz as i64 - less_gz });
     }
-    Ok(SceneSizes { raw, gzip: gz, objects, colors })
+    let css = crate::engine::states_css(sources, name)?;
+    let states = (!css.is_empty()).then(|| Cost { raw: css.len() as i64, gzip: gzip(css.as_bytes()).len() as i64 });
+    Ok(SceneSizes { raw, gzip: gz, objects, colors, states })
 }
 
 /// The output without the paths of one color: what

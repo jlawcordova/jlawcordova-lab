@@ -14,6 +14,7 @@ pub mod library;
 pub mod migrate;
 pub mod object;
 pub mod object_edit;
+pub mod object_states;
 pub mod palette;
 pub mod scene;
 pub mod scene_edit;

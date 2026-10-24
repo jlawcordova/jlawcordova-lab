@@ -1,0 +1,31 @@
+{
+  "output": "states.svg",
+  "viewBox": [-32, -32, 128, 96],
+  "items": [
+    { "object": "block", "at": { "tile": [0, 0, 0] } },
+    { "object": "walker", "id": "walker-a", "at": { "tile": [0, 0, 1] } },
+    { "object": "walker", "state": "walk", "at": { "tile": [1, 0, 0] } },
+    {
+      "group": { "class": "zone", "data-zone": "a" },
+      "items": [
+        { "object": "lamp", "id": "lamp-a", "at": { "tile": [0, 1, 0] } },
+        { "object": "walker", "at": { "tile": [3, 0, 0] } }
+      ]
+    },
+    { "object": "lamp", "id": "lamp-b", "at": { "tile": [1, 1, 0] } },
+    { "object": "pebble", "at": { "tile": [2, 0, 0] } }
+  ],
+  "motion": {
+    "duration": 3000,
+    "tracks": [
+      {
+        "item": "lamp-b",
+        "keys": [
+          { "t": 0 },
+          { "t": 1000, "state": "flicker" },
+          { "t": 2000, "state": "idle" }
+        ]
+      }
+    ]
+  }
+}

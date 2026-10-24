@@ -13,14 +13,14 @@ use std::rc::Rc;
 
 use engine::depth::Bounds;
 use engine::engine::{
-    self as eng, composite, js_string, origin_of, render_object, render_scene, resolve, scene_at, truthy, Child, ColorName,
+    self as eng, composite, js_string, origin_of, render_object_in, render_scene, resolve, scene_at, truthy, Child, ColorName,
     CompositeOptions, Group, Order, Sources, SpriteLayer,
 };
 use engine::iso::{self, Pixel};
 use engine::jsnum::{as_f64, num};
 use engine::omap::{OMap, OSet};
 use engine::png::Image;
-use engine::{edit, motion, preview};
+use engine::{edit, motion, preview, states};
 use serde_json::{Map, Value};
 
 use crate::errors::{CommandError, Error, Result};
@@ -206,7 +206,7 @@ pub fn flatten_items(scene: &Value) -> Value {
                 let level = item.pointer("/at/level").filter(|v| !v.is_null()).cloned().unwrap_or_else(|| Value::from(0));
                 o.insert("level".into(), level);
             }
-            for key in ["depth", "class", "id", "layer"] {
+            for key in ["depth", "class", "id", "layer", "state"] {
                 if let Some(v) = item.get(key) {
                     o.insert(key.into(), v.clone());
                 }
@@ -401,8 +401,9 @@ fn object_pixels(
     time: Option<f64>,
     frame: usize,
     play: Option<(String, f64)>,
+    state: Option<&str>,
 ) -> eng_result::Result<(OMap<Pixel, ColorName>, Option<Bounds>)> {
-    let tree = render_object(sources, name)?;
+    let tree = render_object_in(sources, name, state)?;
     let pixels = composite(&tree, CompositeOptions { first_variant: false, frame, time, play });
     let box_ = eng::bounds(pixels.keys());
     Ok((pixels, box_))
@@ -587,16 +588,28 @@ fn inner_scene_image(
         None => None,
     };
     let mut arts: HashMap<String, Option<Bounds>> = HashMap::new();
+    let mut state_cache: HashMap<String, Option<Rc<states::States>>> = HashMap::new();
     let mut items: Vec<Value> = Vec::new();
     for Leaf { path, item } in leaves.iter().filter(|l| !truthy(l.item.get("hidden"))) {
         let source = original(scene, path).ok_or_else(|| "Cannot read properties of undefined".to_string())?;
         let [x, y] = placement_point(item, origin);
         let object = js_string(item.get("object"));
-        let art = match arts.get(&object) {
+        // A sprite with states is in the state the item is in, entered `since` ms before time 0 (R15), so its box is
+        // the one that state shows now: the frame and the move.
+        let states = state_cache.entry(object.clone()).or_insert_with(|| resolve(sources, &object).ok().and_then(|r| r.states)).clone();
+        let stated = states.as_ref().map(|states| {
+            let name = states.first(item.get("state").and_then(Value::as_str)).name.clone();
+            (states.clone(), name, item.get("since").and_then(as_f64).unwrap_or(0.0))
+        });
+        let (key, state, at) = match &stated {
+            Some((_, name, since)) => (format!("{object} {name} {since}"), Some(name.as_str()), time - since),
+            None => (object.clone(), None, time),
+        };
+        let art = match arts.get(&key) {
             Some(b) => *b,
             None => {
-                let (_, b) = object_pixels(sources, &object, Some(time), 0, None).map_err(e)?;
-                arts.insert(object.clone(), b);
+                let (_, b) = object_pixels(sources, &object, Some(at), 0, None, state).map_err(e)?;
+                arts.insert(key, b);
                 b
             }
         };
@@ -622,6 +635,12 @@ fn inner_scene_image(
         }
         if let Some(v) = source.get("id") {
             o.insert("id".into(), v.clone());
+        }
+        // A sprite with states says which state it is in and which frame that shows at this time (R15).
+        if let Some((states, name, since)) = stated {
+            let frame = states::at(&states, &states::run(&states, &name), time - since).frame;
+            o.insert("state".into(), Value::String(name));
+            o.insert("frame".into(), Value::from(frame));
         }
         o.insert("bounds".into(), to_output(shifted, view, scale));
         items.push(Value::Object(o));
@@ -694,6 +713,12 @@ impl Default for ObjectImageOptions {
 /// is its whole map, so output pixel (x, y) at 1x is map column x, row y; a
 /// block's is the box around its painted pixels.
 pub fn render_object_image(sources: &Sources, name: &str, options: &ObjectImageOptions) -> Result<Value> {
+    render_object_image_in(sources, name, options, None)
+}
+
+/// `render_object_image` with a sprite that has states in `state` (its start state when None): a
+/// `time` is then ms after entering it, and the item says which state and frame it shows (R6).
+pub fn render_object_image_in(sources: &Sources, name: &str, options: &ObjectImageOptions, state: Option<&str>) -> Result<Value> {
     if let Some((action, _)) = &options.play {
         if options.time.is_none() {
             return Err(CommandError::usage("--play needs --time: the action plays over the loops at that time").into());
@@ -709,16 +734,21 @@ pub fn render_object_image(sources: &Sources, name: &str, options: &ObjectImageO
             .into());
         }
     }
-    inner_object_image(sources, name, options).map_err(|m| render_error("object", name, &m))
+    inner_object_image(sources, name, options, state).map_err(|m| render_error("object", name, &m))
 }
 
-fn inner_object_image(sources: &Sources, name: &str, options: &ObjectImageOptions) -> std::result::Result<Value, String> {
+fn inner_object_image(
+    sources: &Sources,
+    name: &str,
+    options: &ObjectImageOptions,
+    state: Option<&str>,
+) -> std::result::Result<Value, String> {
     let ObjectImageOptions { scale, time, frame, layers, play } = options;
     let (scale, frame) = (*scale, *frame);
     let resolved = resolve(sources, name).map_err(|e| e.0)?;
     let (pixels, b) = match layers {
         Some(layers) if resolved.block.is_none() => layer_pixels(&resolved, layers, frame),
-        _ => object_pixels(sources, name, *time, frame, play.clone()).map_err(|e| e.0)?,
+        _ => object_pixels(sources, name, *time, frame, play.clone(), state).map_err(|e| e.0)?,
     };
     let view: [i64; 4] = if resolved.block.is_none() {
         let map = [-resolved.anchor[0], -resolved.anchor[1], resolved.width, resolved.height];
@@ -755,6 +785,16 @@ fn inner_object_image(sources: &Sources, name: &str, options: &ObjectImageOption
     let mut at = Map::new();
     at.insert("px".into(), Value::Array(vec![Value::from(0), Value::from(0)]));
     item.insert("at".into(), Value::Object(at));
+    // A sprite with states says which state it shows and which frame that has at this time (R6).
+    if let Some(states) = &resolved.states {
+        let name = states.first(state).name.clone();
+        let shown = match time {
+            Some(t) => states::at(states, &states::run(states, &name), *t).frame,
+            None => frame,
+        };
+        item.insert("state".into(), Value::String(name));
+        item.insert("frame".into(), Value::from(shown));
+    }
     item.insert("bounds".into(), to_output(b, view, scale));
     out.insert("items".into(), Value::Array(vec![Value::Object(item)]));
     Ok(Value::Object(out))

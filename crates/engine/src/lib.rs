@@ -31,6 +31,7 @@ pub mod preview;
 pub mod serialize;
 pub mod sha256;
 pub mod starter;
+pub mod states;
 pub mod svg;
 
 use std::fmt;

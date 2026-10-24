@@ -1,0 +1,35 @@
+{
+  "kind": "sprite",
+  "anchor": [2, 3],
+  "keys": {
+    "a": "grass-4",
+    "b": "grass-2",
+    "c": "ink"
+  },
+  "layers": [
+    {
+      "loop": "tf",
+      "prefix": "t",
+      "frames": [
+        [
+          "ab.a",
+          "b.ab",
+          ".ab.",
+          "ab.a"
+        ],
+        [
+          "b.ab",
+          ".ab.",
+          "ab.a",
+          "b.ab"
+        ],
+        [
+          ".ab.",
+          "ab.a",
+          "b.ab",
+          ".ab."
+        ]
+      ]
+    }
+  ]
+}
