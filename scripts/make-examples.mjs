@@ -23,6 +23,11 @@
 // coast.pixellib    the harbor's objects, exported by `library export` (an object library).
 // coast.pixelpal    the harbor's palette, exported by `palette export` (a palette file).
 //
+// Both documents have objects with states (docs/intents/2026-10-object-states/spec.md, D7), made with the
+// program like everything else: the lamp has a dim frame, a steady `idle` and a one-shot `flicker` that
+// hands back to `idle`; the harbor's boat rocks a pixel in `idle`, made from an ambient loop by
+// `object states make`; and the town keys a lamp's state, so it flickers once a loop.
+//
 // Both documents' objects have categories (CATEGORIES), set with `object category`. The town
 // differs from the harbor in three small ways that never show in its scene (an unplaced rock of
 // its own, no gold-4, a bluer water-3), so importing coast.pixellib or coast.pixelpal into it
@@ -190,6 +195,26 @@ const TOWN_PALETTE = (/** @type {any} */ palette) => {
   delete palette.world['gold-4'];
   palette.world['water-3'] = '#4F7F9A';
 };
+
+/**
+ * What the program does to the lamp after it is written: a second frame with the glow dimmed, then its states.
+ * `object animate` makes the one still layer a frame loop of four copies; two are taken off.
+ */
+const LAMP_STATES = [
+  ['object', 'animate', 'lamp'],
+  ['object', 'paint', 'lamp', '1,1', '2,1', '3,1', '1,2', '3,2', '--color', 'gold-2', '--layer', '0', '--frame', '1'],
+  ['object', 'paint', 'lamp', '2,2', '--color', 'wood-3', '--layer', '0', '--frame', '1'],
+  ['object', 'frame', 'delete', 'lamp', '--layer', '0', '--frame', '3'],
+  ['object', 'frame', 'delete', 'lamp', '--layer', '0', '--frame', '2'],
+  ['object', 'state', 'add', 'lamp', 'idle', '--frames', '0', '--ms', '1000'],
+  ['object', 'state', 'add', 'lamp', 'flicker', '--frames', '0,1,0,1,0', '--ms', '90', '--once', '--then', 'idle'],
+];
+
+/** The boat rocks a pixel on its layer (an ambient loop), then `object states make` turns that into its `idle`. */
+const BOAT_STATES = [
+  ['object', 'ambient', 'boat', '0', '--duration', '2400', '--keys', JSON.stringify([{ t: 0, move: [0, 0] }, { t: 1200, move: [0, 1] }])],
+  ['object', 'states', 'make', 'boat'],
+];
 
 // ------------------------------------------------------------------- scenes
 
@@ -360,7 +385,13 @@ function town() {
     places.push({ object: 'lamp', tile: [k, 7, 0] });
     places.push({ object: 'lamp', tile: [8, k, 0] });
   }
-  return { scenes: [{ name: 'town', output: 'town.svg', viewBox: [-264, -56, 528, 336], places, layers, finish: () => {} }] };
+  /** A lamp flickers once a loop: its track keys the state `flicker` at 3 s, and the lamp's own `idle` takes over again after. */
+  const finish = (/** @type {(...a: string[]) => string} */ run, /** @type {string} */ scene) => {
+    const lamp = JSON.parse(run('scene', 'items', scene, '--json')).items.find((/** @type {any} */ i) => i.object === 'lamp');
+    run('scene', 'track', 'add', scene, lamp.path, '--duration', '6000');
+    run('scene', 'key', 'set', scene, 'lamp', '--time', '3000', '--state', 'flicker');
+  };
+  return { scenes: [{ name: 'town', output: 'town.svg', viewBox: [-264, -56, 528, 336], places, layers, finish }] };
 }
 
 // ---------------------------------------------------------------- documents
@@ -374,11 +405,13 @@ export function examples() {
         name: 'harbor',
         publish: { budgets: { 'harbor.svg': { raw: 131072, gzip: 32768 }, 'harbor-flat.svg': { raw: 131072, gzip: 32768 } } },
       },
+      objectSteps: [...LAMP_STATES, ...BOAT_STATES],
       objects: ['grass', 'sand', 'path', 'water', 'dock', 'walls', 'roof-red', 'roof-wood', 'hall-walls', 'hall-roof', 'tree', 'pine', 'rock', 'barrel', 'lamp', 'flowers', 'boat'],
       ...harbor(),
     },
     town: {
       manifest: { format: 2, name: 'town', publish: { budgets: { 'town.svg': { raw: 409600, gzip: 81920 } } } },
+      objectSteps: LAMP_STATES,
       objects: ['grass', 'path', 'walls', 'roof-red', 'roof-wood', 'tree', 'pine', 'lamp'],
       own: OWN_OBJECTS.town,
       palette: TOWN_PALETTE,
@@ -449,6 +482,7 @@ export async function writeExamples(out) {
       if (c) byCategory.set(c, [...(byCategory.get(c) ?? []), o]);
     }
     for (const [category, names] of byCategory) run('object', 'category', ...names, '--to', category);
+    for (const args of /** @type {any} */ (ex).objectSteps ?? []) run(...args);
     for (const scene of ex.scenes) {
       await writeFile(join(root, 'scenes', `${scene.name}.json`), sceneText(scene));
       for (const p of inFirstOrder(scene.places)) {

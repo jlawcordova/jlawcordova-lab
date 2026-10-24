@@ -29,5 +29,9 @@
         ".....dddddddddd....."
       ]
     }
-  ]
+  ],
+  "start": "idle",
+  "states": {
+    "idle": { "frames": [0], "ms": 2400, "move": [{ "t": 0, "move": [0, 0] }, { "t": 1200, "move": [0, 1] }] }
+  }
 }

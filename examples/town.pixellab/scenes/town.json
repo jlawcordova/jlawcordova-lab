@@ -132,7 +132,7 @@
     { "object": "path", "layer": "town-paths", "at": { "tile": [0, 8, 0] } },
     { "object": "tree", "layer": "nw-trees", "at": { "tile": [6, 2, 0] } },
     { "object": "pine", "layer": "nw-trees", "at": { "tile": [2, 6, 0] } },
-    { "object": "lamp", "at": { "tile": [1, 7, 0] } },
+    { "object": "lamp", "id": "lamp", "at": { "tile": [1, 7, 0] } },
     { "object": "walls", "layer": "nw-street-2-house-3", "at": { "tile": [5, 3, 1] } },
     { "object": "walls", "layer": "nw-street-3-house-2", "at": { "tile": [3, 5, 1] } },
     { "object": "roof-red", "layer": "nw-street-2-house-3", "at": { "tile": [5, 3, 2] } },
@@ -443,5 +443,17 @@
     { "object": "grass", "layer": "town-grass", "at": { "tile": [14, 15, 0] } },
     { "object": "tree", "layer": "se-trees", "at": { "tile": [15, 14, 0] } },
     { "object": "grass", "layer": "town-grass", "at": { "tile": [15, 15, 0] } }
-  ]
+  ],
+  "motion": {
+    "duration": 6000,
+    "tracks": [
+      {
+        "item": "lamp",
+        "keys": [
+          { "t": 0 },
+          { "t": 3000, "state": "flicker" }
+        ]
+      }
+    ]
+  }
 }

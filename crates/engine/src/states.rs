@@ -797,13 +797,12 @@ pub fn css(scope: &str, items: &[Rc<ItemStates>]) -> Css {
             }
             // Every frame group and the element are set under each state, so one state's animations never carry into another's.
             let mut stopped: Vec<String> = Vec::new();
-            for k in 0..count.max(1) {
-                if count <= 1 {
-                    break;
-                }
-                match &a.frames[k] {
-                    Some(value) => play.push(format!("{}{{animation:{value}}}", selectors(&at, s, &group(k)))),
-                    None => stopped.push(selectors(&at, s, &group(k))),
+            if count > 1 {
+                for (k, frame) in a.frames.iter().enumerate() {
+                    match frame {
+                        Some(value) => play.push(format!("{}{{animation:{value}}}", selectors(&at, s, &group(k)))),
+                        None => stopped.push(selectors(&at, s, &group(k))),
+                    }
                 }
             }
             if !stopped.is_empty() {
@@ -819,9 +818,9 @@ pub fn css(scope: &str, items: &[Rc<ItemStates>]) -> Css {
         // With no attribute, an item plays the state it starts in.
         if let Some(index) = item.states.index_of(&item.start) {
             let a = &animations[index];
-            for k in 0..count {
-                if count > 1 {
-                    if let Some(value) = &a.frames[k] {
+            if count > 1 {
+                for (k, frame) in a.frames.iter().enumerate() {
+                    if let Some(value) = frame {
                         play.push(format!("{at} .{}{{animation:{value}}}", group(k)));
                     }
                 }

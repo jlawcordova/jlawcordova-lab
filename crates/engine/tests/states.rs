@@ -470,3 +470,21 @@ fn r6_the_same_run_every_time_and_changes_lists_when_the_frame_or_the_move_chang
     let dead = changes(&s, &run(&s, "dead"), None);
     assert_eq!(dead.iter().map(|c| (c.t, c.frame)).collect::<Vec<_>>(), [(0.0, 1), (100.0, 2)]);
 }
+
+// ------------------------------------------------------------- R9: one name, one thing
+
+#[test]
+fn r9_a_one_shot_state_and_an_action_of_one_name_in_a_scene_is_a_problem() {
+    // A one-shot state ends with an animation named <scene>--<state>, which is what an action's keyframes are called.
+    let found = problems(|d| {
+        d.scenes.get_mut("states").unwrap()["items"][5]["actions"] =
+            json!({ "hop": { "duration": 200, "keys": [{ "t": 0, "move": [0, -1] }] } });
+    });
+    one(&found, "walker's state 'hop' plays once and ends as <scene>--hop, which is also the action 'hop' on items[5]");
+    // A looping state of that name is no clash, and neither is an action of another name.
+    let found = problems(|d| {
+        d.scenes.get_mut("states").unwrap()["items"][5]["actions"] =
+            json!({ "walk": { "duration": 200, "keys": [{ "t": 0, "move": [0, -1] }] } });
+    });
+    assert_eq!(found, Vec::<String>::new());
+}

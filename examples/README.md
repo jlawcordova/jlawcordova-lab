@@ -4,8 +4,8 @@ Two small `.pixellab` documents with scene layers, to try the app on and to test
 
 | Document | Scenes | What it has |
 | --- | --- | --- |
-| `harbor.pixellab` | `harbor`, `harbor-flat` | An 8×8 island: 89 items in 16 layers up to three deep, the site's `{ group }` wrappers around every tile and object, two rocks in no layer, an animated boat that hops (the `hop` action), and a barrel on the dock that bobs (an ambient loop). `harbor-flat` is the same scene with no layers, and publishes the same SVG (apart from the scene name its generated class and keyframe names are scoped by). |
-| `town.pixellab` | `town` | A 16×16 island: 379 items in 59 layers four deep (district › street › house), with eight lamps in no layer. |
+| `harbor.pixellab` | `harbor`, `harbor-flat` | An 8×8 island: 89 items in 16 layers up to three deep, the site's `{ group }` wrappers around every tile and object, two rocks in no layer, an animated boat that hops (the `hop` action) and rocks (its `idle` state, made from an ambient loop by `object states make`), a barrel on the dock that bobs (an ambient loop), and lamps with states (a steady `idle` and a one-shot `flicker` that hands back to it; a lamp's dim frame is its second). `harbor-flat` is the same scene with no layers, and publishes the same SVG (apart from the scene name its generated class and keyframe names are scoped by). |
+| `town.pixellab` | `town` | A 16×16 island: 379 items in 59 layers four deep (district › street › house), with eight lamps in no layer, one of which flickers once a loop: its motion track keys the state `flicker` at 3 s. |
 
 Their objects have categories (Terrain, Nature › Trees, Buildings › Roofs, Harbor, Props, and so on; the harbor's barrel has none, so the Library shows an Others tab), and two files beside them show the new file kinds:
 

@@ -328,4 +328,23 @@ main ── (PR #58: spec and plan) ── feat/object-states ──────
 
 ## Departures
 
-None yet.
+What PR 1 built differently from the plan above (steps 1 to 6):
+
+- **`object.state.run` came in step 4,** not step 5: the browser check reads the run through it. Its result is `{ object, state, segments: [{ state, from, to }], settle, changes: [{ t, frame, move: [x, y] }] }`, where `settle` is `{ kind: "loop", from, period }` or `{ kind: "hold", from, frame, move }`. A hold's `from` is when its last state has played all its frames (its length), with its move held at its last key.
+- **Frames.** Every frame of the sprite is drawn as a group, not only the ones a state plays, so a frame no state uses yet (one just added, before a state plays it) still renders for `--frame`. A sprite with one frame draws no frame groups and puts its layers straight in the element.
+- **The CSS** differs from D2's text in how it is written, not in what it plays:
+  - A state's move is written as one stop for each pixel step, in a keyframes with `step-end`, from `changes`. It isn't built with `ambient`'s `frames()` (its `steps(n,end)` stops can't hold a hand-over's several states in one keyframes). `ambient::runs` and `at_percent` are `pub(crate)` so `states.rs` steps moves as an action does, and the run compares in ms (a step at `length × percent ÷ 100`, so 44 ms of 480 is 44.0016 ms, as the CSS rounds it).
+  - Each frame has two keyframes for a state, one for the finite part and one (`…-l`) for the settle loop, not one shared.
+  - A one-shot state's end animation lasts the state's length for a `then`, and until its last frame starts for a hold, and at least 1 ms.
+  - Percent stops are written never later than the time they stand for (floored to 3 decimals), so a whole-ms render agrees with the CSS.
+  - A scene validation was added (R9): a one-shot state and an action of the same name in one scene is a problem, since both are `<scene>--<name>`.
+- **A keyed item's reduced-motion frame** is the first frame of its baked track (its state at time 0). R14 says the settle frame, which a scene's track has no single one of.
+- **`Filled` is unchanged.** The state timeline (`states::timeline`) is built from the track's keys and the objects' states, and the pose-change rule of choice 3 lives there.
+- **Render API.** `CompositeOptions` and `ObjectImageOptions` didn't change shape. A sprite is rendered in a state with `render_object_in` and `render_object_image_in`; a scene render marks a keyed item with the `state` it is in and `since` (private to the render), and `composite` reads them.
+- **R16's frame-for-frame test** is in `crates/engine/tests/states_css.rs`, which plays the compiled CSS with a small player and compares every pixel with `scene render` at every 50 or 100 ms (including a hand-over between poses). `state_render.rs` holds the render tests (object at a state and time, scene placing states). R3's goldens are `crates/engine/tests/data/states-r3/` (the sample, the examples as they were, and a frames document with loops, ambient, actions and poses).
+- **R17's warning** (`scene_owns_state`) fires only for a group that carries `data-state` or `data-play` itself and holds a keyed item. The spec's guess (any group with a `data-*` attribute) would fire on every item inside the site's `data-enter` wrappers.
+- **`scene.key.set --state clear` and `scene.set --state start`** are words, so `clear` and `start` can't be state names (`object.state.add` and `--rename` refuse them).
+- **`art sizes`' states line** is the bytes of the rules that play the states, as a `states` entry (raw and gzip, with HEAD's) and a table of its own. The objects' costs still include them.
+- **`object.frame.*` on a sprite with states** ignores `--layer` and acts on the column. `object.animate` on a layer of one makes a loop of the same length as the others, and `object.still` on its last frame loop keeps the frame the states renumber to 0.
+- **Files.** `crates/pixellab/src/commands/object_states.rs` has `object.state.run` from step 4 and the rest from step 5. `scripts/test/states-fixture.mjs` is shared by the two Node tests. `crates/pixellab/src/scene_ops.rs` keeps an item's `state` when its id or class changes. The fixture's scene has a `{ group }` with a `data-zone`, for the browser check of a switch on a group. `crates/engine/tests/data/frame-goldens.txt` has the harbor's and town's new SVG hashes (their previews are unchanged). `examples/README.md` and `docs/contributing.md` (Node's one package) say what changed.
+- **The browser check on this Mac.** WebKit and Chromium pass. Playwright's Firefox (1543, Firefox 155) won't start here: it exits with "Could not find profile folder", even for `-CreateProfile` run by hand, so it isn't verified locally. `PIXELLAB_BROWSERS=chromium,webkit` limits a run (CI never sets it); otherwise a browser that can't start fails with a message naming `npx playwright install`.

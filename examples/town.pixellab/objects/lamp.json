@@ -7,28 +7,56 @@
   "keys": {
     "g": "gold-1",
     "h": "gold-2",
-    "i": "ink"
+    "i": "ink",
+    "w": "wood-3"
   },
   "layers": [
     {
-      "map": [
-        ".iii.",
-        "igggi",
-        "ighgi",
-        "iiiii",
-        "..i..",
-        "..i..",
-        "..i..",
-        "..i..",
-        "..i..",
-        "..i..",
-        "..i..",
-        "..i..",
-        "..i..",
-        "..i..",
-        ".iii.",
-        "iiiii"
+      "loop": "ff",
+      "prefix": "f",
+      "frames": [
+        [
+          ".iii.",
+          "igggi",
+          "ighgi",
+          "iiiii",
+          "..i..",
+          "..i..",
+          "..i..",
+          "..i..",
+          "..i..",
+          "..i..",
+          "..i..",
+          "..i..",
+          "..i..",
+          "..i..",
+          ".iii.",
+          "iiiii"
+        ],
+        [
+          ".iii.",
+          "ihhhi",
+          "ihwhi",
+          "iiiii",
+          "..i..",
+          "..i..",
+          "..i..",
+          "..i..",
+          "..i..",
+          "..i..",
+          "..i..",
+          "..i..",
+          "..i..",
+          "..i..",
+          ".iii.",
+          "iiiii"
+        ]
       ]
     }
-  ]
+  ],
+  "start": "idle",
+  "states": {
+    "idle": { "frames": [0], "ms": 1000 },
+    "flicker": { "frames": [0, 1, 0, 1, 0], "ms": 90, "loop": false, "then": "idle" }
+  }
 }

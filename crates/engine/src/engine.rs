@@ -1078,6 +1078,32 @@ fn validate_scene_moves(sources: &Sources, scene: &Value, items: &[Value], add: 
         }
     }
     walk(sources, items, "items", &tracked, &mut note, add);
+    // A one-shot state ends with an animation named <scene>--<state> (R12), the name an action's keyframes have: one name is
+    // one thing in a scene.
+    let mut stated: Vec<String> = Vec::new();
+    fn objects(list: &[Value], out: &mut Vec<String>) {
+        for item in list {
+            if item.get("group").is_some() {
+                objects(item.get("items").and_then(Value::as_array).map_or(&[][..], |v| v.as_slice()), out);
+            } else if let Some(o) = item.get("object").and_then(Value::as_str) {
+                if !out.iter().any(|x| x == o) {
+                    out.push(o.to_string());
+                }
+            }
+        }
+    }
+    objects(items, &mut stated);
+    for object in stated {
+        let Some(states) = resolve(sources, &object).ok().and_then(|r| r.states) else { continue };
+        for state in states.list.iter().filter(|s| s.plays_once()) {
+            if let Some((_, _, at)) = actions.iter().find(|(n, _, _)| *n == state.name) {
+                add(format!(
+                    "{object}'s state '{}' plays once and ends as <scene>--{}, which is also the action '{}' on {at}; one name is one thing in a scene, so rename one of them",
+                    state.name, state.name, state.name
+                ));
+            }
+        }
+    }
 }
 
 /// `^(.+)-z(\d+)$`.
