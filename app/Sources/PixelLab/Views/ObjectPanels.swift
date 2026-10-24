@@ -375,6 +375,8 @@ struct FramesSection: View {
 /// the size fields for a sprite with layers of its own.
 struct ObjectFactsSection: View {
     var objects: ObjectEditor
+    @Environment(AppModel.self) private var model
+    @FocusState private var categoryFocused: Bool
 
     var body: some View {
         InspectorSection("Object") {
@@ -387,6 +389,7 @@ struct ObjectFactsSection: View {
                     fact("Colors", "\(info.usedColors.count) of \(ObjectEditor.colorCap)")
                     fact("Layers", "\(info.layers.count) · \(info.frames) frame\(info.frames == 1 ? "" : "s")")
                 }
+                categoryRow
                 if objects.editable {
                     HStack(spacing: 6) {
                         sizeField("Width", text: Binding(get: { objects.widthDraft }, set: { objects.widthDraft = $0 }))
@@ -404,6 +407,73 @@ struct ObjectFactsSection: View {
                 }
             }
         }
+    }
+
+    /// CATEGORY (docs/intents/2026-10-object-libraries/spec.md, R4, D8): a path typed with › or /, and a menu of the
+    /// document's categories. Return or leaving the field sets it, Esc puts it back, and a name that breaks R2
+    /// shows why under the field and isn't set.
+    private var categoryRow: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Category").font(.caption).foregroundStyle(Theme.inkMuted)
+            HStack(spacing: 4) {
+                TextField("None", text: Binding(get: { objects.categoryDraft }, set: { objects.categoryDraft = $0; objects.categoryError = nil }))
+                    .textFieldStyle(.plain)
+                    .font(Theme.monoFont(12))
+                    .foregroundStyle(Theme.ink)
+                    .focused($categoryFocused)
+                    .onSubmit { Task { await objects.setCategory(typed: objects.categoryDraft) } }
+                    .onKeyPress(.escape) {
+                        guard categoryFocused else { return .ignored }
+                        objects.revertCategory()
+                        return .handled
+                    }
+                    .onChange(of: categoryFocused) { _, focused in
+                        objects.categoryEditing = focused
+                        if !focused, objects.categoryDraft != objects.categoryText, objects.categoryError == nil {
+                            Task { await objects.setCategory(typed: objects.categoryDraft) }
+                        }
+                    }
+                    .accessibilityLabel("Category")
+                    .accessibilityValue(objects.info?.category?.joined(separator: ", ") ?? "None")
+                Menu {
+                    Button("None") {
+                        objects.categoryDraft = ""
+                        Task { await objects.setCategory(typed: "") }
+                    }
+                    Divider()
+                    ForEach(LibraryCategories.categories(model.objects), id: \.self) { path in
+                        Button(LibraryCategories.text(path)) {
+                            objects.categoryDraft = LibraryCategories.text(path)
+                            Task { await objects.setCategory(typed: objects.categoryDraft) }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "chevron.up.chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.inkMuted)
+                        .frame(width: 22, height: 22)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Pick one of the document's categories, or None")
+                .accessibilityLabel("Categories")
+            }
+            .padding(.leading, 7)
+            .frame(height: 26)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(categoryFocused ? Theme.accent : (objects.categoryError != nil ? Theme.gold : .clear), lineWidth: 1))
+            if let why = objects.categoryError {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Image(systemName: "exclamationmark.triangle.fill").font(.caption2).foregroundStyle(Theme.gold)
+                    Text(why).font(.caption).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Category can't be set: \(why)")
+            } else {
+                Text("Groups the object under a tab in the Library. Type a path with › or /.")
+                    .font(.caption).foregroundStyle(Theme.inkMuted).lineLimit(2)
+            }
+        }
+        .padding(.top, 4)
     }
 
     private func fact(_ term: String, _ value: String) -> some View {

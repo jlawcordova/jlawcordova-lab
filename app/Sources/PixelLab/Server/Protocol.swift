@@ -227,6 +227,8 @@ struct ObjectSummary: Codable, Sendable, Identifiable, Hashable {
     var frames: Int
     var colors: Int
     var description: String?
+    /// The object's category, outermost name first (docs/intents/2026-10-object-libraries/spec.md, R1); nil: none.
+    var category: [String]?
     var id: String { name }
 }
 
@@ -626,6 +628,8 @@ struct ObjectShowResult: Codable, Sendable {
     /// nil for a block, whose size is its footprint.
     var footprint: [Int]?
     var character: Bool?
+    /// The object's category (R1), outermost first.
+    var category: [String]?
     /// The hex values the object paints (the colors meter counts them).
     var usedColors: [String]
     /// The object's source (`object.show --doc`): its layers' ambient loops and actions.
@@ -691,4 +695,145 @@ struct ArtOutput: Codable, Sendable, Equatable {
         over = try c.decodeIfPresent(Bool.self, forKey: .over) ?? false
         report = try c.decodeIfPresent(String.self, forKey: .report) ?? "\(String(format: "%.1f", Double(raw) / 1024)) KB \(kind.uppercased()) image"
     }
+}
+
+
+// MARK: Object libraries and palette files (docs/intents/2026-10-object-libraries/spec.md, D5, D6)
+
+/// A color with its nearest same-tier neighbour in the document.
+struct NearestColor: Codable, Sendable, Hashable {
+    var name: String
+    var hex: String
+}
+
+/// `library.import`'s plan (its `dryRun` result, and the `details` of every refusal), and, once applied,
+/// what it did (`changed`, `imported`, `version`, `summary`).
+struct LibraryPlan: Codable, Sendable {
+    struct Source: Codable, Sendable, Hashable {
+        var path: String
+        var name: String
+        var exportedFrom: String?
+    }
+    /// An object of the library: `fate` is new, renamed, same or character.
+    struct Item: Codable, Sendable, Hashable, Identifiable {
+        var name: String
+        var `as`: String
+        var fate: String
+        var kind: String
+        var category: [String]?
+        var id: String { name }
+    }
+    struct Rename: Codable, Sendable, Hashable {
+        var from: String
+        var to: String
+    }
+    struct Differing: Codable, Sendable, Hashable, Identifiable {
+        var name: String
+        var tier: String
+        var library: String
+        var document: String
+        var id: String { name }
+    }
+    struct Character: Codable, Sendable, Hashable {
+        var swapped: Bool
+        var figures: [String]
+    }
+    struct Missing: Codable, Sendable, Hashable, Identifiable {
+        var name: String
+        var tier: String
+        var hex: String
+        var nearest: NearestColor?
+        var usedBy: [String]
+        var id: String { name }
+    }
+    var library: Source
+    var objects: [Item]
+    var count: Int
+    var renames: [Rename]
+    var same: [String]
+    var differing: [Differing]
+    var character: Character
+    var missing: [Missing]
+    var needsAcceptDifferences: Bool
+    var ready: Bool
+    // Once applied:
+    var changed: Bool?
+    var imported: [String]?
+    var version: Int?
+    var summary: String?
+}
+
+/// `palette.import`'s plan (its `dryRun` result, and a refusal's `details`), and once applied what it did.
+struct PalettePlan: Codable, Sendable {
+    struct Source: Codable, Sendable, Hashable {
+        var path: String
+        var name: String
+    }
+    struct NewColor: Codable, Sendable, Hashable, Identifiable {
+        var name: String
+        var tier: String
+        var hex: String
+        var selected: Bool
+        var note: String?
+        var id: String { name }
+    }
+    struct Differing: Codable, Sendable, Hashable, Identifiable {
+        var name: String
+        var tier: String
+        var theirs: String
+        var mine: String
+        var id: String { name }
+    }
+    struct OtherTier: Codable, Sendable, Hashable, Identifiable {
+        var name: String
+        var tier: String
+        var theirsTier: String
+        var theirs: String
+        var mine: String
+        var id: String { name }
+    }
+    struct Tier: Codable, Sendable, Hashable {
+        var have: Int
+        var adding: Int
+        var cap: Int
+        var over: Int
+    }
+    struct Tiers: Codable, Sendable, Hashable {
+        var world: Tier
+        var outfit: Tier
+    }
+    var file: Source
+    var new: [NewColor]
+    var differing: [Differing]
+    var otherTier: [OtherTier]
+    var tiers: Tiers
+    var over: Int
+    var ready: Bool
+    // Once applied:
+    var changed: Bool?
+    var doc: String?
+    var added: [String]?
+    var usedTheirs: [String]?
+    var summary: String?
+}
+
+/// `library.export` / `palette.export`.
+struct ExportResult: Codable, Sendable {
+    var to: String
+    var name: String
+    var count: Int?
+    var summary: String
+}
+
+/// `object.category`.
+struct ObjectCategoryResult: Codable, Sendable {
+    struct Row: Codable, Sendable, Hashable {
+        var name: String
+        var doc: String?
+        var changed: Bool?
+    }
+    var changed: Bool?
+    var category: [String]?
+    var objects: [Row]
+    var summary: String?
 }

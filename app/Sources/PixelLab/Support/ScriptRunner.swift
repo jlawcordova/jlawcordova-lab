@@ -730,6 +730,12 @@ final class ScriptRunner {
                 throw Failure(agentWindow ? "no Agent window (agent open first)" : settingsWindow ? "no Settings window (settings open first)" : "couldn't capture")
             }
             return out.path
+        case "category", "librarytab", "import", "importsheet", "export", "openfile", "dropfile":
+            return try await performLibraries(words, model: model)
+        case "answer" where words.count > 1 && words[1] == "offer":
+            // The question File › Open Document… asks about a library (R18): `answer offer import|cancel`, before `openfile`.
+            model.imports.scriptOffer = try arg(words, 2) == "import"
+            return nil
         case "migrate":
             // The setup screen's Migrate… button: the alert comes up (`answer migrate|cancel` settles it).
             guard case .setup(let p) = model.phase, p.migrate else { throw Failure("there's no Migrate… on screen") }
@@ -1607,6 +1613,16 @@ final class ScriptRunner {
             if what == "problem" { if case .setup(let p) = model.phase { text = p.document ?? "" } } else { text = model.migrateMessage ?? "" }
             guard text.contains(want) else { throw Failure("expected \(what) to contain \"\(want)\", got \"\(text)\"") }
             return "\(what) has \"\(want)\""
+        case _ where expectLibraries(words, model: model) != nil:
+            let value = expectLibraries(words, model: model) ?? ""
+            // importsheet <what>, objectcategory <name> and palettecolor <name> carry one more word before the value.
+            let skip = ["importsheet", "objectcategory", "palettecolor"].contains(what) ? 3 : 2
+            let wanted = words.dropFirst(skip).joined(separator: " ")
+            let contains = what == "categoryerror" || what == "offer" || (what == "importsheet" && words[safe: 2] == "error")
+            guard contains ? (wanted == "none" ? value == "none" : value.contains(wanted)) : value == wanted else {
+                throw Failure("expected \(words.dropFirst().prefix(skip - 1).joined(separator: " ")) \(contains ? "to contain " : "")\(wanted), got \(value)")
+            }
+            return "\(what) = \(value)"
         case "document": got = model.sessionInfo?.document?.name ?? "none"
         case "documentkind": got = model.sessionInfo?.document?.kind ?? "none"
         case _ where expectLayers(what, model: model) != nil: got = expectLayers(what, model: model) ?? ""
@@ -1679,6 +1695,134 @@ final class ScriptRunner {
         return items.firstIndex { $0.object == name }
     }
 
+    // MARK: Object libraries and palette files (docs/intents/2026-10-object-libraries/spec.md, D9)
+
+    /// `category`, `librarytab`, `import`, `importsheet`, `export`, `openfile` and `dropfile`.
+    private func performLibraries(_ words: [String], model: AppModel) async throws -> String? {
+        let imports = model.imports
+        switch words[0] {
+        case "category":
+            // category Nature/Trees | category none: the open object's Category field, Return.
+            guard model.document?.ref.kind == .object else { throw Failure("category needs an open object") }
+            let typed = words.dropFirst().joined(separator: " ")
+            await model.objectEditor.setCategory(typed: typed.lowercased() == "none" ? "" : typed)
+            return model.objectEditor.categoryError ?? model.lastEdit
+        case "librarytab":
+            let name = words.dropFirst().joined(separator: " ")
+            let tabs = model.libraryTabNames
+            let want = name.lowercased() == "all" ? LibraryCategories.all : name.lowercased() == "others" ? LibraryCategories.others : name
+            guard let tab = tabs.first(where: { $0.lowercased() == want.lowercased() }) else {
+                throw Failure("no tab “\(name)” (tabs: \(tabs.isEmpty ? "none" : tabs.joined(separator: ", ")))")
+            }
+            model.libraryTab = tab
+            model.libraryCursor = 0
+            return tab
+        case "import":
+            let path = NSString(string: try arg(words, 2)).expandingTildeInPath
+            switch try arg(words, 1) {
+            case "library": await imports.startLibrary(path)
+            case "palette": await imports.startPalette(path)
+            default: throw Failure("import library|palette <path>")
+            }
+            if imports.library == nil, imports.palette == nil, let n = model.notice, n.hasPrefix("Couldn't") { throw Failure(n) }
+            return imports.library != nil ? "library sheet" : imports.palette != nil ? "palette sheet" : imports.lastMessage
+        case "importsheet":
+            switch try arg(words, 1) {
+            case "convert":
+                guard imports.library != nil else { throw Failure("no library import sheet") }
+                guard imports.library?.plan.missing.contains(where: { $0.name == words[safe: 2] }) == true else { throw Failure("no missing color \(words[safe: 2] ?? "?")") }
+                imports.library?.conversions[try arg(words, 2)] = try arg(words, 3)
+            case "keep", "theirs":
+                guard imports.palette != nil else { throw Failure("no palette import sheet") }
+                guard imports.palette?.plan.differing.contains(where: { $0.name == words[safe: 2] }) == true else { throw Failure("no differing color \(words[safe: 2] ?? "?")") }
+                if words[1] == "theirs" { imports.palette?.useTheirs.insert(try arg(words, 2)) } else { imports.palette?.useTheirs.remove(try arg(words, 2)) }
+            case "add", "remove":
+                guard imports.palette != nil else { throw Failure("no palette import sheet") }
+                if words[1] == "add" { imports.palette?.selected.insert(try arg(words, 2)) } else { imports.palette?.selected.remove(try arg(words, 2)) }
+            case "import":
+                if imports.library != nil { await imports.applyLibrary() }
+                else if imports.palette != nil { await imports.applyPalette() }
+                else { throw Failure("no import sheet is up") }
+                return imports.library?.error ?? imports.palette?.error ?? imports.lastMessage
+            case "cancel":
+                imports.cancelLibrary()
+                imports.cancelPalette()
+            default: throw Failure("importsheet convert <missing> <existing>|keep <name>|theirs <name>|add <color>|remove <color>|import|cancel")
+            }
+            return nil
+        case "export":
+            let path = NSString(string: try arg(words, 2)).expandingTildeInPath
+            switch try arg(words, 1) {
+            case "library":
+                let category = words.count > 3 ? LibraryCategories.parse(words.dropFirst(3).joined(separator: " ")) : nil
+                await imports.exportLibrary(to: path, category: category)
+            case "palette": await imports.exportPalette(to: path)
+            default: throw Failure("export library <path> [category]|palette <path>")
+            }
+            if let n = model.notice, n.hasPrefix("Couldn't export") { throw Failure(n) }
+            return imports.lastMessage
+        case "openfile":
+            // File › Open Document… on a path: a library or palette file asks whether to import it (R18).
+            let path = NSString(string: try arg(words, 1)).expandingTildeInPath
+            if ImportModel.isLibrary(path) || ImportModel.isPalette(path) { await imports.offer(path) } else { await model.switchDocument(to: path) }
+            return imports.lastOffer
+        case "dropfile":
+            // A file dropped on the window.
+            let took = await imports.drop([NSString(string: try arg(words, 1)).expandingTildeInPath])
+            guard took else { throw Failure("not a .pixellib or .pixelpal") }
+            return nil
+        default: throw Failure("unknown action \(words[0])")
+        }
+    }
+
+    /// The `expect`s for categories, tabs and imports; nil for anything else.
+    private func expectLibraries(_ words: [String], model: AppModel) -> String? {
+        let what = words[1]
+        let imports = model.imports
+        func list(_ items: [String]) -> String { items.isEmpty ? "none" : items.joined(separator: ",") }
+        switch what {
+        case "tabs": return list(model.libraryTabNames)
+        case "libtab": return model.libraryTab
+        case "headings": return list(model.librarySections.compactMap(\.heading))
+        case "libraryobjects": return String(LibraryCategories.flattened(model.librarySections).count)
+        case "libraryorder": return list(LibraryCategories.flattened(model.librarySections).map(\.name))
+        case "category": return model.objectEditor.categoryText.isEmpty ? "none" : model.objectEditor.categoryText
+        case "categorydraft": return model.objectEditor.categoryDraft.isEmpty ? "none" : model.objectEditor.categoryDraft
+        case "categoryerror": return model.objectEditor.categoryError ?? "none"
+        case "objectcategory":
+            // objectcategory pine Nature › Trees (an object of the document, whatever is open)
+            guard let name = words[safe: 2] else { return "usage" }
+            let want = words.dropFirst(3).joined(separator: " ")
+            guard let object = model.objects.first(where: { $0.name == name }) else { return want == "missing" ? "missing" : "no object \(name)" }
+            return object.category.map { LibraryCategories.text($0) } ?? "none"
+        case "palettecolor":
+            guard let name = words[safe: 2] else { return "usage" }
+            return model.paletteByName[name]?.hex.uppercased() ?? "none"
+        case "importundo": return imports.undoTitle ?? "none"
+        case "offer": return imports.lastOffer ?? "none"
+        case "importsheet":
+            let sub = words[safe: 2] ?? ""
+            switch sub {
+            case "sheet": return imports.library != nil ? "library" : imports.palette != nil ? "palette" : "none"
+            case "renames": return list(imports.library?.plan.renames.map { "\($0.from)>\($0.to)" } ?? [])
+            case "differs":
+                if let l = imports.library { return list(l.plan.differing.map(\.name) + (l.plan.character.swapped ? ["character"] : [])) }
+                if let p = imports.palette { return list(p.plan.differing.map { "\($0.name)=\(p.useTheirs.contains($0.name) ? "theirs" : "keep")" }) }
+                return "none"
+            case "missing": return list(imports.library.map { l in l.plan.missing.map { "\($0.name)>\(l.conversions[$0.name] ?? "?")" } } ?? [])
+            case "nearest": return list(imports.library?.plan.missing.map { "\($0.name)>\($0.nearest?.name ?? "none")" } ?? [])
+            case "new": return list(imports.palette.map { p in p.plan.new.filter { p.selected.contains($0.name) }.map(\.name) } ?? [])
+            case "over": return String(imports.palette?.overTotal ?? 0)
+            case "count": return String(imports.library?.plan.count ?? 0)
+            case "button": return imports.library?.buttonTitle ?? (imports.palette != nil ? "Import" : "none")
+            case "canimport": return String(imports.palette?.canImport ?? (imports.library != nil))
+            case "error": return imports.library?.error ?? imports.palette?.error ?? "none"
+            default: return "importsheet sheet|renames|differs|missing|nearest|new|over|count|button|canimport|error"
+            }
+        default: return nil
+        }
+    }
+
     /// Waits until edits, renders, checks, item lists and the build are done
     /// and the stage has been steady for a moment (at most 30 s).
     private func settle(_ model: AppModel) async {
@@ -1692,7 +1836,7 @@ final class ScriptRunner {
                 if model.newDoc?.creating == true { return true }
                 if model.migrating { return true }
                 if case .starting = model.phase { return true }
-                if model.agent.busy || model.versions.busy { return true }
+                if model.agent.busy || model.versions.busy || model.imports.busy { return true }
                 if model.chat.setup == .checking, model.rightTab == .agent { return true }
                 guard let doc = model.document else { return false }
                 // A scene's items as of the last edit's result, so Moved by and the inspector read them.

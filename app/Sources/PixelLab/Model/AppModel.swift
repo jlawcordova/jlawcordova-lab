@@ -69,6 +69,22 @@ final class AppModel {
     /// The popover's search text, and the cell the arrow keys are on.
     var libraryQuery = ""
     var libraryCursor = 0
+    /// The chosen Library tab per document (by its folder), kept while the app runs (docs/intents/2026-10-object-libraries/spec.md, R5).
+    var libraryTabs: [String: String] = [:]
+
+    /// The tab row's tabs (empty when no object has a category: the row doesn't show).
+    var libraryTabNames: [String] { LibraryCategories.tabs(objects) }
+
+    /// The chosen tab: All until another is chosen; All again if the chosen one has gone.
+    var libraryTab: String {
+        get { LibraryCategories.resolved(libraryTabs[sessionInfo?.document?.root ?? ""], in: libraryTabNames) }
+        set { libraryTabs[sessionInfo?.document?.root ?? ""] = newValue }
+    }
+
+    /// The popover's headings and objects for the chosen tab and the search (R6, R7).
+    var librarySections: [LibraryCategories.Section] {
+        LibraryCategories.sections(objects, tab: libraryTab, query: libraryQuery)
+    }
     /// Where Back goes from an object opened with Edit Object (R11).
     var returnScene: DocRef?
 
@@ -163,6 +179,8 @@ final class AppModel {
     let versions = VersionsModel()
     /// The Agent tab's chat with Claude Code (docs/intents/2026-10-agent-chat/spec.md).
     let chat = ChatModel()
+    /// Importing and exporting libraries and palette files (docs/intents/2026-10-object-libraries/spec.md).
+    let imports = ImportModel()
     /// The right column's tab (spec D12): remembered, except under the script hook or a snapshot.
     var rightTab: RightTab = RightTab(rawValue: UserDefaults.standard.string(forKey: SettingsKey.rightTab) ?? "") ?? .inspector {
         didSet { if script == nil, snapshot == nil { UserDefaults.standard.set(rightTab.rawValue, forKey: SettingsKey.rightTab) } }
@@ -202,6 +220,7 @@ final class AppModel {
         agent.app = self
         versions.app = self
         chat.app = self
+        imports.app = self
         // The script hook and a snapshot start on the default tab, not the one the owner left open.
         if script != nil || snapshot != nil { rightTab = .inspector }
     }
@@ -317,6 +336,7 @@ final class AppModel {
         await versions.load()
         document = nil
         phase = .ready
+        imports.reset()
         chat.documentChanged()
         if rightTab == .agent { chat.start() }
         await openInitialDoc()
@@ -364,6 +384,7 @@ final class AppModel {
                 keptStale.remove(status.doc)
             }
             if status.blocked { blockedDocs[status.doc] = status } else { blockedDocs[status.doc] = nil }
+            imports.docChanged(status)
             guard let doc = document, doc.ref.id == status.doc else { return }
             doc.status = status
             if doc.ref.kind == .object {
@@ -815,7 +836,10 @@ final class AppModel {
     var canRedo: Bool { document?.status?.canRedo ?? false }
 
     /// The Edit menu's Undo and Redo: "Undo Place Pine (Claude)" (R20).
-    var undoTitle: String { document?.status?.undoLabel.map { "Undo \(Self.titled($0))" } ?? "Undo" }
+    var undoTitle: String {
+        if let title = imports.undoTitle { return title }
+        return document?.status?.undoLabel.map { "Undo \(Self.titled($0))" } ?? "Undo"
+    }
     var redoTitle: String { document?.status?.redoLabel.map { "Redo \(Self.titled($0))" } ?? "Redo" }
 
     /// "pebble placed at column 1" → "Pebble placed at column 1".
@@ -1027,6 +1051,11 @@ final class AppModel {
     /// Open Document… (⌘O): a `.pixellab` folder, or a site checkout holding one.
     func openDocument() async {
         guard let path = SetupView.chooseDocumentFolder(start: documentPath) else { return }
+        // A library chosen here isn't a document: offer to import it (docs/intents/2026-10-object-libraries/spec.md, R18).
+        if ImportModel.isLibrary(path) || ImportModel.isPalette(path) {
+            await imports.offer(path)
+            return
+        }
         await switchDocument(to: path)
     }
 
@@ -1143,7 +1172,10 @@ final class AppModel {
         keptStale.insert(ref.id)
         if await save(ref, force: true) { staleDocs.remove(ref.id) }
     }
-    func undo() async { await docCommand("doc.undo") }
+    func undo() async {
+        if imports.canUndo { await imports.undo(); return }
+        await docCommand("doc.undo")
+    }
     func redo() async { await docCommand("doc.redo") }
 
     private func docCommand(_ method: String) async {
