@@ -90,7 +90,7 @@ const PAGE = `
     ended: [],
   };
   document.documentElement.addEventListener('animationend', (e) => {
-    if (/^states--[a-z-]+$/.test(e.animationName) && !/^states--s\\d/.test(e.animationName)) pl.ended.push({ name: e.animationName, at: performance.now() });
+    if (/^states--[a-z-]+$/.test(e.animationName) && !/^states--s\\d/.test(e.animationName)) pl.ended.push({ name: e.animationName, at: performance.now(), elapsed: Math.round(e.elapsedTime * 1000) });
   });
 `;
 
@@ -191,19 +191,20 @@ for (const name of wanted) {
         const t0 = await page.evaluate(([a, v]) => { pl.ended.length = 0; const t = performance.now(); document.documentElement.setAttribute(a, v); return t; }, [attr, value]);
         await page.waitForTimeout(waitMs);
         const ended = await page.evaluate(() => pl.ended);
-        return ended.map((/** @type {any} */ e) => ({ name: e.name, after: e.at - t0 }));
+        return ended.map((/** @type {any} */ e) => ({ name: e.name, after: e.at - t0, elapsed: e.elapsed }));
       };
       // hop hands over to idle after 480 ms.
       for (const attr of ['data-state', 'data-play']) {
-        const got = await fired(attr, 'hop', 1100);
+        const got = await fired(attr, 'hop', 1500);
         // One from each of the three walkers, which the attribute on the root switched.
         assert.deepEqual(got.map((e) => e.name), ['states--hop', 'states--hop', 'states--hop'], `${attr}=hop: ${JSON.stringify(got)}`);
-        assert.ok(got.every((e) => e.after >= 400 && e.after < 900), `after ${got.map((e) => e.after)} ms`);
+        // When it fired in the animation's own time, which a loaded machine can't delay; the wall clock only bounds it below.
+        assert.ok(got.every((e) => e.elapsed === 480 && e.after >= 400), `ended ${JSON.stringify(got)}`);
       }
       // dead holds: it fires when its last frame starts, 100 ms in.
-      const dead = await fired('data-state', 'dead', 600);
+      const dead = await fired('data-state', 'dead', 900);
       assert.deepEqual(dead.map((e) => e.name), ['states--dead', 'states--dead', 'states--dead']);
-      assert.ok(dead.every((e) => e.after >= 60 && e.after < 400), `after ${dead.map((e) => e.after)} ms`);
+      assert.ok(dead.every((e) => e.elapsed === 100 && e.after >= 60), `ended ${JSON.stringify(dead)}`);
       // A looping state fires nothing, and neither does a state that started in a looping one after its hand-over.
       assert.deepEqual(await fired('data-state', 'walk', 1300), []);
       assert.deepEqual(await fired('data-play', 'walk', 600), [], 'a looping state has no data-play');
