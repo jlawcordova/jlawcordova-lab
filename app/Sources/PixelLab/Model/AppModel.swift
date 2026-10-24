@@ -385,6 +385,8 @@ final class AppModel {
             }
             if status.blocked { blockedDocs[status.doc] = status } else { blockedDocs[status.doc] = nil }
             imports.docChanged(status)
+            // An agent's edit to an object that isn't open can move it to another category.
+            if document?.ref.id != status.doc, status.doc.hasPrefix("object:") { await loadLists() }
             guard let doc = document, doc.ref.id == status.doc else { return }
             doc.status = status
             if doc.ref.kind == .object {
@@ -1180,6 +1182,8 @@ final class AppModel {
 
     private func docCommand(_ method: String) async {
         guard let doc = document, let connection else { return }
+        // An object's undo can change its category: the Library's tabs follow (docs/intents/2026-10-object-libraries/spec.md, R5).
+        defer { if doc.ref.kind == .object { Task { await loadLists() } } }
         // On its way like an edit: items listed meanwhile may hold the paths from before it.
         editor.pendingEdits += 1
         defer { editor.pendingEdits -= 1 }

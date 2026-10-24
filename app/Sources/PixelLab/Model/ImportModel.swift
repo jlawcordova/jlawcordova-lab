@@ -98,6 +98,9 @@ final class ImportModel {
         case palette
     }
     var undoable: Undoable?
+    /// The objects the last import made, and how long their own saves are not taken for a later edit.
+    @ObservationIgnored private var ignoredObjects: Set<String> = []
+    @ObservationIgnored private var ignoreUntil = Date.distantPast
     /// The palette doc's undo label as the import left it: another edit changes it.
     @ObservationIgnored private var paletteLabel: String?
     @ObservationIgnored private var expectingPalette = false
@@ -129,6 +132,8 @@ final class ImportModel {
             if expectingPalette { paletteLabel = status.undoLabel }
             else if case .palette? = undoable, status.undoLabel != paletteLabel { undoable = nil }
         } else if undoable != nil, status.unsaved {
+            // The import's own objects report their saves a moment after the answer: those aren't a later edit.
+            if status.doc.hasPrefix("object:"), ignoredObjects.contains(String(status.doc.dropFirst("object:".count))), Date() < ignoreUntil { return }
             undoable = nil
         }
     }
@@ -205,7 +210,11 @@ final class ImportModel {
             await app.loadLists()
             app.thumbnails.invalidate(r.imported ?? [])
             await app.versions.load()
-            if let v = r.version, r.changed == true { undoable = .library(version: v) }
+            if let v = r.version, r.changed == true {
+                ignoredObjects = Set(r.imported ?? [])
+                ignoreUntil = Date().addingTimeInterval(5)
+                undoable = .library(version: v)
+            }
             app.lastEdit = r.summary
             app.notice = nil
             say(r.summary ?? "Imported")

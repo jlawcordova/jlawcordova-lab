@@ -256,7 +256,6 @@ final class ObjectEditor {
         let current = (info?.category ?? []).map { $0.lowercased() }
         if (names ?? []).map({ $0.lowercased() }) == current {
             categoryDraft = names.map { LibraryCategories.text($0) } ?? ""
-            if names == nil { categoryDraft = "" }
             return
         }
         pendingEdits += 1

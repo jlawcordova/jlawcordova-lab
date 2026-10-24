@@ -201,6 +201,27 @@ if stage examples-town; then
   (( ${ran[(Ie)examples-harbor]} )) || echo "==> the example documents: layers from the file, three and four levels deep"
   run_example examples-town.txt examples-town.log town
 fi
+if stage libraries; then
+  echo "==> libraries: categories and tabs on the harbor, an exported category, coast.pixellib imported into the town (a rename, a conversion), a palette import with Keep Mine, Undo Import"
+  lib="$out/examples/libraries"
+  rm -rf "$lib" "$shots/libraries-town-before" "$shots/libraries-town-after" && mkdir -p "$lib" "$shots/libraries-town-before" "$shots/libraries-town-after"
+  for d in harbor town; do cp -R "$root/examples/$d.pixellab" "$lib/$d.pixellab" && migrate_doc "$lib/$d.pixellab" > /dev/null; done
+  sed "s#@OUT@#$shots#g; s#@DIR@#$lib#g; s#@EXAMPLES@#$root/examples#g" "$root/scripts/acceptance/libraries.txt" > "$out/libraries.txt"
+  PIXELLAB_SCRIPT="$out/libraries.txt" PIXELLAB_DOC="$lib/harbor.pixellab" PIXELLAB_STATE="$state" "$app/Contents/MacOS/PixelLab" 2>&1 | grep '^script:' > "$out/libraries.log" || true
+  tail -1 "$out/libraries.log"
+  grep -q 'all steps passed' "$out/libraries.log"
+  # The exported category holds those objects and what they extend; everything is canonical files.
+  trees=$(ls "$lib/trees.pixellib/objects" | tr '\n' ' ')
+  [[ $trees == "pine.json tree.json " ]] || { echo "the Nature/Trees export holds: $trees" >&2; exit 1; }
+  [[ -f $lib/harbor.pixelpal ]] || { echo "no exported palette" >&2; exit 1; }
+  # R16: the town's published SVGs are byte-identical before and after the imports.
+  before=$(ls "$shots/libraries-town-before"/*.svg | wc -l | tr -d ' ')
+  [[ $before -ge 1 ]] || { echo "the town published no SVG" >&2; exit 1; }
+  for f in "$shots/libraries-town-before"/*.svg; do
+    cmp "$f" "$shots/libraries-town-after/${f:t}" || { echo "${f:t} changed while libraries were imported (R16)" >&2; exit 1; }
+  done
+  echo "the town's $before SVG(s) are byte-identical before and after the imports; the Nature/Trees export holds exactly pine and tree"
+fi
 if stage examples-depth; then
   echo "==> depth order: the pine moved behind the house, the override, the saved file"
   run_example examples-depth.txt examples-depth.log harbor

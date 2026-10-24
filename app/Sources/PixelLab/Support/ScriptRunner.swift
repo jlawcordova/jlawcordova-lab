@@ -115,6 +115,17 @@ import Foundation
 ///     selectuses   activity all|chats|errors   askclaude   agentwindow
 ///     expect chips|pinned|unsaved|contextline|suggestion|activityrows|banner <value>
 ///
+/// Object libraries and palette files (docs/intents/2026-10-object-libraries/spec.md, D9):
+///
+///     category Nature/Trees|none   (the open object's Category field, Return)   librarytab <name>|all|others   libraryquery <text>
+///     import library|palette <path>   (File › Import…, with the sheet when it has something to ask)   importsheet convert <missing> <existing>
+///     importsheet keep|theirs <color>   importsheet add|remove <color>   importsheet import|cancel
+///     export library <path> [category]   export palette <path>   openfile <path>  (File › Open Document… on a path: a library asks first)
+///     answer offer import|cancel   (that question, before openfile)   dropfile <path>   (a file dropped on the window)
+///     expect tabs <a,b|none>   expect libtab <v>   expect headings <a,b|none>   expect libraryobjects <n>   expect libraryorder <a,b>
+///     expect category <path|none>   expect categorydraft|categoryerror <v>   expect objectcategory <name> <path|none>   expect palettecolor <name> <#hex|none>
+///     expect importsheet sheet|renames|differs|missing|nearest|new|over|count|button|canimport|error <v>   expect importundo <title|none>   expect offer <text>
+///
 /// Each action waits until renders, checks and edits settle. The app logs
 /// each step to stderr and quits at the end: exit 0 if every step and
 /// expectation passed, 1 if any failed, 2 if it couldn't start.
@@ -730,7 +741,7 @@ final class ScriptRunner {
                 throw Failure(agentWindow ? "no Agent window (agent open first)" : settingsWindow ? "no Settings window (settings open first)" : "couldn't capture")
             }
             return out.path
-        case "category", "librarytab", "import", "importsheet", "export", "openfile", "dropfile":
+        case "category", "librarytab", "libraryquery", "import", "importsheet", "export", "openfile", "dropfile":
             return try await performLibraries(words, model: model)
         case "answer" where words.count > 1 && words[1] == "offer":
             // The question File › Open Document… asks about a library (R18): `answer offer import|cancel`, before `openfile`.
@@ -1707,6 +1718,11 @@ final class ScriptRunner {
             let typed = words.dropFirst().joined(separator: " ")
             await model.objectEditor.setCategory(typed: typed.lowercased() == "none" ? "" : typed)
             return model.objectEditor.categoryError ?? model.lastEdit
+        case "libraryquery":
+            // The Library popover's search (the sidebar's is `search`); empty clears it.
+            model.libraryQuery = words.dropFirst().joined(separator: " ")
+            model.libraryCursor = 0
+            return nil
         case "librarytab":
             let name = words.dropFirst().joined(separator: " ")
             let tabs = model.libraryTabNames
