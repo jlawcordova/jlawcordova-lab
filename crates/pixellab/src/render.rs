@@ -533,6 +533,49 @@ pub fn render_scene_image(sources: &Sources, name: &str, dark_page: &str, option
     Ok(image)
 }
 
+/// What a scene shows at times (every item, light theme), pixel by pixel: the paint a scene render at
+/// that time draws, for comparing two versions of a scene (poses becoming states, R38). It keeps one
+/// working copy of the sources, so a render at each of many times doesn't copy the document.
+pub struct ScenePixels {
+    local: Sources,
+    name: String,
+    scene: Value,
+    /// The tree drawn for the last posed scene (times come in order): between two times where nothing
+    /// is placed, posed or ordered differently, only what plays inside the tree (loops, states) changes.
+    last: Option<(String, Rc<Group>)>,
+}
+
+impl ScenePixels {
+    pub fn new(sources: &Sources, name: &str) -> ScenePixels {
+        let scene = sources.scenes.get(name).cloned().unwrap_or(Value::Null);
+        ScenePixels { local: sources.clone(), name: name.to_string(), scene, last: None }
+    }
+
+    pub fn at(&mut self, time: f64) -> std::result::Result<OMap<Pixel, ColorName>, String> {
+        let e = |err: engine::EngineError| err.0;
+        self.local.scenes.insert(self.name.clone(), self.scene.clone());
+        let mut still = scene_at(&self.local, &self.name, time).map_err(e)?;
+        let items = match still.as_object_mut().and_then(|o| o.shift_remove("items")) {
+            Some(Value::Array(a)) => a,
+            _ => Vec::new(),
+        };
+        if let Some(o) = still.as_object_mut() {
+            o.insert("items".into(), Value::Array(motion::shown_items(&items)));
+        }
+        let key = still.to_string();
+        let root = match &self.last {
+            Some((k, root)) if *k == key => root.clone(),
+            _ => {
+                self.local.scenes.insert(self.name.clone(), still);
+                let root = Rc::new(render_scene(&self.local, &self.name, Order::List).map_err(e)?.root);
+                self.last = Some((key, root.clone()));
+                root
+            }
+        };
+        Ok(composite(&root, CompositeOptions { first_variant: false, frame: 0, time: Some(time), play: None }))
+    }
+}
+
 fn inner_scene_image(
     sources: &Sources,
     name: &str,

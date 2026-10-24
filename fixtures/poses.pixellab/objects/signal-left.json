@@ -1,0 +1,15 @@
+{
+  "notes": [
+    "The left lamp lit."
+  ],
+  "kind": "sprite",
+  "extends": "signal",
+  "keys": {
+    "l": "roof-1"
+  },
+  "rows": {
+    "0": {
+      "1": "klkmk"
+    }
+  }
+}

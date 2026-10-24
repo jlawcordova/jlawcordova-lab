@@ -83,6 +83,7 @@
 | [`object state move`](#objectstatemove) | Move a state later (--by 1) or earlier (--by -1) in the list | edit |
 | [`object state run`](#objectstaterun) | What a state plays: the states it leads through, where it settles, and when its frame or move changes | read |
 | [`object state set`](#objectstateset) | Change a state: rename it, its frames, frame length, how it ends, or make it the start | edit |
+| [`object states from-poses`](#objectstatesfrom-poses) | Turn a pose family into one object with states, and its scenes' pose keys into state keys | writes files |
 | [`object states make`](#objectstatesmake) | Turn a sprite's layer ambient loop and actions into states | edit |
 | [`object still`](#objectstill) | Turn a frame loop back into a still layer, keeping one frame | edit |
 | [`palette export`](#paletteexport) | Export the document's palette to a new .pixelpal file | writes files |
@@ -1545,6 +1546,32 @@ edits docs · MCP tool `object_state_set`
 ```sh
 pixellab object state set lamp flicker --ms 60
 pixellab object state set character hop --rename jump
+```
+
+#### object.states.from-poses
+
+Turn a pose family into one object with states, and its scenes' pose keys into state keys.
+
+```
+pixellab object states from-poses <name> [--scene <text,…>] [--fold] [--as <text>] [--delete-unused] [--dry-run]
+```
+
+A pose family is a base object and the objects a scene's motion keys pose its items as (crane-hook, crane-hook-drop and crane-hook-low). Each member's drawing becomes a frame of the base, lined up on its anchor and padded to one box, with the color keys merged; each frame gets a state of its own that loops (rest for the base's own drawing, and each pose named without the base's name: drop, low). Every key that posed an item of the base gets the matching state instead. With --fold, a run of at least four keys that only change the pose, alternating at one interval, becomes one key into a looping state that plays those frames at that interval. Every scene that shows the family is rendered before and after at every 100 ms of its loop (and either side of each key), and if any pixel differs the command changes nothing and says where. Objects that extended the base are written out whole, so they keep their drawing. The pose objects stay unless --delete-unused is given and nothing uses them; the result lists them. It's one version across every file it changes. It refuses a pose that is a frame loop or has an ambient loop or actions, a base that extends another or already has states, and a merged sprite past the size or 12-color caps.
+
+edits docs · writes files directly · MCP tool `object_states_from_poses`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | the base object: the one its items are placed as (or objects/<name>) |
+| `--scene` | list of string |  | only these scenes (default: every scene), comma-separated or repeated on the command line |
+| `--fold` | boolean |  | also turn each run of keys that alternates between poses at one interval into one key into a looping state |
+| `--as` | string |  | the folded state's name (default: the run's first state, with -loop) |
+| `--delete-unused` | boolean |  | delete the pose objects nothing uses afterwards, in the same version |
+| `--dry-run` | boolean |  | say what it would do, and check the renders, without writing |
+
+```sh
+pixellab object states from-poses crane-hook
+pixellab object states from-poses crossing-signal --fold --as flash --delete-unused
 ```
 
 #### object.states.make

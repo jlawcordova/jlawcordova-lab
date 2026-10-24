@@ -1,0 +1,51 @@
+{
+  "output": "yard.svg",
+  "items": [
+    { "object": "grass", "at": { "tile": [0, 0, 0] } },
+    { "object": "grass", "at": { "tile": [1, 0, 0] } },
+    { "object": "grass", "at": { "tile": [0, 1, 0] } },
+    { "object": "grass", "at": { "tile": [1, 1, 0] } },
+    { "object": "hook", "id": "hook", "at": { "tile": [0, 0, 3] } },
+    { "object": "cart", "id": "cart", "at": { "tile": [1, 0, 1] } },
+    { "object": "signal", "id": "sig", "at": { "tile": [1, 1, 1] } },
+    { "object": "signal-right", "at": { "tile": [0, 1, 1] } }
+  ],
+  "motion": {
+    "duration": 3000,
+    "tracks": [
+      {
+        "item": "hook",
+        "keys": [
+          { "t": 0 },
+          { "t": 500, "pose": "hook-drop" },
+          { "t": 900, "move": [16, 8] },
+          { "t": 1300, "pose": "hook-low" },
+          { "t": 1700, "pose": "hook-drop" },
+          { "t": 2100, "pose": "hook" },
+          { "t": 2500, "move": [0, 0] }
+        ]
+      },
+      {
+        "item": "cart",
+        "keys": [
+          { "t": 0 },
+          { "t": 600, "move": [-32, 16] },
+          { "t": 1800, "move": [0, 0] }
+        ]
+      },
+      {
+        "item": "sig",
+        "keys": [
+          { "t": 0 },
+          { "t": 1000, "pose": "signal-left" },
+          { "t": 1200, "pose": "signal-right" },
+          { "t": 1400, "pose": "signal-left" },
+          { "t": 1600, "pose": "signal-right" },
+          { "t": 1800, "pose": "signal-left" },
+          { "t": 2000, "pose": "signal-right" },
+          { "t": 2100, "pose": "signal" }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "notes": [
+    "A cart that rolls past the hook, so the depth order changes over the loop."
+  ],
+  "kind": "sprite",
+  "anchor": [3, 3],
+  "keys": {
+    "s": "soil-2",
+    "i": "ink"
+  },
+  "layers": [
+    {
+      "map": [
+        "sssssss",
+        "sssssss",
+        ".i...i."
+      ]
+    }
+  ]
+}

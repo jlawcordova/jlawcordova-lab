@@ -79,10 +79,13 @@ impl Command {
 }
 
 /// `NAME`: `/^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)*$/`.
+/// Dotted words, each lowercase words joined by hyphens (`object.states.from-poses`).
 fn is_command_name(name: &str) -> bool {
     name.split('.').all(|word| {
-        let mut chars = word.chars();
-        chars.next().is_some_and(|c| c.is_ascii_lowercase()) && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        word.split('-').all(|part| {
+            let mut chars = part.chars();
+            chars.next().is_some_and(|c| c.is_ascii_lowercase()) && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        })
     })
 }
 
@@ -91,7 +94,7 @@ fn is_command_name(name: &str) -> bool {
 fn check_definition(cmd: &Command) {
     let fail = |msg: String| -> ! { panic!("command {}: {msg}", cmd.name) };
     if !is_command_name(cmd.name) {
-        fail("name must be dotted lowercase words, like scene.place".into());
+        fail("name must be dotted lowercase words, like scene.place or object.states.from-poses".into());
     }
     if cmd.summary.is_empty() {
         fail("summary is required".into());
@@ -193,6 +196,7 @@ pub fn registry() -> Registry {
     list.extend(commands::object::commands());
     list.extend(commands::object_edit::commands());
     list.extend(commands::object_states::commands());
+    list.extend(commands::object_poses::commands());
     list.extend(commands::check::commands());
     list.extend(commands::library::commands());
     list.extend(commands::palette::commands());

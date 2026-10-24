@@ -1,0 +1,23 @@
+{
+  "notes": [
+    "A crossing signal, both lamps dark: the base of the signal pose family."
+  ],
+  "kind": "sprite",
+  "anchor": [2, 4],
+  "keys": {
+    "k": "ink",
+    "m": "roof-3",
+    "c": "cream"
+  },
+  "layers": [
+    {
+      "map": [
+        "kkkkk",
+        "kmkmk",
+        "kkkkk",
+        "..c..",
+        "..c.."
+      ]
+    }
+  ]
+}
