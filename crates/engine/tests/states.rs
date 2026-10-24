@@ -316,3 +316,157 @@ fn r7_states_of_a_valid_source_parse_and_a_malformed_one_is_left_out() {
     assert_eq!(States::of(&v).unwrap().start, "a", "a start that names nothing falls back to the first state");
     assert!(States::of(&json!({ "layers": [] })).is_none());
 }
+
+// ----------------------------------------------------------------- R6: the run
+
+use engine::ambient::{action_at, moves_of};
+use engine::states::{at, changes, run, Pose, Settle};
+
+fn walker_states() -> std::rc::Rc<States> {
+    resolve(&docs().sources(), "walker").unwrap().states.unwrap()
+}
+
+fn pose(frame: usize, moved: [f64; 2]) -> Pose {
+    Pose { frame, moved }
+}
+
+fn states_of(v: Value) -> std::rc::Rc<States> {
+    States::of(&v).expect("states")
+}
+
+#[test]
+fn r6_a_looping_state_loops_from_its_first_frame_and_its_move_steps_back() {
+    let s = walker_states();
+    let r = run(&s, "idle");
+    assert_eq!(r.segments.len(), 1);
+    assert_eq!(r.settle, Settle::Loop { from: 0.0, period: 1000.0 });
+    for (t, want) in
+        [(0.0, [0.0, 0.0]), (499.0, [0.0, 0.0]), (500.0, [0.0, -1.0]), (999.0, [0.0, -1.0]), (1000.0, [0.0, 0.0]), (1500.0, [0.0, -1.0])]
+    {
+        assert_eq!(at(&s, &r, t), pose(0, want), "{t} ms into idle");
+    }
+    let w = run(&s, "walk");
+    let frames: Vec<usize> = [0.0, 149.0, 150.0, 300.0, 450.0, 599.0, 600.0, 750.0].iter().map(|t| at(&s, &w, *t).frame).collect();
+    assert_eq!(frames, [0, 0, 1, 2, 1, 1, 0, 1], "walk's frames repeat every 600 ms");
+}
+
+#[test]
+fn r6_a_state_that_holds_shows_its_last_frame_from_when_it_has_played() {
+    let s = walker_states();
+    let r = run(&s, "dead");
+    assert_eq!(r.settle, Settle::Hold { from: 200.0, frame: 2, moved: [0.0, 0.0] });
+    let frames: Vec<usize> = [0.0, 99.0, 100.0, 199.0, 200.0, 99999.0].iter().map(|t| at(&s, &r, *t).frame).collect();
+    assert_eq!(frames, [1, 1, 2, 2, 2, 2]);
+}
+
+#[test]
+fn r6_a_then_hands_over_to_the_next_state_and_the_run_ends_in_its_loop() {
+    let s = walker_states();
+    let r = run(&s, "hop");
+    assert_eq!(
+        r.segments.iter().map(|g| (g.state.as_str(), g.from, g.to)).collect::<Vec<_>>(),
+        [("hop", 0.0, 480.0), ("idle", 480.0, 1480.0)]
+    );
+    assert_eq!(r.settle, Settle::Loop { from: 480.0, period: 1000.0 });
+    assert_eq!(at(&s, &r, 0.0), pose(1, [0.0, 0.0]));
+    assert_eq!(at(&s, &r, 479.0), pose(1, [0.0, -2.0]), "hop holds its last key until it hands over");
+    assert_eq!(at(&s, &r, 480.0), pose(0, [0.0, 0.0]), "idle starts from its first frame and key");
+    assert_eq!(at(&s, &r, 980.0), pose(0, [0.0, -1.0]));
+    assert_eq!(at(&s, &r, 1480.0), pose(0, [0.0, 0.0]), "and loops");
+    assert_eq!(at(&s, &r, 480.0 + 5000.0 + 500.0), pose(0, [0.0, -1.0]));
+}
+
+#[test]
+fn r6_a_chain_of_one_shot_states_that_leads_back_to_itself_is_a_loop() {
+    let s = walker_states();
+    let r = run(&s, "ping");
+    assert_eq!(r.segments.len(), 2);
+    assert_eq!(r.settle, Settle::Loop { from: 0.0, period: 400.0 });
+    let frames: Vec<usize> =
+        [0.0, 99.0, 100.0, 200.0, 299.0, 300.0, 399.0, 400.0, 500.0, 1000.0].iter().map(|t| at(&s, &r, *t).frame).collect();
+    assert_eq!(frames, [0, 0, 1, 1, 1, 0, 0, 0, 1, 1]);
+    // Entered at pong, the cycle starts there.
+    let r = run(&s, "pong");
+    assert_eq!(r.settle, Settle::Loop { from: 0.0, period: 400.0 });
+    assert_eq!(at(&s, &r, 0.0).frame, 1);
+    assert_eq!(at(&s, &r, 200.0).frame, 0);
+}
+
+#[test]
+fn r6_a_chain_that_comes_back_to_a_later_state_loops_from_there() {
+    let s = states_of(json!({ "start": "a", "states": {
+        "a": { "frames": [0], "ms": 100, "loop": false, "then": "b" },
+        "b": { "frames": [1], "ms": 200, "loop": false, "then": "c" },
+        "c": { "frames": [2], "ms": 300, "loop": false, "then": "b" }
+    } }));
+    let r = run(&s, "a");
+    assert_eq!(r.segments.len(), 3);
+    assert_eq!(r.settle, Settle::Loop { from: 100.0, period: 500.0 });
+    let frames: Vec<usize> = [0.0, 100.0, 299.0, 300.0, 599.0, 600.0, 800.0, 1099.0, 1100.0].iter().map(|t| at(&s, &r, *t).frame).collect();
+    assert_eq!(frames, [0, 1, 1, 2, 2, 1, 2, 2, 1]);
+}
+
+#[test]
+fn r6_a_then_that_names_no_state_holds_where_it_stands() {
+    let s = states_of(json!({ "start": "a", "states": { "a": { "frames": [0, 1], "ms": 100, "loop": false, "then": "gone" } } }));
+    let r = run(&s, "a");
+    assert_eq!(r.settle, Settle::Hold { from: 200.0, frame: 1, moved: [0.0, 0.0] });
+}
+
+#[test]
+fn r6_a_move_steps_a_pixel_at_a_time_and_the_one_at_44_ms_in_480_is_where_the_css_puts_it() {
+    let s = walker_states();
+    let r = run(&s, "hop");
+    // 0 → 44 ms goes up two pixels, a step each: the first at 22 ms, the second at 44 ms (a hair after, as the CSS rounds 9.1666…% to 9.167%).
+    assert_eq!(at(&s, &r, 21.0).moved, [0.0, 0.0]);
+    assert_eq!(at(&s, &r, 23.0).moved, [0.0, -1.0]);
+    assert_eq!(at(&s, &r, 43.0).moved, [0.0, -1.0]);
+    assert_eq!(at(&s, &r, 45.0).moved, [0.0, -2.0]);
+}
+
+#[test]
+fn r6_at_agrees_with_ambients_action_at_for_a_converted_action() {
+    // The site's hop, as an action and as a state that hands over to a resting idle.
+    let keys = json!([{ "t": 0, "move": [0, 0] }, { "t": 43, "move": [0, 0] }, { "t": 44, "move": [0, -2] }, { "t": 436, "move": [0, -2] }, { "t": 437, "move": [0, -1] }]);
+    let action = moves_of(&json!({ "actions": { "hop": { "duration": 480, "keys": keys } } })).unwrap();
+    let a = &action.actions[0].1;
+    let s = states_of(json!({ "start": "idle", "states": {
+        "idle": { "frames": [0], "ms": 1000 },
+        "hop": { "frames": [0], "ms": 480, "loop": false, "then": "idle", "move": keys }
+    } }));
+    let r = run(&s, "hop");
+    for t in 0..480 {
+        let want = action_at(a, t as f64).expect("playing");
+        assert_eq!(at(&s, &r, t as f64).moved, want, "{t} ms into the hop");
+        assert_eq!(at(&s, &r, t as f64 + 0.5).moved, action_at(a, t as f64 + 0.5).unwrap(), "{t}.5 ms into the hop");
+    }
+    assert_eq!(action_at(a, 480.0), None, "the action has ended: the element is at rest");
+    assert_eq!(at(&s, &r, 480.0).moved, [0.0, 0.0], "and idle's rest is where the state hands over to");
+}
+
+#[test]
+fn r6_the_same_run_every_time_and_changes_lists_when_the_frame_or_the_move_changes() {
+    let s = walker_states();
+    let r = run(&s, "hop");
+    assert_eq!(run(&s, "hop"), r);
+    let list = changes(&s, &r, None);
+    let got: Vec<(f64, usize, [f64; 2])> = list.iter().map(|c| ((c.t * 1000.0).round() / 1000.0, c.frame, c.moved)).collect();
+    assert_eq!(
+        got,
+        [(0.0, 1, [0.0, 0.0]), (22.001, 1, [0.0, -1.0]), (44.002, 1, [0.0, -2.0]), (480.0, 0, [0.0, 0.0]), (980.0, 0, [0.0, -1.0])]
+    );
+    // Further out, the loop goes on repeating.
+    let more = changes(&s, &r, Some(3500.0));
+    assert_eq!(more.last().map(|c| (c.t, c.frame, c.moved)), Some((3480.0, 0, [0.0, 0.0])), "idle's sixth start, before the horizon");
+    assert!(more.iter().any(|c| c.t == 1480.0 && c.moved == [0.0, 0.0]), "idle starts over at 1480");
+    assert!(more.windows(2).all(|w| w[0].t < w[1].t), "in time order");
+    // Every change is what `at` says from there on, and nothing between two changes differs.
+    for pair in more.windows(2) {
+        let mid = (pair[0].t + pair[1].t) / 2.0;
+        assert_eq!(at(&s, &r, mid), pose(pair[0].frame, pair[0].moved));
+    }
+    let ping = changes(&s, &run(&s, "ping"), None);
+    assert_eq!(ping.iter().map(|c| (c.t, c.frame)).collect::<Vec<_>>(), [(0.0, 0), (100.0, 1), (300.0, 0)]);
+    let dead = changes(&s, &run(&s, "dead"), None);
+    assert_eq!(dead.iter().map(|c| (c.t, c.frame)).collect::<Vec<_>>(), [(0.0, 1), (100.0, 2)]);
+}

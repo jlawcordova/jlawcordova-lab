@@ -121,7 +121,7 @@ pub(crate) fn runs(keys: &[Key], end: [f64; 2], duration: f64) -> Vec<(f64, [f64
     out
 }
 
-fn at_percent(runs: &[(f64, [f64; 2])], p: f64) -> [f64; 2] {
+pub(crate) fn at_percent(runs: &[(f64, [f64; 2])], p: f64) -> [f64; 2] {
     let mut found = runs.first().map_or([0.0, 0.0], |r| r.1);
     for &(at, moved) in runs {
         if at > p {
