@@ -61,7 +61,7 @@ pub fn ordered(map: &Map<String, Value>) -> Map<String, Value> {
 /// (object-libraries spec, R19); a document's palette has neither.
 pub const PALETTE: &[&str] = &["format", "kind", "notes", "world", "outfit", "colorNotes"];
 /// A sprite object.
-pub const SPRITE: &[&str] = &["notes", "category", "kind", "extends", "anchor", "footprint", "keys", "rows", "layers"];
+pub const SPRITE: &[&str] = &["notes", "category", "kind", "extends", "anchor", "footprint", "keys", "rows", "layers", "start", "states"];
 /// A block object.
 pub const BLOCK: &[&str] = &["notes", "category", "kind", "size", "faces", "surface", "sides"];
 /// A map layer, a frame layer, and a block's surface (keys first).
@@ -73,7 +73,7 @@ pub const SCENE: &[&str] = &["notes", "output", "image", "viewBox", "margin", "o
 /// A scene's layer entry.
 pub const SCENE_LAYER: &[&str] = &["id", "name", "parent"];
 /// A placed item.
-pub const ITEM: &[&str] = &["object", "id", "class", "layer", "depth", "at", "ambient", "actions"];
+pub const ITEM: &[&str] = &["object", "id", "class", "layer", "depth", "state", "at", "ambient", "actions"];
 /// A group item.
 pub const GROUP: &[&str] = &["group", "depth", "items"];
 /// An item's placement.
@@ -83,7 +83,11 @@ pub const MOTION: &[&str] = &["duration", "tracks"];
 /// A motion track.
 pub const TRACK: &[&str] = &["item", "keys"];
 /// A motion key.
-pub const KEY: &[&str] = &["t", "move", "show", "pose"];
+pub const KEY: &[&str] = &["t", "move", "show", "pose", "state"];
+/// A sprite's state (docs/intents/2026-10-object-states/spec.md, D1).
+pub const STATE: &[&str] = &["frames", "ms", "loop", "then", "move"];
+/// A key of a state's move: a time and where the sprite is.
+pub const MOVE_KEY: &[&str] = &["t", "move"];
 /// An ambient loop or an action (D6).
 pub const LOOP: &[&str] = &["duration", "offset", "keys"];
 /// A scene's image (D5).

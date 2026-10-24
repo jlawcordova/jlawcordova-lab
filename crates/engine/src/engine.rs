@@ -20,6 +20,7 @@ use crate::iso::{self, Pixel, TILE_H, TILE_W};
 use crate::motion;
 use crate::omap::{OMap, OSet};
 use crate::serialize::{entries, keys};
+use crate::states::{self, States};
 use crate::{jsnum, EngineError, Result};
 
 /// The palette's tiers, in the order the engine reads them.
@@ -412,7 +413,8 @@ fn validate_palette(sources: &Sources, problems: &mut Vec<String>) {
     }
 }
 
-const OBJECT_PROPS: [&str; 9] = ["notes", "category", "kind", "extends", "anchor", "footprint", "keys", "rows", "layers"];
+const OBJECT_PROPS: [&str; 11] =
+    ["notes", "category", "kind", "extends", "anchor", "footprint", "keys", "rows", "layers", "start", "states"];
 const BLOCK_PROPS: [&str; 7] = ["notes", "category", "kind", "size", "faces", "surface", "sides"];
 const SIDES_PROPS: [&str; 3] = ["keys", "left", "right"];
 const FACES: [&str; 4] = ["top", "left", "right", "edge"];
@@ -504,6 +506,9 @@ fn validate_object_shape(sources: &Sources, name: &str, problems: &mut Vec<Strin
         if has(o, "layers") {
             add("an object that extends another gives rows, not layers".into());
         }
+        if has(o, "start") || has(o, "states") {
+            add(format!("an object that extends another has the states of {}; it can't have its own", q(ext)));
+        }
         let rows_shape = "rows must be an object of layer: { row: string }";
         if !has(o, "rows") {
             return;
@@ -526,6 +531,8 @@ fn validate_object_shape(sources: &Sources, name: &str, problems: &mut Vec<Strin
     };
 
     let mut maps: Vec<(String, Vec<&str>)> = Vec::new();
+    // Each frame-loop layer's frames, for the states that play them (R2).
+    let mut loops: Vec<(usize, usize)> = Vec::new();
     for (li, layer) in layers.iter().enumerate() {
         let place = format!("layer {li}");
         let Some(l) = layer.as_object() else {
@@ -547,7 +554,10 @@ fn validate_object_shape(sources: &Sources, name: &str, problems: &mut Vec<Strin
                 add(format!("{place}: prefix must be one lowercase class name"));
             }
             match l.get("frames") {
-                Some(Value::Array(frames)) if !frames.is_empty() => frames.iter().map(Some).collect(),
+                Some(Value::Array(frames)) if !frames.is_empty() => {
+                    loops.push((li, frames.len()));
+                    frames.iter().map(Some).collect()
+                }
                 _ => {
                     add(format!("{place}: frames must be a list of at least one map"));
                     continue;
@@ -567,6 +577,17 @@ fn validate_object_shape(sources: &Sources, name: &str, problems: &mut Vec<Strin
                 _ => add(format!("{at}: map must be a list of at least one string")),
             }
         }
+    }
+    if has(o, "states") || has(o, "start") {
+        // A frame is the same frame on every layer (R2): the loops of a sprite with states are as long as each other.
+        let frames = loops.first().map_or(1, |(_, n)| *n);
+        for (li, n) in loops.iter().filter(|(_, n)| *n != frames) {
+            add(format!(
+                "layer {li}: {n} frames, but layer {} has {frames}; the frame loops of a sprite with states are as long as each other",
+                loops[0].0
+            ));
+        }
+        states::validate(o, frames, &mut add);
     }
     if maps.is_empty() {
         return;
@@ -595,6 +616,8 @@ fn validate_block_shape(sources: &Sources, o: &Map<String, Value>, add: &mut dyn
     for key in keys(o) {
         if key == "footprint" {
             add("footprint is for sprites; a block's size is its footprint".into());
+        } else if key == "start" || key == "states" {
+            add(format!("{key} is for sprites; a block has no states"));
         } else if !BLOCK_PROPS.contains(&key.as_str()) {
             add(format!("unknown property {}", qs(key)));
         }
@@ -1144,7 +1167,7 @@ fn validate_items(
             continue;
         }
         for key in keys(it) {
-            if !["object", "id", "class", "layer", "depth", "at", "ambient", "actions"].contains(&key.as_str()) {
+            if !["object", "id", "class", "layer", "depth", "state", "at", "ambient", "actions"].contains(&key.as_str()) {
                 add(format!("{place}: unknown property {}", qs(key)));
             }
         }
@@ -1169,6 +1192,14 @@ fn validate_items(
         }
         if !it.get("object").and_then(Value::as_str).is_some_and(|o| sources.objects.contains_key(o)) {
             add(format!("{place}: object {} does not exist", q(it.get("object"))));
+        } else if let Some(state) = it.get("state") {
+            let object = js_string(it.get("object"));
+            // An object that doesn't resolve is reported on its own.
+            if let Ok(r) = resolve(sources, &object) {
+                if let Some(problem) = states::state_problem(&object, r.states.as_deref(), state) {
+                    add(format!("{place}: {problem}"));
+                }
+            }
         }
         if has(it, "class") && !it["class"].as_str().is_some_and(is_class_list) {
             add(format!("{place}: class must be lowercase class names separated by single spaces"));
@@ -1239,6 +1270,8 @@ pub struct Resolved {
     pub layers: Vec<SpriteLayer>,
     /// Each layer's ambient loop and actions (D6), beside `layers`.
     pub layer_moves: Vec<Option<Rc<Moves>>>,
+    /// The sprite's states and start state (R1), from its base when it extends one (R5).
+    pub states: Option<Rc<States>>,
     pub width: i64,
     pub height: i64,
 }
@@ -1320,6 +1353,7 @@ fn resolve_seen(sources: &Sources, name: &str, seen: &[String]) -> Result<Resolv
             keys: string_record(obj.get("keys")),
             layers,
             layer_moves,
+            states: States::of(obj),
             width,
             height: first.len() as i64,
         });
@@ -1364,6 +1398,7 @@ fn resolve_seen(sources: &Sources, name: &str, seen: &[String]) -> Result<Resolv
         keys: js_ordered(keys),
         layers,
         layer_moves: base.layer_moves.clone(),
+        states: base.states.clone(),
         width: base.width,
         height: base.height,
     })
@@ -1399,6 +1434,7 @@ fn resolve_block(name: &str, obj: &Value) -> Result<Resolved> {
         keys: string_record(surface.and_then(|s| s.get("keys"))),
         layers,
         layer_moves: vec![],
+        states: None,
         width,
         height,
     })

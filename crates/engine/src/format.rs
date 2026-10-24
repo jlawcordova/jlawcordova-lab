@@ -276,6 +276,8 @@ fn inline_into(v: &Value, table: Option<&[&str]>, out: &mut String) {
                     (Some(t), "actions") if t == order::ITEM => Some(ACTIONS),
                     (Some(t), _) if t == ACTIONS => Some(order::LOOP),
                     (Some(t), "keys") if t == order::LOOP => Some(order::KEY),
+                    // A state's move is a list of keys, as a loop's.
+                    (Some(t), "move") if t == order::STATE => Some(order::MOVE_KEY),
                     _ => None,
                 };
                 inline_into(value, inner, out);
@@ -346,6 +348,8 @@ fn object_key(k: &str) -> Shape {
         "layers" => Shape::List(|_| Shape::Record(order::LAYER, layer_key)),
         "surface" => Shape::Record(order::LAYER, layer_key),
         "sides" => Shape::Record(order::SIDES, pretty),
+        // Each state on one line, as the document format shows them.
+        "states" => Shape::Record(&[], |_| Shape::InlineRecord(order::STATE)),
         _ => Shape::Pretty,
     }
 }

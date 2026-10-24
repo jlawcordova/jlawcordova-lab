@@ -35,7 +35,7 @@ pub const SITE_LOOPS: [SiteLoop; 3] = [
 
 pub const MOTION_PROPS: [&str; 2] = ["duration", "tracks"];
 pub const TRACK_PROPS: [&str; 2] = ["item", "keys"];
-pub const KEY_PROPS: [&str; 4] = ["t", "move", "show", "pose"];
+pub const KEY_PROPS: [&str; 5] = ["t", "move", "show", "pose", "state"];
 
 /// The frame a loop of `count` frames shows at `time` ms (`loopFrame`).
 pub fn loop_frame(loop_name: &str, count: usize, time: f64) -> usize {
@@ -124,10 +124,13 @@ pub fn validate_motion(sources: &Sources, scene: &Value, add: &mut dyn FnMut(Str
             }
         };
         let mut last = -1.0;
+        // The object the item shows at each key (its pose, once a key poses it), for the keys' states.
+        let object = ids.get(t.get("item").and_then(Value::as_str).unwrap_or("")).map(|item| js_string(item.get("object")));
+        let shown = object.as_deref().map(|o| filled_keys(track, o));
         for (k, key) in keys_list.iter().enumerate() {
             let at = format!("{place}.keys[{k}]");
             let Some(kv) = key.as_object() else {
-                add(format!("{at}: must be {{ t, move?, show?, pose? }}"));
+                add(format!("{at}: must be {{ t, move?, show?, pose?, state? }}"));
                 continue;
             };
             for prop in keys(kv) {
@@ -160,6 +163,18 @@ pub fn validate_motion(sources: &Sources, scene: &Value, add: &mut dyn FnMut(Str
             }
             if kv.contains_key("pose") && !kv["pose"].as_str().is_some_and(|p| sources.objects.contains_key(p)) {
                 add(format!("{at}: pose {} does not exist", q(kv.get("pose"))));
+            }
+            if let Some(state) = kv.get("state") {
+                // A state of the object shown at this key, which is the pose if the key or one before it poses.
+                if let Some(pose) =
+                    shown.as_ref().and_then(|s| s.get(k)).map(|f| f.pose.clone()).filter(|p| sources.objects.contains_key(p))
+                {
+                    if let Ok(r) = crate::engine::resolve(sources, &pose) {
+                        if let Some(problem) = crate::states::state_problem(&pose, r.states.as_deref(), state) {
+                            add(format!("{at}: {problem}"));
+                        }
+                    }
+                }
             }
         }
     }
