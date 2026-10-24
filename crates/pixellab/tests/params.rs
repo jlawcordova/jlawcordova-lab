@@ -316,6 +316,7 @@ fn every_command_is_well_formed_and_has_a_group() {
         "object.pick",
         "object.render",
         "object.show",
+        "object.state.run",
         "palette.get",
         "scene.items",
         "scene.list",

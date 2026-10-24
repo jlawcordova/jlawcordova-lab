@@ -26,7 +26,7 @@ A small, self-contained fix can go straight to a PR into `main`.
 
 - **The document is the source of truth, and the engine lives here** (`crates/engine/`), in Rust. A site publishes its art with the `pixellab` program and the [site contract](site-contract.md). Never write to the real site checkout, or the real document inside it, from tests or scripts: use a temp copy (`make_document()`, `make_site()` in `crates/pixellab/tests/common/mod.rs`). A change to the site's art is a change in the site repo.
 - **Every action is a command** in the registry, so the CLI, the app and agents can all take it. MCP edits become proposals the owner approves; `--direct` stays off by default.
-- **No new crates, npm packages or Swift dependencies** without asking. The Rust crates are `serde`, `serde_json` (with `preserve_order`) and `miniz_oxide`, and nothing else; Node is repo tooling only, with no packages.
+- **No new crates, npm packages or Swift dependencies** without asking. The Rust crates are `serde`, `serde_json` (with `preserve_order`) and `miniz_oxide`, and nothing else; Node is repo tooling only, and its one package is `playwright` (a dev dependency, for the states' browser check; `npm ci` installs it and `npx playwright install` the browsers).
 - **The app builds with the Command Line Tools:** no `@State`; never `xcode-select -s`.
 - **Colors come from the board 03 tokens** in `Theme.swift`. Pixel art is nearest-neighbor at integer zoom.
 - **Accessibility:** VoiceOver labels, visible focus, comfortable hit targets and Reduce Motion on anything interactive or animated.

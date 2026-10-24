@@ -2343,6 +2343,19 @@ pub fn render_scene(sources: &Sources, name: &str, order: Order) -> Result<Rende
 /// style plays the motion and the frame loops under `[data-pixellab]`, with
 /// generated names `<scope>--…`, and a scene with nothing to play has none.
 pub fn render_scene_with(sources: &Sources, name: &str, order: Order, scope: Option<&str>) -> Result<Rendered> {
+    Ok(render_scene_stated(sources, name, order, scope)?.0)
+}
+
+/// The CSS the stated items of a scene play, as a compiled SVG carries it (R9 to R16): what `art sizes`
+/// counts as the states' own bytes. Empty when no item has states.
+pub fn states_css(sources: &Sources, name: &str) -> Result<String> {
+    let (_, stated) = render_scene_stated(sources, name, Order::Depth, Some(name))?;
+    let css = states::css(name, &stated);
+    Ok(css.rules.concat() + &css.reduced.concat())
+}
+
+/// `render_scene_with`, and the sprites with states it drew, each kind once.
+fn render_scene_stated(sources: &Sources, name: &str, order: Order, scope: Option<&str>) -> Result<(Rendered, Vec<Rc<ItemStates>>)> {
     let scene = scene_or_err(sources, name)?;
     let mut root = Group::default();
     let tracks = tracks_of(scene);
@@ -2373,13 +2386,16 @@ pub fn render_scene_with(sources: &Sources, name: &str, order: Order, scope: Opt
         frame_loops(&root, &mut loops);
         let motion = if tracks.is_empty() { None } else { Some((motion, &ids, &copies)) };
         let style = motion::scene_css(scope, motion, &loops, &names.elements, &names.stated);
-        return Ok(Rendered { view_box, root, style: Some(style).filter(|s| !s.is_empty()), scope: Some(scope.to_string()) });
+        return Ok((
+            Rendered { view_box, root, style: Some(style).filter(|s| !s.is_empty()), scope: Some(scope.to_string()) },
+            names.stated,
+        ));
     }
     if tracks.is_empty() {
-        return Ok(Rendered { view_box, root, style: None, scope: None });
+        return Ok((Rendered { view_box, root, style: None, scope: None }, names.stated));
     }
     let style = motion::motion_css(motion, &ids, &copies);
-    Ok(Rendered { view_box, root, style: Some(style), scope: None })
+    Ok((Rendered { view_box, root, style: Some(style), scope: None }, names.stated))
 }
 
 /// A box with nothing in it: one tile around the origin (scene-canvas spec R6).

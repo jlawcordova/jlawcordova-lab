@@ -100,6 +100,17 @@ jobs:
       # fixture and examples.
       - name: Test the program
         run: cargo test --locked
+      # The states' browser check runs in WebKit, Chromium and Firefox: Playwright's, cached on the
+      # lockfile. macOS needs no system libraries, so there is no --with-deps here.
+      - name: Install the repo's Node dependencies
+        run: npm ci
+      - name: Cache the browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install the browsers
+        run: npx playwright install
       - name: Test the repo's tooling
         run: npm test
       - name: Test the app

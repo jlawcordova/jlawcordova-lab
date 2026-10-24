@@ -11,5 +11,6 @@
     "docs:cli": "node scripts/docs-cli.mjs",
     "docs:site": "node scripts/docs-site/build.mjs",
     "examples": "node scripts/make-examples.mjs"
-  }
+  },
+  "devDependencies": { "playwright": "1.63.0" }
 }

@@ -71,6 +71,7 @@
 | [`object render`](#objectrender) | Render one object to a transparent PNG | read |
 | [`object resize`](#objectresize) | Pad or crop a sprite's maps to a width and height (at the right and bottom) | edit |
 | [`object show`](#objectshow) | Show an object's kind, category, size, anchor, footprint, layers, frames, colors and extends | read |
+| [`object state run`](#objectstaterun) | What a state plays: the states it leads through, where it settles, and when its frame or move changes | read |
 | [`object still`](#objectstill) | Turn a frame loop back into a still layer, keeping one frame | edit |
 | [`palette export`](#paletteexport) | Export the document's palette to a new .pixelpal file | writes files |
 | [`palette get`](#paletteget) | List the palette: every color name, hex and tier | read |
@@ -303,7 +304,7 @@ Bytes each object and each color adds to a compiled scene, against the document'
 pixellab art sizes <name>
 ```
 
-The bytes a compiled scene loses, raw and gzip, when an object's items are left out or a color's paths are dropped (costs overlap a little), now and as committed at HEAD of the repository the document is in. Returns { scene, output, now: { raw, gzip }, head: { raw, gzip } | { reason }, objects: [{ object, placed, raw, gzip, headRaw, headGzip }], colors: [{ color, raw, gzip, headRaw, headGzip }] }.
+The bytes a compiled scene loses, raw and gzip, when an object's items are left out or a color's paths are dropped (costs overlap a little), now and as committed at HEAD of the repository the document is in. Returns { scene, output, now: { raw, gzip }, head: { raw, gzip } | { reason }, objects: [{ object, placed, raw, gzip, headRaw, headGzip }], colors: [{ color, raw, gzip, headRaw, headGzip }], states?: { raw, gzip, headRaw?, headGzip? }, warnings }. A scene with sprites that have states also gets states, a line of its own: the bytes of the rules in its style that play them (the objects' costs include them), as the style alone.
 
 read-only · MCP tool `art_sizes`
 
@@ -1300,6 +1301,29 @@ read-only · MCP tool `object_show`
 | --- | --- | --- | --- |
 | `name` (positional) | string | required | object name (or objects/<name>) |
 | `--doc` | boolean | default `false` | also return the object's source data as doc |
+
+#### object.state.run
+
+What a state plays: the states it leads through, where it settles, and when its frame or move changes.
+
+```
+pixellab object state run <name> <state> [--horizon <n>]
+```
+
+The run is what an item shows after it enters the state, and it is the same every time: segments are the states that then leads through (each from and to, in ms after entering), settle says where it ends up (a loop from some ms with its period, or a hold of one frame), and changes lists every time the frame or the whole sprite's move (x,y pixels) changes, from 0 up to horizon. The app, the renders and the published SVG all play this one run.
+
+read-only · MCP tool `object_state_run`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `name` (positional) | string | required | object name (or objects/<name>) |
+| `state` (positional) | string | required | a state of the object |
+| `--horizon` | integer |  | list changes up to this many ms after entering (default: the settle plus one period) (at least 1) |
+
+```sh
+pixellab object state run character hop
+pixellab object state run lamp flicker --horizon 3000
+```
 
 #### object.still
 

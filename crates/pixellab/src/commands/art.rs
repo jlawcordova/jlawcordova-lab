@@ -290,15 +290,29 @@ fn sizes_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let head_colors = before.as_ref().map(color_rows);
     let budget = engine::compile::scene_budget(sources, &target.name, &ctx.document()?.budgets);
     let warnings = engine::compile::budget_warnings(budget, now.raw, now.gzip);
-    Ok(Value::Object(obj(vec![
+    let mut out = obj(vec![
         ("scene", json!(target.name)),
         ("output", output),
         ("now", json!({ "raw": now.raw, "gzip": now.gzip })),
         ("head", head_value),
         ("objects", Value::Array(rows(&object_rows(&now), head_objects.as_ref(), "object"))),
         ("colors", Value::Array(rows(&color_rows(&now), head_colors.as_ref(), "color"))),
-        ("warnings", json!(warnings)),
-    ])))
+    ]);
+    // The rules that play the sprites with states, as a line of their own (D2, "Byte size"); HEAD's, when it had states.
+    if now.states.is_some() || before.as_ref().is_some_and(|b| b.states.is_some()) {
+        let mut line = Map::new();
+        if let Some(s) = now.states {
+            line.insert("raw".into(), json!(s.raw));
+            line.insert("gzip".into(), json!(s.gzip));
+        }
+        if let Some(s) = before.as_ref().and_then(|b| b.states) {
+            line.insert("headRaw".into(), json!(s.raw));
+            line.insert("headGzip".into(), json!(s.gzip));
+        }
+        out.insert("states".into(), Value::Object(line));
+    }
+    out.insert("warnings".into(), json!(warnings));
+    Ok(Value::Object(out))
 }
 
 /// `n.toLocaleString('en-US')` for a whole number.
@@ -392,6 +406,10 @@ fn sizes_format(r: &Value, _: &Params) -> String {
     let colors = r["colors"].as_array().cloned().unwrap_or_default();
     table(&mut lines, "object", "Bytes each object adds (the scene compiled without it), against HEAD:", &objects, true);
     table(&mut lines, "color", "Bytes each color's path takes, against HEAD:", &colors, false);
+    if let Some(s) = r.get("states") {
+        let row = json!({ "states": "the rules that play them", "raw": s.get("raw"), "gzip": s.get("gzip"), "headRaw": s.get("headRaw"), "headGzip": s.get("headGzip") });
+        table(&mut lines, "states", "Of those, the rules in the style that play the sprites with states, against HEAD:", &[row], false);
+    }
     let warnings = r["warnings"].as_array().cloned().unwrap_or_default();
     lines.extend(warnings.iter().map(|w| format!("warning: {}: {}", str_of(r.get("scene")), str_of(Some(w)))));
     lines.join("\n")
@@ -456,7 +474,8 @@ pub fn commands() -> Vec<Command> {
     );
     sizes.description = Some(concat!(
         "The bytes a compiled scene loses, raw and gzip, when an object's items are left out or a color's paths are dropped (costs overlap a little), now and as committed at HEAD of the repository the document is in. ",
-        "Returns { scene, output, now: { raw, gzip }, head: { raw, gzip } | { reason }, objects: [{ object, placed, raw, gzip, headRaw, headGzip }], colors: [{ color, raw, gzip, headRaw, headGzip }] }."
+        "Returns { scene, output, now: { raw, gzip }, head: { raw, gzip } | { reason }, objects: [{ object, placed, raw, gzip, headRaw, headGzip }], colors: [{ color, raw, gzip, headRaw, headGzip }], states?: { raw, gzip, headRaw?, headGzip? }, warnings }. ",
+        "A scene with sprites that have states also gets states, a line of its own: the bytes of the rules in its style that play them (the objects' costs include them), as the style alone."
     ));
     sizes.args = vec!["name"];
     sizes.examples = vec!["pixellab art sizes hero-island"];
