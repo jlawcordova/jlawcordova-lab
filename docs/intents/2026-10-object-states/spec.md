@@ -1,5 +1,5 @@
 # Spec: Object states and the animation pane (from intent.md 2026-10-24)
-Status: draft. On 2026-10-24 the owner said yes to every decision the spec raised: each Area of concern is marked **Settled** with what was chosen, and the new open questions are answered. That adds folding pose families into states (R37–R40, D8) and a real-browser check with Playwright (D6).
+Status: approved (the owner, 2026-10-24, after reviewing it with the prototype boards). On 2026-10-24 the owner said yes to every decision the spec raised: each Area of concern is marked **Settled** with what was chosen, and the new open questions are answered. That adds folding pose families into states (R37–R40, D8) and a real-browser check with Playwright (D6).
 
 This spec covers the intent as the owner revised it on 2026-10-24, with the animation pane folded in (`animation-pane.md`). It builds on what is in `main` today: autosave (`../2026-10-autosave/spec.md`: edits apply as they're made, MCP edits included, and every change is a version), the canvas-first window with the floating Library (`../2026-10-floating-library/spec.md`), the scene canvas (`../2026-10-scene-canvas/spec.md`), depth order (`../2026-10-depth-order/spec.md`) and the Rust engine's ambient loops and actions (`../2026-10-rust-engine/spec.md`, R12, R13, D6, D7).
 
