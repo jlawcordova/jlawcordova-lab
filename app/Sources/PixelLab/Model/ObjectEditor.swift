@@ -84,6 +84,10 @@ final class ObjectEditor {
     /// The Object panel's size fields.
     var widthDraft = ""
     var heightDraft = ""
+    /// The Category field's text, the reason it can't be set (R2), and whether the keyboard is in it.
+    var categoryDraft = ""
+    var categoryError: String?
+    var categoryEditing = false
 
     /// Edits sent and not answered yet, and loads in flight (the script hook waits on them).
     @ObservationIgnored var pendingEdits = 0
@@ -147,6 +151,9 @@ final class ObjectEditor {
         frameImages = [:]
         renderColors = nil
         info = nil
+        categoryDraft = ""
+        categoryError = nil
+        categoryEditing = false
         stroke = nil
         jobs = []
         lastPoint = nil
@@ -220,6 +227,53 @@ final class ObjectEditor {
         guard let info else { return }
         widthDraft = String(info.size.first ?? 0)
         heightDraft = String(info.size.count > 1 ? info.size[1] : 0)
+        if !categoryEditing { revertCategory() }
+    }
+
+    // MARK: Category (docs/intents/2026-10-object-libraries/spec.md, R4, D8)
+
+    /// The open object's category as read: "Nature › Trees", or empty.
+    var categoryText: String { info?.category.map { LibraryCategories.text($0) } ?? "" }
+
+    /// Esc, or the object changed: the field shows the category again.
+    func revertCategory() {
+        categoryDraft = categoryText
+        categoryError = nil
+    }
+
+    /// Return, leaving the field, a menu pick: sets the category through `object.category`, one edit and one undo step.
+    /// A typed name that breaks R2 stays in the field with its reason, and nothing is set. Empty is None.
+    func setCategory(typed: String) async {
+        guard let app, let doc, let connection = app.connection, doc.ref.kind == .object else { return }
+        let names = LibraryCategories.parse(typed)
+        if let names, let why = LibraryCategories.problem(names) {
+            categoryError = why
+            say(why)
+            return
+        }
+        categoryError = nil
+        // The same category (without regard to case or spelling of the separator): nothing to set.
+        let current = (info?.category ?? []).map { $0.lowercased() }
+        if (names ?? []).map({ $0.lowercased() }) == current {
+            categoryDraft = names.map { LibraryCategories.text($0) } ?? ""
+            return
+        }
+        pendingEdits += 1
+        defer { pendingEdits -= 1 }
+        do {
+            let category: JSONValue = names.map { .array($0.map { .string($0) }) } ?? .null
+            let r: ObjectCategoryResult = try await connection.call("object.category", ["names": [.string(doc.ref.name)], "category": category])
+            if let s = r.summary { say(s) }
+            app.lastEdit = r.summary
+            app.notice = nil
+            categoryDraft = (r.category.map { LibraryCategories.text($0) }) ?? ""
+            await app.loadLists()
+        } catch let e as RPCError {
+            categoryError = e.message
+            say(e.message)
+        } catch {
+            categoryError = error.localizedDescription
+        }
     }
 
     private func clamp() {

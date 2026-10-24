@@ -288,8 +288,9 @@ struct LibraryCell: View {
         }
         .onHover { model.setHovered("object:\(object.name)", $0) }
         .help(object.name)
-        .accessibilityLabel("Place \(object.name)")
-        .accessibilityHint("Double-click to edit the object")
+        // "pine, Nature › Trees" (docs/intents/2026-10-object-libraries/spec.md, R8).
+        .accessibilityLabel(object.category.map { "\(object.name), \(LibraryCategories.text($0))" } ?? object.name)
+        .accessibilityHint("Place it. Double-click to edit the object")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 

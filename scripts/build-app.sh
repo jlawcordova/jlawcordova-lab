@@ -92,6 +92,21 @@ cat > "$app/Contents/Info.plist" <<PLIST
       <key>LSItemContentTypes</key>
       <array><string>com.jlawcordova.pixellab.document</string></array>
     </dict>
+    <dict>
+      <key>CFBundleTypeName</key><string>Pixel Lab Object Library</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Owner</string>
+      <key>LSTypeIsPackage</key><true/>
+      <key>LSItemContentTypes</key>
+      <array><string>com.jlawcordova.pixellab.library</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key><string>Pixel Lab Palette</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Owner</string>
+      <key>LSItemContentTypes</key>
+      <array><string>com.jlawcordova.pixellab.palette</string></array>
+    </dict>
   </array>
   <key>UTExportedTypeDeclarations</key>
   <array>
@@ -104,6 +119,28 @@ cat > "$app/Contents/Info.plist" <<PLIST
       <dict>
         <key>public.filename-extension</key>
         <array><string>pixellab</string></array>
+      </dict>
+    </dict>
+    <dict>
+      <key>UTTypeIdentifier</key><string>com.jlawcordova.pixellab.library</string>
+      <key>UTTypeDescription</key><string>Pixel Lab Object Library</string>
+      <key>UTTypeConformsTo</key>
+      <array><string>com.apple.package</string></array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array><string>pixellib</string></array>
+      </dict>
+    </dict>
+    <dict>
+      <key>UTTypeIdentifier</key><string>com.jlawcordova.pixellab.palette</string>
+      <key>UTTypeDescription</key><string>Pixel Lab Palette</string>
+      <key>UTTypeConformsTo</key>
+      <array><string>public.json</string></array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array><string>pixelpal</string></array>
       </dict>
     </dict>
   </array>
