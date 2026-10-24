@@ -488,3 +488,104 @@ fn r9_a_one_shot_state_and_an_action_of_one_name_in_a_scene_is_a_problem() {
     });
     assert_eq!(found, Vec::<String>::new());
 }
+
+#[test]
+fn r12_a_one_shot_state_and_a_frame_loop_of_one_name_in_a_scene_is_a_problem() {
+    // A frame loop plays as keyframes <scene>--<loop>, the name a one-shot state's end has: the later one would win.
+    let pebble_loop = |d: &mut Docs, name: &str| d.objects.get_mut("pebble").unwrap()["layers"][0]["loop"] = json!(name);
+    let found = problems(|d| pebble_loop(d, "flicker"));
+    one(&found, "lamp's state 'flicker' plays once and ends as <scene>--flicker, which is also the frame loop 'flicker' that pebble plays");
+    // The scene draws a track's poses too.
+    let found = problems(|d| {
+        pebble_loop(d, "flicker");
+        let scene = d.scenes.get_mut("states").unwrap();
+        scene["items"].as_array_mut().unwrap().pop();
+        scene["motion"]["tracks"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({ "item": "walker-a", "keys": [{ "t": 0 }, { "t": 500, "pose": "pebble" }] }));
+    });
+    one(&found, "which is also the frame loop 'flicker' that pebble plays");
+    // A looping state of a loop's name ends with nothing, and a sprite with states draws its frames as its states, not as a loop.
+    assert_eq!(problems(|d| pebble_loop(d, "walk")), Vec::<String>::new());
+    assert_eq!(problems(|d| d.objects.get_mut("lamp").unwrap()["layers"][0]["loop"] = json!("flicker")), Vec::<String>::new());
+}
+
+#[test]
+fn r7_a_state_is_not_named_as_the_compiler_names_what_it_makes() {
+    // mv-<id> is scene motion, a<n> and am-<n> ambient loops, s<n>… a stated item: all <scene>--… beside a one-shot state's end.
+    for name in ["mv", "mv-boat", "am-1", "a1", "a12-b", "s2", "s10-f0"] {
+        let found = problems(|d| {
+            let states = walker(d)["states"].as_object_mut().unwrap();
+            let dead = states.shift_remove("dead").unwrap();
+            states.insert(name.to_string(), dead);
+        });
+        one(&found, &format!("states.{name}: a name that starts {} is one the compiler makes", name.split('-').next().unwrap()));
+    }
+    for name in ["amber", "sway", "s", "a", "a-b", "mvx", "spin2"] {
+        assert_eq!(engine::states::reserved(name), None, "{name}");
+    }
+}
+
+#[test]
+fn r7_a_state_written_twice_is_a_problem() {
+    // JSON keeps the last of a key, so only the text can tell.
+    use engine::format::duplicate_states;
+    let text = r#"{ "layers": [{ "states": { "a": 1, "a": 2 } }], "states": { "idle": { "frames": [0], "ms": 1000, "move": [{ "t": 0 }] }, "say \"hi\"": {}, "flicker": {}, "idle": {}, "flicker": {}, "idle": {} } }"#;
+    assert_eq!(duplicate_states(text), ["idle", "flicker"]);
+    assert_eq!(duplicate_states(r#"{ "states": { "a": { "a": 1, "b": { "a": 2 } }, "b": [{ "a": 1 }, "a"] } }"#), Vec::<String>::new());
+    // Reading the document reports it, and the object still loads (as its last).
+    let dir = std::env::temp_dir().join(format!("pixellab-states-twice-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    for file in common::sources(&states_fixture()) {
+        let to = dir.join(&file);
+        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+        std::fs::copy(states_fixture().join(&file), to).unwrap();
+    }
+    let lamp = dir.join("objects/lamp.json");
+    let text = std::fs::read_to_string(&lamp).unwrap();
+    std::fs::write(&lamp, text.replacen("    \"flicker\"", "    \"idle\": { \"frames\": [1], \"ms\": 200 },\n    \"flicker\"", 1)).unwrap();
+    let d = read_docs(&dir);
+    std::fs::remove_dir_all(&dir).unwrap();
+    assert_eq!(
+        d.load_errors,
+        ["objects/lamp.json: states.idle: written twice; the last one counts, and saving keeps only it, so remove or rename one"]
+    );
+    assert_eq!(d.objects["lamp"]["states"]["idle"], json!({ "frames": [1], "ms": 200 }));
+}
+
+#[test]
+fn r15_a_track_that_only_changes_pose_leaves_each_object_in_the_state_it_starts_in_from_time_0() {
+    // With no state key the track isn't baked, so a page's data-state still reaches the item (R17), and each pose plays
+    // its object's start from time 0, as the CSS and a render play it: entered at 0 whatever the key's time.
+    let sources = docs().sources();
+    let states_of = |n: &str| resolve(&sources, n).ok().and_then(|r| r.states);
+    let track = json!({ "item": "p", "keys": [{ "t": 0 }, { "t": 1250, "pose": "walker" }, { "t": 2000, "pose": "lamp" }] });
+    let segs = engine::states::timeline(&track, "pebble", None, 3000.0, &states_of);
+    let got: Vec<(f64, &str, Option<&str>, f64)> = segs.iter().map(|s| (s.from, s.pose.as_str(), s.state.as_deref(), s.entered)).collect();
+    assert_eq!(got, [(0.0, "pebble", None, 0.0), (1250.0, "walker", Some("idle"), 0.0), (2000.0, "lamp", Some("idle"), 0.0)]);
+    // The item's own state is its own object's.
+    let track = json!({ "item": "w", "keys": [{ "t": 0 }, { "t": 1000, "pose": "lamp" }, { "t": 2000, "pose": "walker" }] });
+    let segs = engine::states::timeline(&track, "walker", Some("walk"), 3000.0, &states_of);
+    let got: Vec<Option<&str>> = segs.iter().map(|s| s.state.as_deref()).collect();
+    assert_eq!(got, [Some("walk"), Some("idle"), Some("walk")]);
+    assert!(engine::states::schedule(&track, "walker", Some("walk"), 3000.0, "walker", &states_of).is_none(), "nothing is baked");
+}
+
+#[test]
+fn r16_a_long_loop_keeps_its_baked_changes_within_a_ms_of_the_run() {
+    // Three decimals of a percent is 3 ms of a 300 s loop: the stops get as many more as they need to stay within 1 ms.
+    let sources = docs().sources();
+    let states_of = |n: &str| resolve(&sources, n).ok().and_then(|r| r.states);
+    let track = json!({ "item": "lamp-b", "keys": [{ "t": 0 }, { "t": 1001, "state": "flicker" }] });
+    let keyed = engine::states::schedule(&track, "lamp", None, 300_000.0, "lamp", &states_of).unwrap();
+    // flicker shows frame 1 from 80 ms in: 1081 ms.
+    assert_eq!(keyed.at(1080.0).frame, 0);
+    assert_eq!(keyed.at(1081.0).frame, 1);
+    let stop = keyed.stops.iter().find(|s| s.frame == 1).unwrap();
+    assert_eq!(stop.pct, 0.3603);
+    assert!(stop.pct * 3000.0 <= 1081.0 && stop.pct * 3000.0 > 1080.0);
+    // A loop of 100 s or less keeps 3 decimals, as before.
+    let keyed = engine::states::schedule(&track, "lamp", None, 3000.0, "lamp", &states_of).unwrap();
+    assert!(keyed.stops.iter().all(|s| (s.pct * 1000.0 - (s.pct * 1000.0).round()).abs() < 1e-9), "{:?}", keyed.stops);
+}

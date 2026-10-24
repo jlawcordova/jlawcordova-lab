@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -40,6 +40,22 @@ export function compileFixture(/** @type {string} */ dir) {
   assert.equal(r.status, 0, `art build: ${r.stdout}${r.stderr}`);
   const path = join(out, 'states.svg');
   return { path, text: readFileSync(path, 'utf8') };
+}
+
+/** Compiles a temp copy of the fixture whose scene `change` has edited; returns the SVG's path. */
+export function compileWith(/** @type {string} */ dir, /** @type {(scene: any) => void} */ change) {
+  const env = { ...process.env, HOME: dir, PIXELLAB_STATE: join(dir, 'state') };
+  const doc = join(dir, 'changed.pixellab');
+  const copy = spawnSync(PROGRAM, ['document', 'copy', '--to', doc, '--document', DOCUMENT], { encoding: 'utf8', env });
+  assert.equal(copy.status, 0, `document copy: ${copy.stdout}${copy.stderr}`);
+  const file = join(doc, 'scenes/states.json');
+  const scene = JSON.parse(readFileSync(file, 'utf8'));
+  change(scene);
+  writeFileSync(file, JSON.stringify(scene, null, 2));
+  const out = join(dir, 'changed-out');
+  const r = spawnSync(PROGRAM, ['art', 'build', '--dir', out, '--document', doc], { encoding: 'utf8', env });
+  assert.equal(r.status, 0, `art build: ${r.stdout}${r.stderr}`);
+  return join(out, 'states.svg');
 }
 
 /** The `<style>` of a compiled SVG. */

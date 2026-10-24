@@ -613,11 +613,22 @@ fn inner_scene_image(
         let source = original(scene, path).ok_or_else(|| "Cannot read properties of undefined".to_string())?;
         let [x, y] = placement_point(item, origin);
         let object = js_string(item.get("object"));
-        let art = match arts.get(&object) {
+        // A sprite with states is in the state the item is in, entered `since` ms before time 0 (R15), so its box is
+        // the one that state shows now: the frame and the move.
+        let states = state_cache.entry(object.clone()).or_insert_with(|| resolve(sources, &object).ok().and_then(|r| r.states)).clone();
+        let stated = states.as_ref().map(|states| {
+            let name = states.first(item.get("state").and_then(Value::as_str)).name.clone();
+            (states.clone(), name, item.get("since").and_then(as_f64).unwrap_or(0.0))
+        });
+        let (key, state, at) = match &stated {
+            Some((_, name, since)) => (format!("{object} {name} {since}"), Some(name.as_str()), time - since),
+            None => (object.clone(), None, time),
+        };
+        let art = match arts.get(&key) {
             Some(b) => *b,
             None => {
-                let (_, b) = object_pixels(sources, &object, Some(time), 0, None, None).map_err(e)?;
-                arts.insert(object.clone(), b);
+                let (_, b) = object_pixels(sources, &object, Some(at), 0, None, state).map_err(e)?;
+                arts.insert(key, b);
                 b
             }
         };
@@ -645,10 +656,7 @@ fn inner_scene_image(
             o.insert("id".into(), v.clone());
         }
         // A sprite with states says which state it is in and which frame that shows at this time (R15).
-        let states = state_cache.entry(object.clone()).or_insert_with(|| resolve(sources, &object).ok().and_then(|r| r.states)).clone();
-        if let Some(states) = states {
-            let name = states.first(item.get("state").and_then(Value::as_str)).name.clone();
-            let since = item.get("since").and_then(as_f64).unwrap_or(0.0);
+        if let Some((states, name, since)) = stated {
             let frame = states::at(&states, &states::run(&states, &name), time - since).frame;
             o.insert("state".into(), Value::String(name));
             o.insert("frame".into(), Value::from(frame));

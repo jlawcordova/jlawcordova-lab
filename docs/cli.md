@@ -1322,7 +1322,7 @@ Add a state to a sprite: frames played at one frame length, that loops or plays 
 pixellab object state add <name> <state> [--frames <n,…>] [--ms <n>] [--once] [--then <text>] [--after <text>]
 ```
 
-A state is the sprite's frames played at one frame length; it loops, or plays once and then holds its last frame or hands over to another state (--once --then). Without --frames it plays every frame, and without --ms it uses the frame length the sprite's frame loop plays at today (150 ms for ff, 200 ms for wf, 500 ms for hf, 200 ms for any other loop and for a still sprite), so the first state looks and plays as the sprite did. The first state is the start: every placement plays it unless an item says otherwise. A sprite has at most 32 states, and a block or a sprite that extends another has none of its own. The names clear and start are the scene commands' words and can't be state names.
+A state is the sprite's frames played at one frame length; it loops, or plays once and then holds its last frame or hands over to another state (--once --then). Without --frames it plays every frame, and without --ms it uses the frame length the sprite's frame loop plays at today (150 ms for ff, 200 ms for wf, 500 ms for hf, 200 ms for any other loop and for a still sprite), so the first state looks and plays as the sprite did. The first state is the start: every placement plays it unless an item says otherwise. A sprite has at most 32 states, and a block or a sprite that extends another has none of its own. The names clear and start are the scene commands' words and can't be state names, and neither can names that start as the compiler's own do (mv-, am-, a or s and a number, like s2).
 
 edits docs · MCP tool `object_state_add`
 

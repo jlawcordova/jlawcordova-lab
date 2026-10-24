@@ -156,3 +156,30 @@ fn r15_the_picture_of_a_keyed_item_changes_with_its_frame() {
     assert_eq!(lamp(1080.0), lamp(1240.0));
     assert_eq!(lamp(1080.0), lamp(3000.0 + 1080.0), "the loop is the same on every pass");
 }
+
+/// The top row of an item's box in a scene render.
+fn top_of(r: &Value, path: &str) -> i64 {
+    r["items"].as_array().unwrap().iter().find(|i| i["path"] == path).unwrap_or_else(|| panic!("no item at {path}"))["bounds"][1]
+        .as_i64()
+        .unwrap()
+}
+
+#[test]
+fn r15_a_scene_renders_boxes_follow_each_items_own_state_and_when_it_entered() {
+    let mut s = sources();
+    // The walker at 2 starts in walk, which doesn't move; walker-a (1) is in idle, which bobs up a pixel at 500 ms.
+    let (early, late) = (scene_at(&s, 300.0), scene_at(&s, 600.0));
+    assert_eq!(top_of(&late, "2"), top_of(&early, "2"), "walk doesn't move it");
+    assert_eq!(top_of(&late, "1"), top_of(&early, "1") - 1, "idle does");
+    // A pebble posed as a walker and keyed into idle at 1250 ms is at rest until idle's move, 500 ms after it entered.
+    let scene = s.scenes.get_mut("states").unwrap();
+    scene["items"][5]["id"] = serde_json::json!("peb");
+    scene["motion"]["tracks"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({ "item": "peb", "keys": [{ "t": 0 }, { "t": 1250, "pose": "walker", "state": "idle" }] }));
+    let s = load_sources(s.palette.clone(), s.objects.clone(), s.scenes.clone());
+    let [rest, still, moved] = [1300.0, 1700.0, 1800.0].map(|t| top_of(&scene_at(&s, t), "5"));
+    assert_eq!(still, rest, "at rest at 1700 ms");
+    assert_eq!(moved, rest - 1, "up a pixel from 1750 ms");
+}
