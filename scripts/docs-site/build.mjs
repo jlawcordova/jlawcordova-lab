@@ -32,6 +32,7 @@ export const PAGES = /** @type {Page[]} */ ([
   { section: 'Guides', file: 'docs/architecture.md', title: 'Architecture' },
   { section: 'Guides', file: 'docs/contributing.md', title: 'Contributing' },
   { section: 'Guides', file: 'docs/testing.md', title: 'Testing' },
+  { section: 'Guides', file: 'docs/libraries.md', title: 'Libraries and palette files' },
   { section: 'Code', file: 'crates/pixellab/README.md', title: 'The program (CLI and servers)' },
   { section: 'Code', file: 'app/README.md', title: 'Mac app' },
   { section: 'Code', file: 'scripts/README.md', title: 'Scripts' },

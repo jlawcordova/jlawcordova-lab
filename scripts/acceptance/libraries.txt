@@ -1,0 +1,172 @@
+# Object libraries and palette files on the examples (docs/intents/2026-10-object-libraries/spec.md, R29), on temp copies of
+# harbor and town (@DIR@) and the committed coast.pixellib and coast.pixelpal (@EXAMPLES@, read-only):
+# categories, tabs and headings in the Library, the inspector's Category row, an exported category, a library and a
+# palette imported into the town (a rename, a conversion, Keep Mine), and Undo Import. The harbor comes first.
+appearance dark
+open scene:harbor
+
+# R5, R6: a tab per outermost category, All first, Others last; All groups by full path under headings
+expect tabs All,Buildings,Harbor,Nature,Props,Terrain,Others
+expect libtab All
+expect headings Buildings › Roofs,Buildings › Walls,Harbor,Nature › Plants,Nature › Stones,Nature › Trees,Props,Terrain,Others
+expect libraryobjects 17
+library open
+snapshot @OUT@/libraries-popover-all-dark.png
+librarytab Nature
+expect libtab Nature
+expect headings Plants,Stones,Trees
+expect libraryobjects 4
+expect libraryorder flowers,rock,pine,tree
+snapshot @OUT@/libraries-popover-nature-dark.png
+# R7: search works within the tab and keeps its headings
+libraryquery pine
+expect libraryobjects 1
+expect headings Trees
+libraryquery
+librarytab others
+expect libraryorder barrel
+expect headings none
+# the tab is remembered while the app runs
+library close
+open scene:harbor-flat
+expect libtab Others
+librarytab all
+appearance light
+library open
+snapshot @OUT@/libraries-popover-all-light.png
+librarytab Buildings
+expect headings Roofs,Walls
+snapshot @OUT@/libraries-popover-buildings-light.png
+librarytab all
+library close
+appearance dark
+
+# R4: the inspector's Category row: a path, one edit and one undo step, an R2 error shown in place
+open object:pine
+expect category Nature › Trees
+snapshot @OUT@/libraries-inspector-category-dark.png
+category Nature / Evergreens
+expect category Nature › Evergreens
+expect objectcategory pine Nature › Evergreens
+expect undolabel Set pine's category to Nature › Evergreens
+undo
+expect category Nature › Trees
+expect objectcategory pine Nature › Trees
+category Na_ture
+expect categoryerror use letters, digits
+expect category Nature › Trees
+snapshot @OUT@/libraries-inspector-category-error-dark.png
+appearance light
+snapshot @OUT@/libraries-inspector-category-error-light.png
+appearance dark
+category all
+expect categoryerror tab of the Library
+category none
+expect category none
+expect objectcategory pine none
+expect tabs All,Buildings,Harbor,Nature,Props,Terrain,Others
+undo
+expect category Nature › Trees
+open scene:harbor
+
+# R11, R20: export a category, all objects and the palette; the document doesn't change
+export library @DIR@/trees.pixellib Nature/Trees
+cli library info @DIR@/trees.pixellib
+expect cli pine
+export library @DIR@/everything.pixellib
+export palette @DIR@/harbor.pixelpal
+expect objects 17
+expect dirty false
+
+# R12, R21: the harbor already has everything in coast.pixellib and coast.pixelpal: nothing to ask, nothing to import
+import library @EXAMPLES@/coast.pixellib
+expect importsheet sheet none
+expect objects 17
+expect importundo none
+import palette @EXAMPLES@/coast.pixelpal
+expect importsheet sheet none
+
+# the town
+openfile @DIR@/town.pixellab
+expect document town
+expect objects 9
+expect tabs All,Buildings,Nature,Props,Terrain
+publish @OUT@/libraries-town-before
+done
+
+# R18: a library opened as a document is offered as an import; Cancel leaves everything as it was
+answer offer cancel
+openfile @EXAMPLES@/coast.pixellib
+expect offer is an object library
+expect importsheet sheet none
+expect objects 9
+
+# R13, R14, R15: the sheet lists the rename, the color that differs and the missing color, nearest first
+answer offer import
+openfile @EXAMPLES@/coast.pixellib
+expect importsheet sheet library
+expect importsheet count 9
+expect importsheet renames rock>rock-2
+expect importsheet differs water-3
+expect importsheet nearest gold-4>wood-3
+expect importsheet missing gold-4>wood-3
+expect importsheet button Import Anyway
+importsheet cancel
+expect importsheet sheet none
+expect objects 9
+
+# a file dropped on the window does the same; this time gold-4 is converted to gold-3, not the nearest
+dropfile @EXAMPLES@/coast.pixellib
+expect importsheet sheet library
+importsheet convert gold-4 gold-3
+expect importsheet missing gold-4>gold-3
+snapshot @OUT@/libraries-import-sheet-dark.png
+appearance light
+snapshot @OUT@/libraries-import-sheet-light.png
+appearance dark
+importsheet import
+expect importsheet sheet none
+expect objects 18
+expect objectcategory rock-2 Nature › Stones
+expect objectcategory rock Nature › Stones
+expect objectcategory barrel none
+expect tabs All,Buildings,Harbor,Nature,Props,Terrain,Others
+expect importundo Undo Import
+library open
+snapshot @OUT@/libraries-popover-town-imported-dark.png
+library close
+
+# R12: one undo step takes the whole import back
+undo
+expect objects 9
+expect importundo none
+expect tabs All,Buildings,Nature,Props,Terrain
+
+# imported again, to be left in place
+import library @EXAMPLES@/coast.pixellib
+importsheet convert gold-4 gold-3
+importsheet import
+expect objects 18
+
+# R21, R22: the palette file adds gold-4 and asks about water-3; Keep Mine is the default
+import palette @EXAMPLES@/coast.pixelpal
+expect importsheet sheet palette
+expect importsheet new gold-4
+expect importsheet differs water-3=keep
+expect importsheet over 0
+snapshot @OUT@/libraries-palette-sheet-dark.png
+appearance light
+snapshot @OUT@/libraries-palette-sheet-light.png
+appearance dark
+importsheet import
+expect importsheet sheet none
+expect palettecolor gold-4 #7A5E2A
+expect palettecolor water-3 #4F7F9A
+expect importundo Undo Import
+undo
+expect palettecolor gold-4 none
+expect importundo none
+
+# R16: no import changed a scene's SVG
+publish @OUT@/libraries-town-after
+done

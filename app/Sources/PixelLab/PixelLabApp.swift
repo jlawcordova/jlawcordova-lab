@@ -80,6 +80,16 @@ struct PixelLabCommands: Commands {
                 .disabled(model.phase != .ready || model.build?.running == true)
             Button("Publish to Folder…") { Task { await model.publish(askFolder: true) } }
                 .disabled(model.phase != .ready || model.build?.running == true)
+            // Object libraries and palette files (docs/intents/2026-10-object-libraries/spec.md, D10): no shortcuts.
+            Button("Import Library…") { Task { await model.imports.chooseLibrary() } }
+                .disabled(model.phase != .ready)
+            Button("Import Palette…") { Task { await model.imports.choosePalette() } }
+                .disabled(model.phase != .ready)
+            Divider()
+            Button("Export Library…") { Task { await model.imports.exportLibrary() } }
+                .disabled(model.phase != .ready)
+            Button("Export Palette…") { Task { await model.imports.exportPalette() } }
+                .disabled(model.phase != .ready)
         }
         CommandGroup(after: .pasteboard) {
             Divider()
@@ -225,6 +235,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// becomes the document, after any unsaved work is dealt with.
     func application(_ application: NSApplication, open urls: [URL]) {
         guard let url = urls.first(where: { $0.pathExtension == "pixellab" }) ?? urls.first else { return }
+        // A library or a palette file isn't a document: the app offers to import it (docs/intents/2026-10-object-libraries/spec.md, R18).
+        if ImportModel.isLibrary(url.path) || ImportModel.isPalette(url.path) {
+            Task { await AppModel.shared.imports.offer(url.path) }
+            return
+        }
         Task { await AppModel.shared.switchDocument(to: url.path) }
     }
 

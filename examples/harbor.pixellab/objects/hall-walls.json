@@ -1,4 +1,8 @@
 {
+  "category": [
+    "Buildings",
+    "Walls"
+  ],
   "kind": "block",
   "size": [2, 1, 1],
   "faces": {

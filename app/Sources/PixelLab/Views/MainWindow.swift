@@ -122,6 +122,26 @@ struct DocumentWindow: View {
         .sheet(item: Binding(get: { model.newDoc }, set: { model.newDoc = $0 })) { draft in
             NewDocSheet(draft: draft).environment(model)
         }
+        // File › Import Library… and Import Palette…, when they have something to ask (docs/intents/2026-10-object-libraries/spec.md, D5, D6).
+        .sheet(item: Binding(get: { model.imports.library }, set: { if $0 == nil { model.imports.cancelLibrary() } })) { _ in
+            LibraryImportSheet().environment(model)
+        }
+        .sheet(item: Binding(get: { model.imports.palette }, set: { if $0 == nil { model.imports.cancelPalette() } })) { _ in
+            PaletteImportSheet().environment(model)
+        }
+        // A .pixellib or .pixelpal dropped on the window starts its import (R12, R21).
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            var took = false
+            for provider in providers where provider.hasItemConformingToTypeIdentifier("public.file-url") {
+                took = true
+                provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { item, _ in
+                    guard let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
+                    guard ImportModel.isLibrary(url.path) || ImportModel.isPalette(url.path) else { return }
+                    Task { @MainActor in await AppModel.shared.imports.drop([url.path]) }
+                }
+            }
+            return took
+        }
     }
 
     private var saveAlertTitle: String {

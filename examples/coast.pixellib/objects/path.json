@@ -1,0 +1,13 @@
+{
+  "category": [
+    "Terrain"
+  ],
+  "kind": "block",
+  "size": [1, 1, 1],
+  "faces": {
+    "top": "path-2",
+    "left": "path-3",
+    "right": "path-4",
+    "edge": "soil-4"
+  }
+}

@@ -25,6 +25,9 @@
 # and an MCP client editing through the app, then the CLI writing itself once the app quits) run on temp harbor
 # copies with a short autosave pause; every other stage runs with a long one (PIXELLAB_AUTOSAVE_MS), so its
 # edits wait for the saves it makes itself, as before autosave.
+# The site's categories (site-categories.mjs, docs/intents/2026-10-object-libraries/spec.md R24–R26) run last, on a copy
+# of the temp site's document and a git archive copy of the explainer document: categorized, exported and imported,
+# with every published SVG byte-identical.
 # The real checkout is only read (copied). Exits 0 if every step passed.
 #
 #   scripts/acceptance.sh [--only <name>[,<name>...]] [out-dir]      (default: a new temp dir)
@@ -201,6 +204,27 @@ if stage examples-town; then
   (( ${ran[(Ie)examples-harbor]} )) || echo "==> the example documents: layers from the file, three and four levels deep"
   run_example examples-town.txt examples-town.log town
 fi
+if stage libraries; then
+  echo "==> libraries: categories and tabs on the harbor, an exported category, coast.pixellib imported into the town (a rename, a conversion), a palette import with Keep Mine, Undo Import"
+  lib="$out/examples/libraries"
+  rm -rf "$lib" "$shots/libraries-town-before" "$shots/libraries-town-after" && mkdir -p "$lib" "$shots/libraries-town-before" "$shots/libraries-town-after"
+  for d in harbor town; do cp -R "$root/examples/$d.pixellab" "$lib/$d.pixellab" && migrate_doc "$lib/$d.pixellab" > /dev/null; done
+  sed "s#@OUT@#$shots#g; s#@DIR@#$lib#g; s#@EXAMPLES@#$root/examples#g" "$root/scripts/acceptance/libraries.txt" > "$out/libraries.txt"
+  PIXELLAB_SCRIPT="$out/libraries.txt" PIXELLAB_DOC="$lib/harbor.pixellab" PIXELLAB_STATE="$state" "$app/Contents/MacOS/PixelLab" 2>&1 | grep '^script:' > "$out/libraries.log" || true
+  tail -1 "$out/libraries.log"
+  grep -q 'all steps passed' "$out/libraries.log"
+  # The exported category holds those objects and what they extend; everything is canonical files.
+  trees=$(ls "$lib/trees.pixellib/objects" | tr '\n' ' ')
+  [[ $trees == "pine.json tree.json " ]] || { echo "the Nature/Trees export holds: $trees" >&2; exit 1; }
+  [[ -f $lib/harbor.pixelpal ]] || { echo "no exported palette" >&2; exit 1; }
+  # R16: the town's published SVGs are byte-identical before and after the imports.
+  before=$(ls "$shots/libraries-town-before"/*.svg | wc -l | tr -d ' ')
+  [[ $before -ge 1 ]] || { echo "the town published no SVG" >&2; exit 1; }
+  for f in "$shots/libraries-town-before"/*.svg; do
+    cmp "$f" "$shots/libraries-town-after/${f:t}" || { echo "${f:t} changed while libraries were imported (R16)" >&2; exit 1; }
+  done
+  echo "the town's $before SVG(s) are byte-identical before and after the imports; the Nature/Trees export holds exactly pine and tree"
+fi
 if stage examples-depth; then
   echo "==> depth order: the pine moved behind the house, the override, the saved file"
   run_example examples-depth.txt examples-depth.log harbor
@@ -330,6 +354,14 @@ if stage canvas; then
   meadow_width=$(sed -n 's/.*<svg[^>]* viewBox="[-0-9]* [-0-9]* \([0-9]*\) [0-9]*".*/\1/p' "$shots/canvas-after/meadow.svg" | head -1)
   [[ -n $meadow_width && $meadow_width -gt 128 ]] || { echo "the meadow's SVG is $meadow_width wide: it should fit what was placed far from the origin (R2)" >&2; exit 1; }
   echo "harbor SVGs byte-identical; the meadow publishes at ${meadow_width} px wide, fit to its content (the old default cut at 128)"
+fi
+if stage site-categories; then
+  # docs/intents/2026-10-object-libraries/spec.md, R24–R26: the owner's art in categories, on copies only
+  # (the temp site's document, and the explainer document read with git archive from the real site).
+  echo "==> the site's categories: Appendix A on the site's document, B on the explainer, exported and imported, the SVGs byte-identical"
+  mkdir -p "$out/state-site-categories"
+  PIXELLAB_STATE="$out/state-site-categories" node "$root/scripts/acceptance/site-categories.mjs" "$site" "$out/state-site-categories" "$out" "$real" | tee "$out/site-categories.log" | tail -1
+  grep -q 'all passed' "$out/site-categories.log" || { grep FAIL "$out/site-categories.log" >&2; exit 1; }
 fi
 echo "==> the temp site after the run"
 # (A partial pass may have committed nothing after the base.)

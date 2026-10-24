@@ -202,7 +202,7 @@ impl History {
         // A file whose edits cancelled out isn't a change.
         version["changes"].as_array_mut().expect("changes").retain(|c| c["before"] != c["after"]);
         let list = version["edits"].as_array_mut().expect("edits");
-        list.extend(edits.iter().map(|e| json!(e)));
+        list.extend(edits.iter().filter(|e| !e.is_empty()).map(|e| json!(e)));
         if list.len() > EDITS_KEPT {
             let extra = list.len() - EDITS_KEPT;
             list.drain(..extra);
