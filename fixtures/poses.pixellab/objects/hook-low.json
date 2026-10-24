@@ -1,0 +1,25 @@
+{
+  "notes": [
+    "The hook at the bottom, swung wide: wider than the base, and its W is another color, so the merge pads the box and renames the key."
+  ],
+  "kind": "sprite",
+  "anchor": [3, 0],
+  "keys": {
+    "W": "soil-3",
+    "d": "gold-3"
+  },
+  "layers": [
+    {
+      "map": [
+        "...W...",
+        "...W...",
+        "...W...",
+        "...W...",
+        "...W...",
+        "...W...",
+        "ddddddd",
+        "...d..."
+      ]
+    }
+  ]
+}

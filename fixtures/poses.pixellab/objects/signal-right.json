@@ -1,0 +1,15 @@
+{
+  "notes": [
+    "The right lamp lit; one is also placed on its own, so it stays in use after the merge."
+  ],
+  "kind": "sprite",
+  "extends": "signal",
+  "keys": {
+    "l": "roof-1"
+  },
+  "rows": {
+    "0": {
+      "1": "kmklk"
+    }
+  }
+}

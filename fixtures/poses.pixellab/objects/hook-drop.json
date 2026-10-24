@@ -1,0 +1,34 @@
+{
+  "notes": [
+    "The hook let down: a longer rope on one layer and the hook on another, so the merge flattens it."
+  ],
+  "kind": "sprite",
+  "anchor": [2, 0],
+  "keys": {
+    "W": "wood-3",
+    "d": "gold-3",
+    "g": "gold-2"
+  },
+  "layers": [
+    {
+      "map": [
+        "..W..",
+        "..W..",
+        "..W..",
+        "..W..",
+        ".....",
+        "....."
+      ]
+    },
+    {
+      "map": [
+        ".....",
+        ".....",
+        ".....",
+        ".....",
+        ".dgd.",
+        "..d.."
+      ]
+    }
+  ]
+}

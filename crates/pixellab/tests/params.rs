@@ -366,6 +366,7 @@ fn every_command_is_well_formed_and_has_a_group() {
         "object.state.move",
         "object.state.set",
         "object.states.make",
+        "object.states.from-poses",
         "object.still",
         "scene.action",
         "scene.ambient",
@@ -441,6 +442,7 @@ fn every_command_is_well_formed_and_has_a_group() {
             "library.category",
             "library.export",
             "library.import",
+            "object.states.from-poses",
             "palette.export"
         ]
     );

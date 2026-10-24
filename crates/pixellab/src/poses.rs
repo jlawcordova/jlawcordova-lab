@@ -15,6 +15,7 @@ use engine::serialize::keys;
 use serde_json::{json, Map, Value};
 
 use crate::errors::CommandError;
+use crate::render::ScenePixels;
 
 /// The loop name and frame prefix of the merged sprite's frames: a loop name of their own, which
 /// never plays by itself, since the sprite now has states.
@@ -650,38 +651,49 @@ pub fn affected(sources: &Sources, plan: &Plan) -> Vec<String> {
         .collect()
 }
 
-/// The times a scene's render is compared at: every 100 ms of its loop, and either side of each key
-/// of the tracks the merge rewrote (`0` alone for a scene without motion).
+/// The times a scene's render is compared at: every 100 ms of its loop, and each of `extra` (the
+/// keys of the tracks the merge rewrites, which can fall between), or `0` alone for a scene without
+/// motion.
 pub fn check_times(scene: &Value, extra: &[f64]) -> Vec<f64> {
     let duration = scene.pointer("/motion/duration").and_then(Value::as_f64).unwrap_or(0.0);
     if duration <= 0.0 {
         return vec![0.0];
     }
     let mut times: Vec<f64> = (0..).map(|i| i as f64 * 100.0).take_while(|t| *t < duration).collect();
-    for t in extra {
-        for at in [*t - 1.0, *t, *t + 1.0] {
-            if (0.0..duration).contains(&at) {
-                times.push(at);
-            }
-        }
-    }
+    times.extend(extra.iter().copied().filter(|t| (0.0..duration).contains(t)));
     times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     times.dedup();
     times
 }
 
-/// Every key time in a scene's tracks.
-pub fn key_times(scene: &Value) -> Vec<f64> {
-    scene
-        .pointer("/motion/tracks")
-        .and_then(Value::as_array)
+/// The key times of a scene's tracks whose item places `base`.
+pub fn family_key_times(scene: &Value, base: &str) -> Vec<f64> {
+    tracks_of_object(scene, base)
         .into_iter()
-        .flatten()
-        .flat_map(|t| t.get("keys").and_then(Value::as_array).into_iter().flatten().map(t_of))
+        .flat_map(|i| scene["motion"]["tracks"][i].get("keys").and_then(Value::as_array).cloned().unwrap_or_default())
+        .map(|k| t_of(&k))
         .collect()
 }
 
 /// The names of a doc's states, in order.
 pub fn state_names(doc: &Value) -> Vec<String> {
     doc.get("states").and_then(Value::as_object).map(|m| keys(m).into_iter().cloned().collect()).unwrap_or_default()
+}
+
+/// The times `scene` renders differently with the plan applied (`after`), at most `limit` of them
+/// (R38): every 100 ms of its loop and each key of the base's tracks, pixel by pixel.
+pub fn differences(before: &Sources, after: &Sources, plan: &Plan, scene: &str, limit: usize) -> Result<Vec<f64>, String> {
+    let extra = family_key_times(&before.scenes[scene], &plan.object);
+    let mut out = Vec::new();
+    let (mut was, mut now) = (ScenePixels::new(before, scene), ScenePixels::new(after, scene));
+    for t in check_times(&after.scenes[scene], &extra) {
+        let (a, b) = (was.at(t)?, now.at(t)?);
+        if a.len() != b.len() || a.iter().any(|(k, v)| b.get(k) != Some(v)) {
+            out.push(t);
+            if out.len() >= limit {
+                break;
+            }
+        }
+    }
+    Ok(out)
 }

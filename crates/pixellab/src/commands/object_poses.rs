@@ -3,7 +3,6 @@
 //! render checked to stay the same before anything is written.
 
 use engine::engine::validate;
-use engine::omap::OMap;
 use serde_json::{json, Value};
 
 use super::common::{flag, obj, opt_str, str_of};
@@ -12,7 +11,6 @@ use crate::context::{Ctx, DocKind};
 use crate::errors::{CommandError, Result};
 use crate::poses::{self, Options};
 use crate::registry::{Command, Params};
-use crate::render::scene_pixels_at;
 
 fn strings(params: &Params, key: &str) -> Vec<String> {
     match params.get(key) {
@@ -24,31 +22,6 @@ fn strings(params: &Params, key: &str) -> Vec<String> {
 
 fn ms(t: f64) -> String {
     engine::jsnum::to_string(t)
-}
-
-/// The times a scene renders differently in `after`, at most `limit` of them.
-fn differences(
-    before: &engine::engine::Sources,
-    after: &engine::engine::Sources,
-    scene: &str,
-    limit: usize,
-) -> std::result::Result<Vec<f64>, String> {
-    let extra: Vec<f64> = poses::key_times(&before.scenes[scene]).into_iter().chain(poses::key_times(&after.scenes[scene])).collect();
-    let mut out = Vec::new();
-    for t in poses::check_times(&after.scenes[scene], &extra) {
-        let (a, b) = (scene_pixels_at(before, scene, t)?, scene_pixels_at(after, scene, t)?);
-        if !same(&a, &b) {
-            out.push(t);
-            if out.len() >= limit {
-                break;
-            }
-        }
-    }
-    Ok(out)
-}
-
-fn same<K: PartialEq + std::hash::Hash + Eq + Clone, V: PartialEq>(a: &OMap<K, V>, b: &OMap<K, V>) -> bool {
-    a.len() == b.len() && a.iter().all(|(k, v)| b.get(k) == Some(v))
 }
 
 fn run(ctx: &mut Ctx, params: Params) -> Result<Value> {
@@ -97,7 +70,7 @@ fn run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     // Every scene that shows the family renders the same, before and after, at every 100 ms (R38).
     let mut differ: Vec<Value> = Vec::new();
     for scene in poses::affected(before, &plan) {
-        let times = differences(before, &after, &scene, 5)
+        let times = poses::differences(before, &after, &plan, &scene, 5)
             .map_err(|m| CommandError::new(format!("{scene} doesn't render: {m}"), "render_error"))?;
         if !times.is_empty() {
             differ.push(json!({ "scene": scene, "times": times }));
@@ -217,5 +190,7 @@ pub fn commands() -> Vec<Command> {
         "pixellab object states from-poses crossing-signal --fold --as flash --delete-unused",
     ];
     c.format = Some(format);
+    // It saves every file it changes itself, as one version (put_files), and has its own dryRun.
+    c.writes_direct = true;
     vec![c]
 }

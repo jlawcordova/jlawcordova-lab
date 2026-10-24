@@ -1,0 +1,21 @@
+{
+  "notes": [
+    "A crane hook at rest: the base of the hook pose family (poses.pixellab, object-states spec R37)."
+  ],
+  "kind": "sprite",
+  "anchor": [2, 0],
+  "keys": {
+    "W": "wood-3",
+    "d": "gold-3"
+  },
+  "layers": [
+    {
+      "map": [
+        "..W..",
+        "..W..",
+        ".ddd.",
+        "..d.."
+      ]
+    }
+  ]
+}
