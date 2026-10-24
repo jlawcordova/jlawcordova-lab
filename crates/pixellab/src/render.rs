@@ -533,6 +533,25 @@ pub fn render_scene_image(sources: &Sources, name: &str, dark_page: &str, option
     Ok(image)
 }
 
+/// What a scene shows at `time` (every item, light theme), pixel by pixel: the paint a scene render
+/// at that time draws, for comparing two versions of a scene (poses becoming states, R38).
+pub fn scene_pixels_at(sources: &Sources, name: &str, time: f64) -> std::result::Result<OMap<Pixel, ColorName>, String> {
+    let e = |err: engine::EngineError| err.0;
+    let mut still = scene_at(sources, name, time).map_err(e)?;
+    let items = match still.as_object_mut().and_then(|o| o.shift_remove("items")) {
+        Some(Value::Array(a)) => a,
+        _ => Vec::new(),
+    };
+    if let Some(o) = still.as_object_mut() {
+        o.insert("items".into(), Value::Array(motion::shown_items(&items)));
+    }
+    let mut local = sources.clone();
+    local.scenes.clear();
+    local.scenes.insert(name.to_string(), still);
+    let rendered = render_scene(&local, name, Order::List).map_err(e)?;
+    Ok(composite(&rendered.root, CompositeOptions { first_variant: false, frame: 0, time: Some(time), play: None }))
+}
+
 fn inner_scene_image(
     sources: &Sources,
     name: &str,

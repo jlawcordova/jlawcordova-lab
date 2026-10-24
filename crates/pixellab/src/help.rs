@@ -342,7 +342,7 @@ use crate::server_mcp::LEFT_OUT;
 const REPO: &str = "/Users/jlawcordova/Projects/jlawcordova-lab";
 
 fn tool_name(command: &str) -> String {
-    command.replace('.', "_")
+    command.replace(['.', '-'], "_")
 }
 
 fn cell(s: &str) -> String {

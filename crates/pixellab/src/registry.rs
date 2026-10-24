@@ -193,6 +193,7 @@ pub fn registry() -> Registry {
     list.extend(commands::object::commands());
     list.extend(commands::object_edit::commands());
     list.extend(commands::object_states::commands());
+    list.extend(commands::object_poses::commands());
     list.extend(commands::check::commands());
     list.extend(commands::library::commands());
     list.extend(commands::palette::commands());

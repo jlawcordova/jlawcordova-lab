@@ -41,7 +41,7 @@ const DESTRUCTIVE: [&str; 3] = ["scene.remove", "scene.track.remove", "doc.rever
 
 /// scene.place → scene_place (`toolName`).
 pub fn tool_name(command: &str) -> String {
-    command.replace('.', "_")
+    command.replace(['.', '-'], "_")
 }
 
 pub const INSTRUCTIONS: &str = "Pixel Lab edits the pixel art in a .pixellab document: scenes (isometric, 32×16 tiles) and objects (sprites and blocks drawn from a fixed palette). The site that inlines the art publishes from the document.

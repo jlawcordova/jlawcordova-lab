@@ -27,6 +27,7 @@ pub mod merge;
 pub mod motion_ops;
 pub mod owner;
 pub mod params;
+pub mod poses;
 pub mod registry;
 pub mod render;
 pub mod scene_ops;
