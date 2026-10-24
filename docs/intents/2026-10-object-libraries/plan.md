@@ -57,14 +57,13 @@ This plan builds [`spec.md`](spec.md), R1–R30, as approved with its Areas of c
 ## Order of work
 
 ```
-main ── spec/object-libraries (intent + spec, PR #53) ── feat/object-libraries ───── PR 4 (owner merges) ──▶ main
+main ── (PR #53: intent, spec and plan) ── feat/object-libraries ───── PR 4 (owner merges) ──▶ main
                                                           ├─ PR 1  program  ◀─ feat/object-libraries-program
                                                           ├─ PR 2  app      ◀─ feat/object-libraries-app   (after PR 1 merges)
                                                           └─ integration commits (docs, site categories) ─ then PR 4
 ```
 
-- `feat/object-libraries` is cut from `spec/object-libraries`, so it carries the accepted intent and the approved spec, and this plan is its first commit of its own.
-- PR #53 (intent and spec only) is closed in favor of PR 4, which carries them too.
+- The intent, spec and plan go to `main` in PR #53. Once the owner merges it, `feat/object-libraries` is cut from `main`, and the slices start.
 - There are two slices, because the app is built on the program's commands: the program is the foundation, merged and checked before the app slice starts.
 - The docs and the site-categories pass are small and need both slices, so the main session commits them straight onto `feat/object-libraries`.
 
