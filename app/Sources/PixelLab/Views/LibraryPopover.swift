@@ -68,9 +68,11 @@ struct LibraryPopover: View {
         }
         .padding(12)
         .frame(width: Self.width)
-        .background(Theme.sidebar, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        // The shadow is the panel's only: on the whole view it would shadow every cell and pinned heading too.
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.sidebar).shadow(color: .black.opacity(0.28), radius: 14, y: 4)
+        }
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
-        .shadow(color: .black.opacity(0.28), radius: 14, y: 4)
         .transition(reduceMotion ? .identity : .opacity.combined(with: .offset(y: 6)))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Library")
