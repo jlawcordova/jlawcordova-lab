@@ -1,0 +1,14 @@
+{
+  "category": [
+    "Buildings",
+    "Roofs"
+  ],
+  "kind": "block",
+  "size": [2, 1, 1],
+  "faces": {
+    "top": "gold-1",
+    "left": "gold-2",
+    "right": "gold-3",
+    "edge": "gold-4"
+  }
+}

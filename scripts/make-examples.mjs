@@ -20,9 +20,16 @@
 //                   scene without layers (it publishes the same SVG).
 // town.pixellab     a bigger island (about 400 items) with four districts of streets
 //                   of houses: about 60 layers, four levels deep, no wrappers.
+// coast.pixellib    the harbor's objects, exported by `library export` (an object library).
+// coast.pixelpal    the harbor's palette, exported by `palette export` (a palette file).
+//
+// Both documents' objects have categories (CATEGORIES), set with `object category`. The town
+// differs from the harbor in three small ways that never show in its scene (an unplaced rock of
+// its own, no gold-4, a bluer water-3), so importing coast.pixellib or coast.pixelpal into it
+// shows a rename, a color to convert and a color that differs.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -137,6 +144,51 @@ export const OBJECTS = {
     { a: 'wood-1', b: 'wood-2', c: 'wood-3', d: 'wood-4', s: 'cream' },
     [10, 11],
   ),
+};
+
+/**
+ * The category of each object, outermost name first (docs/intents/2026-10-object-libraries/spec.md, R27).
+ * The barrel has none, so the Library shows an Others tab on the harbor. A category is a name
+ * the program sets with `object category`, one call for each, and never reaches the SVGs.
+ */
+export const CATEGORIES = {
+  grass: 'Terrain',
+  path: 'Terrain',
+  sand: 'Terrain',
+  water: 'Terrain',
+  pine: 'Nature/Trees',
+  tree: 'Nature/Trees',
+  flowers: 'Nature/Plants',
+  rock: 'Nature/Stones',
+  walls: 'Buildings/Walls',
+  'hall-walls': 'Buildings/Walls',
+  'roof-red': 'Buildings/Roofs',
+  'roof-wood': 'Buildings/Roofs',
+  'hall-roof': 'Buildings/Roofs',
+  dock: 'Harbor',
+  boat: 'Harbor',
+  lamp: 'Props',
+};
+
+/**
+ * Objects only one example has, by example: the town has a rock of its own, unplaced, so that
+ * importing the harbor's library into it renames the harbor's rock (rock-2).
+ */
+const OWN_OBJECTS = {
+  town: {
+    rock: sprite(['..aa..', '.abba.', 'abbbbc', '.bbcc.', '..cc..'], { a: 'path-1', b: 'path-2', c: 'path-3' }, [2, 4]),
+  },
+};
+
+/**
+ * What the town's palette is not: the harbor's palette without `gold-4`, which no town object
+ * uses, and with a bluer `water-3`. So importing the harbor's library or palette into the town
+ * shows the three things a palette can say: a color to convert (gold-4), one that differs
+ * (water-3), and nothing else. Neither changes how the town's scene renders.
+ */
+const TOWN_PALETTE = (/** @type {any} */ palette) => {
+  delete palette.world['gold-4'];
+  palette.world['water-3'] = '#4F7F9A';
 };
 
 // ------------------------------------------------------------------- scenes
@@ -328,6 +380,8 @@ export function examples() {
     town: {
       manifest: { format: 2, name: 'town', publish: { budgets: { 'town.svg': { raw: 409600, gzip: 81920 } } } },
       objects: ['grass', 'path', 'walls', 'roof-red', 'roof-wood', 'tree', 'pine', 'lamp'],
+      own: OWN_OBJECTS.town,
+      palette: TOWN_PALETTE,
       ...town(),
     },
   };
@@ -380,6 +434,21 @@ export async function writeExamples(out) {
     execFileSync(BIN, ['document', 'new', root, '--name', name], { stdio: 'ignore', env });
     await writeFile(join(root, 'manifest.json'), `${JSON.stringify(ex.manifest, null, 2)}\n`);
     for (const o of ex.objects) await writeFile(join(root, 'objects', `${o}.json`), objectText(/** @type {any} */ (OBJECTS)[o]));
+    for (const [o, def] of Object.entries(/** @type {any} */ (ex).own ?? {})) await writeFile(join(root, 'objects', `${o}.json`), objectText(def));
+    if (/** @type {any} */ (ex).palette) {
+      const file = join(root, 'palette.json');
+      const palette = JSON.parse(readFileSync(file, 'utf8'));
+      /** @type {any} */ (ex).palette(palette);
+      await writeFile(file, `${JSON.stringify(palette, null, 2)}\n`);
+    }
+    // Categories: one `object category` call for each.
+    /** @type {Map<string, string[]>} */
+    const byCategory = new Map();
+    for (const o of [...ex.objects, ...Object.keys(/** @type {any} */ (ex).own ?? {})]) {
+      const c = /** @type {any} */ (CATEGORIES)[o];
+      if (c) byCategory.set(c, [...(byCategory.get(c) ?? []), o]);
+    }
+    for (const [category, names] of byCategory) run('object', 'category', ...names, '--to', category);
     for (const scene of ex.scenes) {
       await writeFile(join(root, 'scenes', `${scene.name}.json`), sceneText(scene));
       for (const p of inFirstOrder(scene.places)) {
@@ -393,6 +462,12 @@ export async function writeExamples(out) {
       scene.finish((...a) => run(...a), scene.name);
     }
     run('check');
+    // The library and the palette file the harbor exports (R27): made by the program from the finished document.
+    if (name === 'harbor') {
+      for (const f of ['coast.pixellib', 'coast.pixelpal']) await rm(join(out, f), { recursive: true, force: true });
+      run('library', 'export', join(out, 'coast.pixellib'));
+      run('palette', 'export', join(out, 'coast.pixelpal'));
+    }
   }
   } finally {
     rmSync(state, { recursive: true, force: true });

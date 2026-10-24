@@ -1,0 +1,24 @@
+{
+  "category": [
+    "Nature",
+    "Stones"
+  ],
+  "kind": "sprite",
+  "anchor": [2, 4],
+  "keys": {
+    "a": "path-1",
+    "b": "path-2",
+    "c": "path-3"
+  },
+  "layers": [
+    {
+      "map": [
+        "..aa..",
+        ".abba.",
+        "abbbbc",
+        ".bbcc.",
+        "..cc.."
+      ]
+    }
+  ]
+}
