@@ -851,3 +851,80 @@ pub fn apply_palette(palette: &mut Value, file: &PaletteFile, add: &[NewColor], 
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn doc(world: Value, objects: Vec<(&str, Value)>) -> Sources {
+        load_sources(
+            json!({ "world": world, "outfit": {} }),
+            objects.into_iter().map(|(n, o)| (n.to_string(), o)).collect(),
+            BTreeMap::new(),
+        )
+    }
+
+    fn sprite(color: &str) -> Value {
+        json!({ "kind": "sprite", "anchor": [0, 0], "keys": { "a": color }, "layers": [{ "map": ["a"] }] })
+    }
+
+    #[test]
+    fn r4_a_typed_path_splits_on_either_separator_and_trims() {
+        assert_eq!(split_category("Nature / Trees"), ["Nature", "Trees"]);
+        assert_eq!(split_category("Nature › Trees"), ["Nature", "Trees"]);
+        assert_eq!(category_from_param(&json!(["Nature", "Big/Trees"])).unwrap(), ["Nature", "Big", "Trees"]);
+        assert!(category_from_param(&json!("Nature//Trees")).is_err(), "an empty name is refused");
+        assert!(category_from_param(&json!("all")).is_err());
+    }
+
+    #[test]
+    fn r9_a_category_is_within_its_prefix_without_regard_to_case() {
+        let names = |l: &[&str]| l.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(category_within(&names(&["Nature", "Trees"]), &names(&["nature"])));
+        assert!(category_within(&names(&["Nature"]), &names(&["NATURE"])));
+        assert!(!category_within(&names(&["Nature"]), &names(&["Nature", "Trees"])));
+        assert!(!category_within(&names(&["Trees"]), &names(&["Nature"])));
+    }
+
+    #[test]
+    fn r15_the_nearest_color_is_the_smallest_distance_in_the_tier_and_ties_go_to_the_earlier() {
+        let d = doc(json!({ "dark": "#101010", "mid-a": "#808080", "mid-b": "#808080", "light": "#F0F0F0" }), vec![]);
+        assert_eq!(nearest_color(&d, "world", "#7F7F7F"), Some(("mid-a".into(), "#808080".into())));
+        assert_eq!(nearest_color(&d, "world", "#000000").unwrap().0, "dark");
+        assert_eq!(nearest_color(&d, "outfit", "#000000"), None, "an empty tier has none");
+    }
+
+    #[test]
+    fn r13_a_rename_takes_the_first_free_suffix_and_an_equal_object_is_the_documents() {
+        let d = doc(json!({ "grass": "#00FF00" }), vec![("pine", sprite("grass")), ("pine-2", sprite("grass"))]);
+        let mut lib =
+            Library { name: "l".into(), exported_from: "x".into(), world: vec![("grass".into(), "#00FF00".into())], ..Library::default() };
+        let mut other = sprite("grass");
+        other["anchor"] = json!([1, 1]);
+        lib.objects.insert("pine".into(), other);
+        lib.objects.insert("fir".into(), sprite("grass"));
+        lib.objects.insert("pine-2".into(), sprite("grass"));
+        let plan = plan_import(&d, &lib);
+        let fate = |n: &str| plan.objects.iter().find(|o| o.name == n).map(|o| (o.fate, o.as_name.clone())).unwrap();
+        assert_eq!(fate("pine"), (Fate::Renamed, "pine-3".into()), "pine-2 is taken in the document");
+        assert_eq!(fate("pine-2"), (Fate::Same, "pine-2".into()));
+        assert_eq!(fate("fir"), (Fate::New, "fir".into()));
+        assert!(plan.differing.is_empty() && plan.missing.is_empty() && !plan.differs());
+    }
+
+    #[test]
+    fn r22_a_palette_plan_sorts_new_differing_and_other_tier_colors() {
+        let d = doc(json!({ "a": "#111111", "b": "#222222" }), vec![]);
+        let file = PaletteFile {
+            world: vec![("a".into(), "#111111".into()), ("b".into(), "#999999".into()), ("c".into(), "#333333".into())],
+            outfit: vec![("d".into(), "#444444".into())],
+            ..PaletteFile::default()
+        };
+        let plan = plan_palette(&d, &file);
+        assert_eq!(plan.new.iter().map(|c| (c.name.as_str(), c.tier)).collect::<Vec<_>>(), [("c", "world"), ("d", "outfit")]);
+        assert_eq!(plan.differing.len(), 1);
+        assert_eq!(plan.differing[0].name, "b");
+        assert!(plan.other_tier.is_empty());
+        assert_eq!(over_cap(&d, &plan.new), (0, 0));
+    }
+}

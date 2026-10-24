@@ -6,6 +6,7 @@
 
 - [Commands](#commands)
 - [The command line](#the-command-line)
+- [Libraries and palette files](#libraries-and-palette-files)
 - [The stdio protocol](#the-stdio-protocol) (`serve --stdio`, for the Mac app)
 - [MCP](#mcp) (`serve --mcp`, for agents) and [setup for Claude Code](#setup-for-claude-code)
 - [The state dir: history, owners and activity](#the-state-dir-history-owners-and-activity)
@@ -127,6 +128,16 @@ The leading words name the command (`scene place` is `scene.place`; the longest 
 **One writer per document.** While Pixel Lab has the document open, its server owns it: an edit command sends itself to the app (the edit shows on its stage, and the app saves it before answering), and a read reads the app's open copy. Without the app, the command writes the files itself. `--dry-run` asks the app to save first, then shows the diff against the files. `document migrate` refuses while the app has the document open.
 
 The document comes from `--document`, else `PIXELLAB_DOC`, else `~/.config/pixellab/config.json` (`{"document": "…"}`), else `--site <checkout>` / `PIXELLAB_SITE` / `{"site": "…"}` (the `*.pixellab` under the site's `src/assets/pixel-art/`, or its legacy `source/` folder), else `~/Projects/jlawcordova.github.io`.
+
+## Libraries and palette files
+
+Two file kinds sit beside the `.pixellab` document, for moving art between documents by copying. Nothing links a document to either afterwards.
+
+- **Categories.** An object can carry a `category`, a list of names from the outermost in (`["Nature", "Trees"]`, typed `Nature/Trees` or `Nature › Trees`). A name is 1 to 32 letters, digits, spaces, `&`, `'` and `-`, and `All` and `Others` can't be the outermost (they are the Library's own tabs). `object category` sets or clears it, `object list --category` filters by it, and `check` reports a bad one. A category never changes how an object renders or what `art build` writes.
+- **`.pixellib`, an object library.** A folder: `library.json` (`format`, `kind: "library"`, `name`, `exportedFrom` and `colors`, the palette colors its objects used at export, never read as a palette) and `objects/*.json`, the same files a document holds, categories included. It has no scenes and no palette. `library export` writes one from all of a document's objects, one category and below it, or a named list, adding every object they extend; it refuses an existing library unless `--replace`. `library import` copies a library's objects in: a taken name gets the first free suffix (`pine-2`) and every `extends` follows; an object identical to the document's, apart from its category, isn't copied; a library `character` that differs isn't copied, and its figures extend the document's. Differing colors need `--accept-differences`, and a color the document lacks needs `--convert '{"wood-5":"wood-3"}'` to a color of the same tier; `--dry-run` shows the plan. An import never changes the palette, the existing objects or the scenes, and is one version in the history. `library info` reads a library, `library category` sets categories in one in place, and `check --library <path>` validates one.
+- **`.pixelpal`, a palette file.** One JSON file: `format`, `kind: "palette"`, and the `world` and `outfit` tiers (and `colorNotes`) as in a document's `palette.json`. `palette export` writes the document's palette. `palette import` adds the colors the document lacks, by name, at the end of their tier; it never removes one. A name with another value needs `--keep` or `--use-theirs`, and an import that would pass a tier's cap (32 world, 16 outfit) adds nothing and says how many colors are over; `--only` narrows it. It is one edit and one version.
+
+An agent that is refused with `differs`, `missing_colors` or `palette_differs` asks the owner (`chat_ask`) before it accepts differences, converts a color or chooses a value.
 
 ## The stdio protocol
 
