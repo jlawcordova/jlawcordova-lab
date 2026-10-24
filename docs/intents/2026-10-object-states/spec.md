@@ -1,5 +1,5 @@
 # Spec: Object states and the animation pane (from intent.md 2026-10-24)
-Status: draft.
+Status: draft. On 2026-10-24 the owner said yes to every decision the spec raised: each Area of concern is marked **Settled** with what was chosen, and the new open questions are answered. That adds folding pose families into states (R37–R40, D8) and a real-browser check with Playwright (D6).
 
 This spec covers the intent as the owner revised it on 2026-10-24, with the animation pane folded in (`animation-pane.md`). It builds on what is in `main` today: autosave (`../2026-10-autosave/spec.md`: edits apply as they're made, MCP edits included, and every change is a version), the canvas-first window with the floating Library (`../2026-10-floating-library/spec.md`), the scene canvas (`../2026-10-scene-canvas/spec.md`), depth order (`../2026-10-depth-order/spec.md`) and the Rust engine's ambient loops and actions (`../2026-10-rust-engine/spec.md`, R12, R13, D6, D7).
 
@@ -182,7 +182,7 @@ R18 to R25 carry the animation pane's spec (`animation-pane.md`, and its spec on
 **Doors, tests, docs**
 
 - **R34. Every edit is a command, in all three doors.** These are new commands, or changes to existing ones, in the registry (D3):
-  - the state commands;
+  - the state commands, including making states from poses (R37–R40);
   - `scene.key.set` with `state`, and with no values pinning the item;
   - `scene.set` with `state`;
   - `scene.track.add` giving an item an id;
@@ -201,6 +201,20 @@ R18 to R25 carry the animation pane's spec (`animation-pane.md`, and its spec on
   - a follow-ups note in the record (`../2026-10-mac-app/plan.md`).
   
   The examples get states on one object each (D7).
+
+**Poses become states**
+
+- **R37. A pose family can be made into one object with states.**
+  - A pose family is a base object and the objects its items pose as, such as the hero island's `crane-hook`, `crane-hook-drop` and `crane-hook-low`.
+  - One command, and **Make States from Poses** in the scene inspector for an item whose track has pose keys, turns the family into the base object's states.
+  - Each pose object's drawing becomes a frame of the base object, and each frame gets a state of its own: one step that loops. The base object's own drawing is the start state.
+  - The command lines up every pose's map on the base's anchor, merges their color keys, and pads the maps to one box. It refuses, with the reason, when the merged sprite would break a rule: more than 12 colors, wider or taller than 64, or a pose that is itself a frame loop.
+- **R38. The scene keys follow.**
+  - In every scene, each key on an item of the family that has a `pose` gets the matching `state` instead. A key that poses the item back as its base object gets the start state.
+  - A track keeps every other value (move, show) as it is.
+  - Every render of the scene, at every 100 ms of its loop, is pixel-identical before and after, and the command checks that before it writes. It refuses and changes nothing if any frame differs.
+- **R39. Repeating poses can become one looping state.** With `--fold`, a run of pose keys that alternate between the same poses at one fixed interval is replaced by one key into a looping state that plays those frames at that interval. The hero island's crossing signal, alternating left and right every 500 ms, becomes a `flash` state. The renders still have to match (R38). The command names the folded state after the run's first pose unless `--name` is given.
+- **R40. The pose objects stay until nothing uses them.** After the merge, the pose objects are left in the document. The result lists the ones no scene uses any more, and `--delete-unused` removes those in the same undo step. The site's hero island is converted in the site repo, once it pins this release (Areas of concern, 1 and 2).
 
 ## Design
 
@@ -342,11 +356,20 @@ Undo and versions: every command above goes through `session.rs`. A rename that 
   - R16's baked track, matched frame for frame against `scene render --time` at every 100 ms.
   
   In Swift Testing: the pane's hit-testing and snapping, inherited values, `stateSections`, `graphLayout`, and playing a run.
-- **A browser check of the CSS (R10–R14),** as a Node script in `scripts/test/`. It compiles a fixture with states and checks the generated rules' shape: selectors, animation lists, the end animation's name and the reduced-motion block. Driving a real browser to watch `animationend` is listed in Areas of concern, 3, for the plan to decide.
+- **A string check of the CSS (R10–R14),** as a Node script in `scripts/test/`. It compiles a fixture with states and checks the generated rules' shape: selectors, animation lists, the end animation's name and the reduced-motion block.
+- **A real-browser check (R10–R14),** with Playwright as a new dev dependency, which the owner approved on 2026-10-24. `scripts/test/states-browser.test.mjs` opens a compiled fixture SVG in WebKit, Chromium and Firefox. For each browser it:
+  - pauses the document's animations and seeks them (`document.getAnimations()`, `currentTime`), checking which frame group is visible and each layer's transform at set times, against `object state run`;
+  - sets `data-state` and checks that the new state starts at once (R11);
+  - checks that `animationend` fires with `<scene>--<state>` for a one-shot state, and for `data-play` (R9, R12);
+  - checks a `then` hand-over and the scene-keyed track of R16 against `scene render --time`;
+  - with `emulateMedia({ reducedMotion: 'reduce' })`, checks the settle frame and that no event fires (R14).
+  
+  `npm test` runs it. CI installs the browsers (`npx playwright install --with-deps`) in the test job of `.github/workflows/release.yml` and in any workflow that runs `npm test`.
 - **Acceptance.** Three new scripts in `scripts/acceptance/`:
   - `states.txt`, on a temp copy of `examples/harbor.pixellab`: make states for an object, add a one-shot that hands over, link it in the graph, Try it, Play, and check the published SVG for `data-state` rules;
   - `animation.txt`, on a temp site copy: select the cart, add, move, edit and delete a key, set the loop, Animate an item and remove its track;
-  - `scenestates.txt`, on the harbor copy: key an item's state, check its lane, and match `scene render` frames at three times.
+  - `scenestates.txt`, on the harbor copy: key an item's state, check its lane, and match `scene render` frames at three times;
+  - `poses.txt`, on a temp site copy: Make States from Poses on the hero island's hook and signals (with fold), check the lanes and the key counts, and check that the scene renders the same at every 100 ms (R38). The site's real document isn't touched.
   
   Each runs on a temp copy, as autosave requires. The hero island's SVG stays byte-identical where no states are added (R3).
 
@@ -367,17 +390,31 @@ Undo and versions: every command above goes through `session.rs`. A rename that 
 - **Examples**: `scripts/make-examples.mjs` gives the harbor's `lamp` two states: a steady `idle` and a one-shot `flicker` that hands back to `idle`. It gives the harbor's `boat` a rocking `idle` made from an ambient loop by `object states make`, and a scene key in the town that switches a lamp to `flicker` once a loop. `npm run examples` rewrites both.
 - **The record** gets a follow-up: an item's states detached from its object (out of scope), and per-step frame lengths if the owner asks.
 
+### D8. Poses become states (R37–R40)
+
+- **The command:** `object states from-poses <object> [--scene <name>…] [--fold] [--name <state>] [--delete-unused]`, an edit in all three doors (`object_states_from_poses` over MCP). It's one undo step and one version across every doc it changes.
+- **The family:** the base object, plus every object that a `pose` key names on an item of the base object, in the scenes given (all scenes by default).
+- **The merge:**
+  - Each family member's layers are flattened to one map. A pose object with several map layers becomes one drawing, since a frame is the whole sprite.
+  - The maps are placed on the base's anchor and padded to the union box, so the anchor moves to where the union puts it.
+  - Color keys are merged, and characters are renamed where two objects use the same one for different colors.
+  - The base gets one frame-loop layer holding every frame, with frame 0 its own drawing. Its other layers stay as map layers when the base had several and no pose differs on them. Otherwise everything goes in the one layer. The loop name is `pf`, with prefix `p`, a new loop name for pose frames. It never plays on its own, because the object now has states.
+  - The states are named after each pose object, minus the base's name and its hyphen, so `crane-hook-drop` becomes `drop`. The base's own drawing becomes `rest`.
+- **The keys:** `motion_ops.rs` rewrites each track (R38). With `--fold` it scans for runs of at least four keys whose only value is a pose, alternating among two or more poses at one interval, and replaces the run with one `state` key (R39).
+- **The check:** the command renders every scene that changed, before and after, at every 100 ms of its loop, at scale 1, and compares the pixels. Any difference refuses the whole command and lists the scene and time. This is how R38's promise is kept.
+- **Bytes:** a merged family is usually smaller in the SVG, since its frames are drawn once per item, not once per pose object per item. `art sizes` shows it.
+
 ## Areas of concern
 
-1. **The site has to take a new release before its document gets states.** Today's site pins `pixellab` v0.6.0 (`scripts/pixellab.mjs`). That release, and v0.7.0, reject `states`, item `state` and key `state` as unknown properties. The site keeps building until its document uses them. Then it needs this release, and `Range.astro` keeps working through `data-play` (R9). A site change to use `data-state` is optional and belongs in the site repo under its own intent. The owner decides when the site's `character` becomes states (`object states make character`). That's a change to the site's art, in the site repo.
-2. **Two ways to change what an item looks like over a scene: poses and states.** The hero island's 59 pose keys swap whole objects (`crane-hook`, `crane-hook-drop`, `crane-hook-low`), and those are states in all but name. This spec keeps poses, so nothing in the site's art changes, and adds states beside them. A key may carry both, with the state naming one of the pose's states. Folding pose families into one object with states (a "Make States from Poses" command) would make the hero island's tracks shorter, but it changes the site's art and is left as a follow-up. The owner should say whether they want it in this change.
-3. **A CSS-only state machine is at the edge of what step animations do.** Immediate switching relies on a change of `animation-name` restarting an animation. "Then" relies on a second, delayed animation in the same list taking over. The end event relies on an animation of a custom property firing `animationend`. All three are standard CSS Animations behavior in current Safari, Chrome and Firefox, but the site's pages run in all three, and the existing tests only check strings. The plan should include a real-browser check: Playwright is already used by the site, not here, so it needs the owner's OK as a dev dependency, or a manual check recorded in the PR.
-4. **A page's `data-state` against a scene's state keys.** R17 gives the scene the item, which keeps a scene's animation the same every time (the intent's constraint for video). The alternative, letting the page override a scene-keyed item while the attribute is set, is possible in CSS (later selectors win). It would make a page-driven scene differ from its video. The spec chooses the scene. The `check` warning in R17 can only guess which groups a page targets (any group with a `data-*` attribute that holds a state-keyed item), so it may be noisy. The plan can drop it if so.
-5. **Bytes.** A state that switches frames draws each frame once per placement, as frame loops do today. The rules for each state cost about 150 to 400 bytes, and a baked scene state track costs about 30 bytes per change over the loop. A forest of 40 pines with three states each would add roughly 40 frame groups per extra frame. The engine's budgets catch a scene that grows past them, and `art sizes` shows the cost. An alternative that shares one set of frames per object across its placements (`<use>`) is smaller but changes the output's structure for every sprite. It isn't proposed here.
-6. **Frames are per sprite, with frame-loop layers in lockstep (R2).** Today a sprite could, in principle, carry two frame-loop layers of different lengths (none of the site's 21 animated objects does). With states, such a sprite has to even them out before it gets states, and `check` says which layer. This is the Aseprite model (a frame is a column across all layers) and keeps the pane simple.
-7. **Uniform frame length per state.** Aseprite and Unity allow a different length per frame. This spec gives a state one `ms`, and a held frame is the same frame repeated in the steps. Per-step lengths could come later without breaking the format (`ms` as a list).
-8. **No conditions on transitions.** Unity and Unreal transitions test parameters. Here only `then` (at end) is stored, and anything else is the page's or the scene's job. The graph's Any state note makes this visible. If the owner wants transitions on events in the art itself (for example "on hover, go to wave" without page script), that's a site contract addition for later.
-9. **Clicking a key moves the playhead** (Rive's way), with ⌥-click to select only (Unity's way). The animation pane's spec chose to move it, and the intent left it open. This spec keeps that and adds ⌥-click.
+1. **The site has to take a new release before its document gets states.** Today's site pins `pixellab` v0.6.0 (`scripts/pixellab.mjs`). That release, and v0.7.0, reject `states`, item `state` and key `state` as unknown properties. The site keeps building until its document uses them. Then it needs this release, and `Range.astro` keeps working through `data-play` (R9). A site change to use `data-state` is optional and belongs in the site repo under its own intent. The owner decides when the site's `character` becomes states (`object states make character`). That's a change to the site's art, in the site repo. **Settled (owner, 2026-10-24):** as described. The site bumps its pin first, under its own change.
+2. **Two ways to change what an item looks like over a scene: poses and states.** The hero island's 59 pose keys swap whole objects (`crane-hook`, `crane-hook-drop`, `crane-hook-low`), and those are states in all but name. This spec keeps poses, so nothing in the site's art changes, and adds states beside them. A key may carry both, with the state naming one of the pose's states. Folding pose families into one object with states (a "Make States from Poses" command) would make the hero island's tracks shorter, but it changes the site's art and is left as a follow-up. The owner should say whether they want it in this change. **Settled (owner, 2026-10-24):** in this change. R37–R40 and D8 add Make States from Poses, which keeps the renders pixel-identical. The hero island's conversion is a site change made with that command, after the pin bump.
+3. **A CSS-only state machine is at the edge of what step animations do.** Immediate switching relies on a change of `animation-name` restarting an animation. "Then" relies on a second, delayed animation in the same list taking over. The end event relies on an animation of a custom property firing `animationend`. All three are standard CSS Animations behavior in current Safari, Chrome and Firefox, but the site's pages run in all three, and the existing tests only check strings. The plan should include a real-browser check: Playwright is already used by the site, not here, so it needs the owner's OK as a dev dependency, or a manual check recorded in the PR. **Settled (owner, 2026-10-24):** Playwright is added as a dev dependency for a real-browser check in WebKit, Chromium and Firefox (D6).
+4. **A page's `data-state` against a scene's state keys.** R17 gives the scene the item, which keeps a scene's animation the same every time (the intent's constraint for video). The alternative, letting the page override a scene-keyed item while the attribute is set, is possible in CSS (later selectors win). It would make a page-driven scene differ from its video. The spec chooses the scene. The `check` warning in R17 can only guess which groups a page targets (any group with a `data-*` attribute that holds a state-keyed item), so it may be noisy. The plan can drop it if so. **Settled (owner, 2026-10-24):** the scene owns its keyed items, and the warning stays unless the plan finds it too noisy.
+5. **Bytes.** A state that switches frames draws each frame once per placement, as frame loops do today. The rules for each state cost about 150 to 400 bytes, and a baked scene state track costs about 30 bytes per change over the loop. A forest of 40 pines with three states each would add roughly 40 frame groups per extra frame. The engine's budgets catch a scene that grows past them, and `art sizes` shows the cost. An alternative that shares one set of frames per object across its placements (`<use>`) is smaller but changes the output's structure for every sprite. It isn't proposed here. **Settled (owner, 2026-10-24):** accepted. Frames are drawn per placement, with no `<use>`.
+6. **Frames are per sprite, with frame-loop layers in lockstep (R2).** Today a sprite could, in principle, carry two frame-loop layers of different lengths (none of the site's 21 animated objects does). With states, such a sprite has to even them out before it gets states, and `check` says which layer. This is the Aseprite model (a frame is a column across all layers) and keeps the pane simple. **Settled (owner, 2026-10-24):** frame-loop layers move in lockstep.
+7. **Uniform frame length per state.** Aseprite and Unity allow a different length per frame. This spec gives a state one `ms`, and a held frame is the same frame repeated in the steps. Per-step lengths could come later without breaking the format (`ms` as a list). **Settled (owner, 2026-10-24):** one frame length per state for now.
+8. **No conditions on transitions.** Unity and Unreal transitions test parameters. Here only `then` (at end) is stored, and anything else is the page's or the scene's job. The graph's Any state note makes this visible. If the owner wants transitions on events in the art itself (for example "on hover, go to wave" without page script), that's a site contract addition for later. **Settled (owner, 2026-10-24):** only `then`. Event transitions in the art are for later.
+9. **Clicking a key moves the playhead** (Rive's way), with ⌥-click to select only (Unity's way). The animation pane's spec chose to move it, and the intent left it open. This spec keeps that and adds ⌥-click. **Settled (owner, 2026-10-24):** clicking a key moves the playhead, and ⌥-click only selects.
 
 ## Open questions
 
@@ -389,7 +426,7 @@ The intent's questions:
 - **Does clicking a key move the playhead?** Yes, with ⌥-click to select without moving (R19; Areas of concern, 9).
 - **The default loop for a scene's first animated item?** 4 s (R23).
 
-New questions for the owner:
-- Should this change also fold the hero island's pose families into states (Areas of concern, 2)?
-- Is a real-browser check of the state CSS worth a dev dependency (Areas of concern, 3)?
-- Should the examples' state demos be the lamp and the boat (D7), or does the owner have other objects in mind?
+The spec's own questions, answered by the owner on 2026-10-24:
+- **Fold the hero island's pose families into states in this change?** Yes (R37–R40, D8).
+- **A real-browser check with a dev dependency?** Yes, with Playwright (D6).
+- **The examples' state demos?** The lamp and the boat (D7).
