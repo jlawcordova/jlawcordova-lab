@@ -309,8 +309,13 @@ fn r12_import_copies_objects_with_their_categories_as_one_version_and_nothing_li
     assert_eq!(edits, ["Imported 3 objects from yard.pixellib"]);
     let files: Vec<&str> = v["files"].as_array().unwrap().iter().map(|c| c.as_str().unwrap()).collect();
     assert_eq!(files, ["objects/bench.json", "objects/lamp.json", "objects/sign.json"]);
-    // History undo takes the whole import back.
-    ok(&mut s, "history.undo", json!({ "version": n }));
+    // It's the requester's own edit, not "a restore".
+    assert_ne!(v["author"]["kind"], "restore", "{}", v["author"]);
+    // History undo takes the whole import back, as one version whose label is listed once.
+    let undone = ok(&mut s, "history.undo", json!({ "version": n }));
+    let newest = ok(&mut s, "history.list", json!({}))["versions"][0]["number"].clone();
+    let u = ok(&mut s, "history.show", json!({ "version": newest }));
+    assert_eq!(u["edits"], json!([undone["summary"]]));
     assert!(!doc.root.join("objects/lamp.json").exists() && !doc.root.join("objects/bench.json").exists());
     // The document names nothing of the library.
     let manifest = text(&doc.root.join("manifest.json"));

@@ -257,8 +257,10 @@ pub(crate) fn put_files(
     label: &str,
     force: bool,
     once: bool,
+    restore: bool,
 ) -> Result<(Vec<String>, Vec<String>)> {
-    let author = requester(session);
+    // A restore or an undo is credited as one, on behalf of whoever asked; an import is its requester's own edit.
+    let author = if restore { requester(session) } else { session.author.clone() };
     let who = std::mem::replace(&mut session.author, author);
     let _ = session.history.mark(None);
     let result = (|| -> Result<(Vec<String>, Vec<String>)> {
@@ -324,7 +326,7 @@ fn restore_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
         }
     }
     let label = format!("Restored to version {n}");
-    let (written, removed) = put_files(session, targets, &label, true, false)?;
+    let (written, removed) = put_files(session, targets, &label, true, false, true)?;
     let changed = !written.is_empty() || !removed.is_empty();
     let summary = if changed {
         format!("{label}: {} doc{} written, {} removed", written.len(), if written.len() == 1 { "" } else { "s" }, removed.len())
@@ -398,7 +400,7 @@ fn undo_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     }
     let first = v["edits"].as_array().and_then(|e| e.first()).map(|e| str_of(Some(e))).unwrap_or_default();
     let label = if first.is_empty() { format!("Undid version {n}") } else { format!("Undid version {n}: {first}") };
-    let (written, removed) = put_files(session, targets, &label, flag(&params, "force"), false)?;
+    let (written, removed) = put_files(session, targets, &label, flag(&params, "force"), true, true)?;
     let changed = !written.is_empty() || !removed.is_empty();
     Ok(json!({ "version": n, "changed": changed, "written": written, "removed": removed, "summary": label }))
 }

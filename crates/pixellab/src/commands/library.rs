@@ -448,7 +448,7 @@ fn import_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let targets: Vec<(String, Option<String>)> =
         imported.iter().map(|(n, o)| (engine::format::object_file(n), Some(engine::format::serialize_object(o)))).collect();
     let session = ctx.session()?;
-    put_files(session, targets, &label, false, true)?;
+    put_files(session, targets, &label, false, true, false)?;
     let version = session.history.latest();
     let Value::Object(m) = &mut shown else { unreachable!() };
     m.insert("changed".into(), json!(true));
