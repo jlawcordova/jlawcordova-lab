@@ -299,10 +299,10 @@ const FIELDS: [&str; 5] = ["col", "row", "level", "x", "y"];
 fn set_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let mut wanted: Vec<&str> = vec!["tile", "px"];
     wanted.extend(FIELDS);
-    wanted.extend(["depth", "class", "id"]);
+    wanted.extend(["depth", "class", "id", "state"]);
     need_one(&params, &wanted, "scene.set")?;
     at_most_one(&params, &["tile", "px"], "scene.set")?;
-    let others = FIELDS.iter().chain(["tile", "px", "class", "id"].iter()).any(|k| given(&params, k));
+    let others = FIELDS.iter().chain(["tile", "px", "class", "id", "state"].iter()).any(|k| given(&params, k));
     if given(&params, "depth") && !others {
         // The override is the one field a group takes.
         // A group is named by its path, which the sort that ends the edit can change: say it with the path the result returns.
@@ -329,6 +329,7 @@ fn set_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
 
 /// scene.set's edit of a placed item.
 fn set_edit(ctx: &mut Ctx, params: &Params) -> Result<Value> {
+    let loaded = ctx.sources()?;
     move_edit(
         ctx,
         params,
@@ -359,6 +360,11 @@ fn set_edit(ctx: &mut Ctx, params: &Params) -> Result<Value> {
             }
             if let Some(i) = opt_str(params, "id") {
                 said.push(str_of(ops::set_id(doc, path, i)?.get("message")));
+            }
+            if let Some(st) = opt_str(params, "state") {
+                // `start` is the word for the object's own start state.
+                let state = if st == "start" { None } else { Some(st) };
+                said.push(str_of(ops::set_state(doc, path, state, &loaded.sources)?.get("message")));
             }
             Ok(
                 json!({ "path": path.to_vec(), "item": ops::item_at(doc, path).cloned().unwrap_or(Value::Null), "message": said.join("; ") }),
@@ -756,7 +762,7 @@ pub fn commands() -> Vec<Command> {
 
     let mut set = Command::new(
         "scene.set",
-        "Set an item's tile or pixel point, one coordinate, its level, depth override, class or id",
+        "Set an item's tile or pixel point, one coordinate, its level, depth override, class, id or state",
         item_params(vec![
             ("keepGroup", keep_group_param()),
             ("tile", tile_param()),
@@ -775,6 +781,10 @@ pub fn commands() -> Vec<Command> {
             ),
             ("class", json!({ "type": "string", "description": "a class list, or '' to remove it" })),
             ("id", json!({ "type": "string", "description": "an id, or '' to remove it" })),
+            (
+                "state",
+                json!({ "type": "string", "description": "the state a sprite with states starts in, or start for the object's own start state" }),
+            ),
         ]),
         true,
         set_run,
@@ -785,7 +795,7 @@ pub fn commands() -> Vec<Command> {
         "--level also sets how high a pixel-placed item stands, which only matters for depth order. ",
         "--depth is the override: front draws the item over everything else in its list, back under everything, auto takes the override off ",
         "so it draws by where it stands. It also takes a group's path, as the only field (a group's attributes are scene.group.set). ",
-        "--class sets the class list and --id the id; an empty value removes it. An id's motion track follows it when it's renamed and goes with it ",
+        "--class sets the class list and --id the id; an empty value removes it. --state sets the state of its object the item starts in (the object's start otherwise; --state start puts it back). An id's motion track follows it when it's renamed and goes with it ",
         "when it's removed. All in one undo step, after which the scene is in depth order (the result has the item's path after that; reordered says what moved). ",
         "Moving it keeps its group's data-x/data-y and data-col/data-row in step, as scene.move does (--no-keep-group leaves them)."
     ));

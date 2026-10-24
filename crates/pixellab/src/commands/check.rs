@@ -186,6 +186,71 @@ fn empty_warnings(sources: &Sources, all: &[String], n: &str) -> Vec<Value> {
     }
 }
 
+/// An object that has states and also layer ambient loops or actions (R8): the states decide what plays, so those never do.
+fn states_warnings(sources: &Sources, all: &[String], name: &str) -> Vec<Value> {
+    let Some(doc) = sources.objects.get(name) else { return vec![] };
+    let deps = dependencies(sources, DocKind::Object, name);
+    if deps.iter().any(|f| all.iter().any(|p| file_of(p) == *f)) {
+        return vec![];
+    }
+    let loops: Vec<usize> = doc
+        .get("layers")
+        .and_then(Value::as_array)
+        .map(|l| l.iter().enumerate().filter(|(_, l)| l.get("ambient").is_some() || l.get("actions").is_some()).map(|(i, _)| i).collect())
+        .unwrap_or_default();
+    if doc.get("states").is_none() || loops.is_empty() {
+        return vec![];
+    }
+    let layers = loops.iter().map(|i| format!("layer {i}")).collect::<Vec<_>>().join(", ");
+    let text = format!(
+        "{}: has states and an ambient loop or actions on {layers}; the states decide what plays, so those never play (pixellab object states make turns them into states)",
+        engine::format::object_file(name)
+    );
+    vec![with(entry(&text), vec![("code", json!("states_and_loops")), ("object", json!(name))])]
+}
+
+/// An item whose track keys a state belongs to the scene (R17): a page's `data-state` doesn't change it. A group that carries
+/// `data-state` or `data-play` around one is a page's switch that can't reach it, so that is a warning.
+fn owned_state_warnings(sources: &Sources, all: &[String], n: &str) -> Vec<Value> {
+    let Some(scene) = sources.scenes.get(n) else { return vec![] };
+    let deps = dependencies(sources, DocKind::Scene, n);
+    if deps.iter().any(|f| all.iter().any(|p| file_of(p) == *f)) {
+        return vec![];
+    }
+    let keyed: Vec<String> = scene
+        .pointer("/motion/tracks")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|t| engine::states::keys_states(t))
+        .filter_map(|t| t.get("item").and_then(Value::as_str).map(str::to_string))
+        .collect();
+    if keyed.is_empty() {
+        return vec![];
+    }
+    fn walk(list: &[Value], path: &str, switch: Option<&str>, keyed: &[String], n: &str, out: &mut Vec<Value>) {
+        for (i, item) in list.iter().enumerate() {
+            let here = if path.is_empty() { i.to_string() } else { format!("{path}.{i}") };
+            if let Some(attrs) = item.get("group").and_then(Value::as_object) {
+                let own = ["data-state", "data-play"].into_iter().find(|a| attrs.contains_key(*a));
+                let inner = item.get("items").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]);
+                walk(inner, &here, own.map(|_| here.as_str()).or(switch), keyed, n, out);
+            } else if let (Some(group), Some(id)) =
+                (switch, item.get("id").and_then(Value::as_str).filter(|id| keyed.iter().any(|k| k == id)))
+            {
+                let text = format!(
+                    "{}: {id}'s track keys a state, so the scene plays it and the data-state or data-play on the group at {group} doesn't switch it",
+                    engine::format::scene_file(n)
+                );
+                out.push(with(entry(&text), vec![("code", json!("scene_owns_state")), ("scene", json!(n)), ("item", json!(id))]));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(scene.get("items").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]), "", None, &keyed, n, &mut out);
+    out
+}
+
 fn warnings_of(sources: &Sources, all: &[String], names: &[String], budgets: &Budgets) -> Vec<Value> {
     let mut out = Vec::new();
     for n in names {
@@ -195,6 +260,7 @@ fn warnings_of(sources: &Sources, all: &[String], names: &[String], budgets: &Bu
                 out.push(with(entry(&text), vec![("code", json!("off_grid")), ("scene", json!(n))]));
             }
         }
+        out.extend(owned_state_warnings(sources, all, n));
         out.extend(depth_warnings(sources, all, n));
         out.extend(cropped_warnings(sources, all, n));
         out.extend(empty_warnings(sources, all, n));
@@ -272,7 +338,15 @@ fn run(ctx: &mut Ctx, params: Params) -> Result<Value> {
             ("problems", Value::Array(all.iter().map(|p| Value::Object(entry(p))).collect())),
             (
                 "warnings",
-                Value::Array(warnings_of(sources, &all, &names, &budgets).into_iter().chain(not_canonical.unwrap_or_default()).collect()),
+                Value::Array(
+                    sources
+                        .objects
+                        .keys()
+                        .flat_map(|n| states_warnings(sources, &all, n))
+                        .chain(warnings_of(sources, &all, &names, &budgets))
+                        .chain(not_canonical.unwrap_or_default())
+                        .collect(),
+                ),
             ),
         ])));
     };
@@ -299,8 +373,11 @@ fn run(ctx: &mut Ctx, params: Params) -> Result<Value> {
             summary = Some(format!("{}×{} · {} items · {objects} objects · {output}", vb(2), vb(3), count_items(&items)));
         }
     }
-    let mut warnings =
-        if target.kind == DocKind::Scene { warnings_of(sources, &all, std::slice::from_ref(&target.name), &budgets) } else { vec![] };
+    let mut warnings = match target.kind {
+        DocKind::Scene => warnings_of(sources, &all, std::slice::from_ref(&target.name), &budgets),
+        DocKind::Object => states_warnings(sources, &all, &target.name),
+        DocKind::Palette => vec![],
+    };
     warnings.extend(canonical_warnings(ctx, Some(&files))?);
     let mut out = obj(vec![
         ("ok", json!(mine.is_empty())),
@@ -363,6 +440,8 @@ pub fn commands() -> Vec<Command> {
         "copies: a moving item that takes several places among the others as it moves is drawn once for each place in the SVG, which adds to its size; the warning says how many. ",
         "cropped: a scene with a fixed viewBox paints pixels outside it, which the published SVG cuts off; the warning says how many (scene.frame --fit fits it to its content). ",
         "empty: a scene with nothing in it and no viewBox, which publishes one tile around the origin. ",
+        "states_and_loops: a sprite with states that also has layer ambient loops or actions, which never play since the states decide what plays (object.states.make turns them into states). ",
+        "scene_owns_state: an item whose motion track keys a state sits in a group with data-state or data-play: the scene plays it, so the page's attribute can't switch it. ",
         "With library, it checks an object library instead (no document needed): its objects against the colors it recorded at export, extends resolving inside it, and categories."
     ));
     check.no_document_with = Some("library");

@@ -195,10 +195,13 @@ fn d2_a_scene_at_a_time_marks_the_state_a_keyed_item_is_in_and_when_it_entered()
 /// base rules, for elements with no attribute on them. It plays them as CSS Animations does: an
 /// animation in its delay does nothing, one that has ended holds its last stop only with `forwards`,
 /// and the one later in the list wins.
+/// A rule: its selectors, and its declarations.
+type Rule = (Vec<String>, Vec<(String, String)>);
+
 struct Player {
     keyframes: std::collections::HashMap<String, Vec<(f64, String)>>,
     /// (selectors, declarations), in the order written; the no-preference block's rules included.
-    rules: Vec<(Vec<String>, Vec<(String, String)>)>,
+    rules: Vec<Rule>,
 }
 
 impl Player {

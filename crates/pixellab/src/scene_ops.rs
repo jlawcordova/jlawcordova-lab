@@ -429,10 +429,16 @@ pub fn remove_item(doc: &mut Value, path: &[usize]) -> Result<Value> {
 /// (`reorderKeys`).
 fn reorder_keys(item: &mut Value, id: Option<Value>, class: Option<Value>) {
     let Some(map) = item.as_object_mut() else { return };
-    let (object, at, layer, depth) =
-        (map.get("object").cloned(), map.get("at").cloned(), map.get("layer").cloned(), map.get("depth").cloned());
+    let (object, at, layer, depth, state) = (
+        map.get("object").cloned(),
+        map.get("at").cloned(),
+        map.get("layer").cloned(),
+        map.get("depth").cloned(),
+        map.get("state").cloned(),
+    );
     map.clear();
-    for (key, value) in [("object", object), ("id", id), ("class", class), ("layer", layer), ("depth", depth), ("at", at)] {
+    for (key, value) in [("object", object), ("id", id), ("class", class), ("layer", layer), ("depth", depth), ("state", state), ("at", at)]
+    {
         if let Some(value) = value {
             map.insert(key.into(), value);
         }
@@ -566,6 +572,37 @@ pub fn set_id(doc: &mut Value, path: &[usize], value: &str) -> Result<Value> {
     reorder_keys(item, if id.is_empty() { None } else { Some(id_value) }, class);
     let message = if id.is_empty() { "Id removed".to_string() } else { format!("Id set to {id}") };
     Ok(json!({ "path": path_value(path), "item": item.clone(), "message": message }))
+}
+
+/// Sets the state a placed item starts in, or clears it with None (the object's own start then): it's left out when it is the
+/// object's start. Refuses a state the object doesn't have. Returns `{ path, item, message }`.
+pub fn set_state(doc: &mut Value, path: &[usize], state: Option<&str>, sources: &Sources) -> Result<Value> {
+    let object = js_string(placed_at(doc, path)?.get("object"));
+    let states = eng::resolve(sources, &object).ok().and_then(|r| r.states);
+    let message = match state {
+        None => {
+            placed_at_mut(doc, path)?.as_object_mut().expect("an item").shift_remove("state");
+            format!("{object} starts in the state it has by default")
+        }
+        Some(name) => {
+            let Some(states) = states else {
+                return Err(scene_op_error(format!("{object} has no states (object.state.add makes the first)"), "no_states"));
+            };
+            if !states.has(name) {
+                return Err(scene_op_error(format!("{object} has no state {name} (it has {})", states.names().join(", ")), "not_found"));
+            }
+            let item = placed_at_mut(doc, path)?.as_object_mut().expect("an item");
+            if name == states.start {
+                item.shift_remove("state");
+                format!("{object} starts in {name}, the object's start")
+            } else {
+                item.insert("state".into(), Value::String(name.to_string()));
+                format!("{object} starts in {name}")
+            }
+        }
+    };
+    let item = item_at(doc, path).cloned().unwrap_or(Value::Null);
+    Ok(json!({ "path": path_value(path), "item": item, "message": message }))
 }
 
 /// `^\d+(\.\d+)*$`: a path like "12" or "5.2".

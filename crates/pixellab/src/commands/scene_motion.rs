@@ -98,12 +98,32 @@ fn result(r: &Value, keys: &[&str], extra: Vec<(&str, Value)>) -> Value {
     Value::Object(out)
 }
 
+/// The id of the item `reference` names, giving it one when it has none: its object's name, made unique in the scene (`cart`,
+/// `cart-2`). Returns the id and whether it was made.
+fn id_or_made(doc: &mut Value, reference: &str) -> Result<(String, bool)> {
+    let path = ops::find_item(doc, reference)?;
+    let item = ops::placed_at(doc, &path)?;
+    if let Some(id) = item.get("id") {
+        return Ok((str_of(Some(id)), false));
+    }
+    let object = str_of(item.get("object"));
+    let taken = engine::motion::items_by_id(doc.get("items").unwrap_or(&Value::Null));
+    let id = std::iter::once(object.clone()).chain((2..).map(|i| format!("{object}-{i}"))).find(|id| !taken.has(id)).expect("a free id");
+    ops::set_id(doc, &path, &id)?;
+    Ok((id, true))
+}
+
 fn add_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     motion_edit(ctx, &s(&params, "name"), |doc, _| {
-        let id = id_of(doc, &s(&params, "item"))?;
+        let (id, made) = id_or_made(doc, &s(&params, "item"))?;
         let r = m::add_track(doc, &id, params.get("duration").and_then(Value::as_f64))?;
         let duration = doc["motion"]["duration"].clone();
-        Ok(result(&r, &["track"], vec![("duration", duration)]))
+        let mut out = result(&r, &["track"], vec![("duration", duration), ("id", json!(id))]);
+        if made {
+            let tail = format!("{} (the item had no id, so it got {id})", str_of(out.get("message")));
+            out["message"] = json!(tail);
+        }
+        Ok(out)
     })
 }
 
@@ -115,25 +135,53 @@ fn remove_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
 }
 
 fn key_set_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
-    need_one(&params, &["move", "show", "pose", "clear"], "scene.key.set")?;
+    let given = |k: &str| params.get(k).is_some_and(|v| !v.is_null());
+    // With no value at all, the key pins the item where it is.
+    let pins = !["move", "show", "pose", "state", "clear"].iter().any(|k| given(k));
     if let Some(pose) = params.get("pose").and_then(Value::as_str) {
         if !ctx.names(DocKind::Object)?.iter().any(|o| o == pose) {
             return Err(CommandError::usage(format!("scene.key.set: no object named {pose} to pose as (pixellab object list)")).into());
         }
     }
+    let loaded = ctx.sources()?;
+    // `--state clear` takes the state off the key; any other name is a state of the object the item shows at that key.
+    let state = params.get("state").and_then(Value::as_str).map(str::to_string);
+    let clear_state = state.as_deref() == Some("clear");
     motion_edit(ctx, &s(&params, "name"), |doc, name| {
         let id = id_of(doc, &s(&params, "item"))?;
+        if pins {
+            let object = ops::item_at(doc, &ops::find_item(doc, &s(&params, "item"))?).map(|i| str_of(i.get("object"))).unwrap_or_default();
+            let r = m::pin_key(doc, &id, &object, n(&params, "time"))?;
+            return Ok(result(&r, &["key", "pinned"], vec![("warnings", Value::Array(warnings_for(doc, name, &id)))]));
+        }
+        let mut clear: Vec<String> = params
+            .get("clear")
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+            .unwrap_or_default();
+        if clear_state && !clear.iter().any(|c| c == "state") {
+            clear.push("state".into());
+        }
         let values = m::KeyValues {
             move_: params.get("move").and_then(Value::as_array).map(|a| [a[0].as_f64().unwrap_or(0.0), a[1].as_f64().unwrap_or(0.0)]),
             show: params.get("show").and_then(Value::as_bool),
             pose: params.get("pose").and_then(Value::as_str).map(str::to_string),
-            clear: params
-                .get("clear")
-                .and_then(Value::as_array)
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
-                .unwrap_or_default(),
+            state: state.clone().filter(|_| !clear_state),
+            clear,
         };
         let r = m::set_key(doc, &id, n(&params, "time"), &values)?;
+        // The state is one of the object the item shows from this key on: its pose if it has one (R15).
+        if let Some(wanted) = values.state.as_deref() {
+            let object = ops::item_at(doc, &ops::find_item(doc, &s(&params, "item"))?).map(|i| str_of(i.get("object"))).unwrap_or_default();
+            let t = n(&params, "time");
+            let shown = m::track_of(doc, &id)
+                .and_then(|track| engine::motion::filled_keys(track, &object).into_iter().find(|f| f.t == t))
+                .map_or(object, |f| f.pose);
+            let states = engine::engine::resolve(&loaded.sources, &shown).ok().and_then(|r| r.states);
+            if let Some(problem) = engine::states::state_problem(&shown, states.as_deref(), &Value::String(wanted.to_string())) {
+                return Err(CommandError::new(format!("scene.key.set: {problem}"), "no_state").into());
+            }
+        }
         Ok(result(&r, &["key"], vec![("warnings", Value::Array(warnings_for(doc, name, &id)))]))
     })
 }
@@ -213,7 +261,7 @@ fn format_warnings(r: &Value, _: &Params) -> String {
 pub fn commands() -> Vec<Command> {
     let mut add = Command::new(
         "scene.track.add",
-        "Add a motion track for an item (it needs an id): one key at 0, the rest frame",
+        "Add a motion track for an item: one key at 0, the rest frame",
         json!({
             "type": "object",
             "properties": {
@@ -227,7 +275,7 @@ pub fn commands() -> Vec<Command> {
         add_run,
     );
     add.description =
-        Some("Makes the scene's motion (one loop of --duration ms) when it has none. Then scene.key.set or scene.motion.path keys it.");
+        Some("Makes the scene's motion (one loop of --duration ms) when it has none. An item without an id gets one, its object's name made unique in the scene (cart, cart-2), and the result says which (id). Then scene.key.set or scene.motion.path keys it.");
     add.args = vec!["name", "item"];
     add.examples = vec!["pixellab scene track add hero-island truck-a", "pixellab scene track add meadow bird --duration 4000"];
     add.format = Some(format_change);
@@ -244,7 +292,7 @@ pub fn commands() -> Vec<Command> {
 
     let mut key_set = Command::new(
         "scene.key.set",
-        "Set a key of an item's track: its move, show and pose at a time (made if there's no key there)",
+        "Set a key of an item's track: its move, show, pose and state at a time (made if there's no key there)",
         json!({
             "type": "object",
             "properties": {
@@ -254,7 +302,8 @@ pub fn commands() -> Vec<Command> {
                 "move": move_param(),
                 "show": { "type": "boolean", "description": "whether the item shows from this key on" },
                 "pose": { "type": "string", "description": "the object the item draws from this key on" },
-                "clear": { "type": "array", "items": { "type": "string", "enum": ["move", "show", "pose"] }, "description": "values to remove from the key" }
+                "state": { "type": "string", "description": "a state of the object the item shows, which it plays from its first frame from this key on; clear takes the state off the key" },
+                "clear": { "type": "array", "items": { "type": "string", "enum": ["move", "show", "pose", "state"] }, "description": "values to remove from the key" }
             },
             "required": ["name", "item", "time"]
         }),
@@ -262,13 +311,15 @@ pub fn commands() -> Vec<Command> {
         key_set_run,
     );
     key_set.description = Some(
-        "--move x,y is pixels from where the scene places the item; --show false hides it from that key on; --pose <object> draws another object from that key on. --clear move,show,pose removes those values from the key, so they carry on from the key before. Returns the key and the track's off-grid warnings (moves whose steps aren't 1 px straight, 1:1 or 2:1).",
+        "--move x,y is pixels from where the scene places the item; --show false hides it from that key on; --pose <object> draws another object from that key on; --state <name> puts it in that state of the object it shows (a state is entered from its first frame and plays by itself, the same every time; --state clear takes it off the key). With none of them, the key pins the item where it is at that time: { t, move } with the move it has then, pinned: true, and a time that already has a key is left alone (changed: false). --clear move,show,pose,state removes those values from the key, so they carry on from the key before. A page's data-state doesn't change an item whose track keys a state. Returns the key and the track's off-grid warnings (moves whose steps aren't 1 px straight, 1:1 or 2:1).",
     );
     key_set.args = vec!["name", "item"];
     key_set.examples = vec![
         "pixellab scene key set hero-island truck-a --time 4200 --move 32,16",
         "pixellab scene key set hero-island crane-hook --time 9000 --pose crane-hook-down",
         "pixellab scene key set hero-island parcel --time 12000 --no-show",
+        "pixellab scene key set town lamp-1 --time 1000 --state flicker",
+        "pixellab scene key set hero-island truck-a --time 4200",
     ];
     key_set.format = Some(format_warnings);
 
