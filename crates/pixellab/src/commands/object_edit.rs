@@ -24,6 +24,7 @@ use super::common::{flag, format_change, obj, opt_str, str_of};
 use super::scene_edit::check_new_name;
 use crate::context::{Ctx, DocKind, Loaded};
 use crate::errors::{CommandError, Error, Result};
+use crate::library::{category_from_param, category_text};
 use crate::registry::{Command, Params};
 use crate::session::Edit;
 
@@ -519,6 +520,73 @@ fn footprint_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     })
 }
 
+/// object.category: sets or clears the category of one or more objects
+/// (docs/intents/2026-10-object-libraries/spec.md, R9, D2). Each object is
+/// one session edit; the command checks every name and the path first, so a
+/// refusal changes nothing.
+fn category_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
+    let has = |k: &str| params.get(k).is_some_and(|v| !v.is_null());
+    // `category: null` is the JSON form of --clear.
+    let clear = flag(&params, "clear") || params.get("category").is_some_and(Value::is_null);
+    if usize::from(has("category")) + usize::from(has("to")) + usize::from(clear) != 1 {
+        return Err(usage("object.category: give one of --to, --clear"));
+    }
+    let category = if clear {
+        None
+    } else {
+        let value = params.get("category").filter(|v| !v.is_null()).or_else(|| params.get("to")).expect("a category");
+        Some(category_from_param(value).map_err(|why| usage(format!("object.category: {why}")))?)
+    };
+    let queries: Vec<String> =
+        params.get("names").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(String::from).collect();
+    if queries.is_empty() {
+        return Err(usage("object.category: give at least one object name"));
+    }
+    let mut names: Vec<String> = Vec::new();
+    for query in &queries {
+        let name = object_at(ctx, query)?;
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    let mut results: Vec<Value> = Vec::new();
+    for name in &names {
+        let n = name.clone();
+        let set = category.clone();
+        let label = match &category {
+            Some(c) => format!("Set {n}'s category to {}", category_text(c)),
+            None => format!("Cleared {n}'s category"),
+        };
+        let r = ctx.edit(DocKind::Object, name, None, move |doc, _| {
+            let object = doc.as_object_mut().expect("an object source is an object");
+            match &set {
+                Some(c) => {
+                    object.insert("category".into(), json!(c));
+                }
+                None => {
+                    object.shift_remove("category");
+                }
+            }
+            Ok(Edit::new(obj(vec![("category", set.as_ref().map_or(Value::Null, |c| json!(c)))]), label))
+        })?;
+        results.push(json!({ "name": name, "doc": r["doc"], "changed": r["changed"] }));
+    }
+    let changed = results.iter().any(|r| r["changed"] == json!(true));
+    let summary = match (names.as_slice(), &category) {
+        ([one], Some(c)) => format!("Set {one}'s category to {}", category_text(c)),
+        ([one], None) => format!("Cleared {one}'s category"),
+        (many, Some(c)) => format!("Set the category of {} objects ({}) to {}", many.len(), many.join(", "), category_text(c)),
+        (many, None) => format!("Cleared the category of {} objects ({})", many.len(), many.join(", ")),
+    };
+    let summary = if changed { summary } else { format!("nothing changed ({summary})") };
+    Ok(json!({
+        "changed": changed,
+        "category": category.map_or(Value::Null, |c| json!(c)),
+        "objects": results,
+        "summary": summary,
+    }))
+}
+
 fn new_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let name = opt_str(&params, "name").unwrap_or("").to_string();
     let kind = opt_str(&params, "kind").unwrap_or("sprite");
@@ -948,6 +1016,31 @@ pub fn commands() -> Vec<Command> {
     );
     footprint.examples = vec!["pixellab object footprint house --to 2,2", "pixellab object footprint house --clear"];
 
+    let mut category = command(
+        "object.category",
+        "Set or clear the category of one or more objects",
+        json!({
+            "type": "object",
+            "properties": {
+                "names": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "the objects (names, or objects/<name>)" },
+                "category": {
+                    "type": ["array", "null"],
+                    "items": { "type": "string" },
+                    "description": "the category as names, outermost first, or null to clear it"
+                },
+                "to": { "type": "string", "description": "the category as a path: Nature/Trees or Nature › Trees" },
+                "clear": { "type": "boolean", "default": false, "description": "remove the category" }
+            },
+            "required": ["names"]
+        }),
+        category_run,
+        vec!["names"],
+    );
+    category.description = Some(
+        "A category is a path of names, outermost first (Nature › Trees), that groups an object under a tab and heading in the Library. A name is 1 to 32 letters, digits, spaces, &, ' or -, with no space at either end or doubled, and All and Others can't be the outermost (they are the Library's own tabs). Names compare without regard to case. A category never changes how an object renders or what Publish writes. Give --to on the command line, or category (a list, or null to clear) in JSON. Each object is its own edit and undo step; the command checks every object and the path first.",
+    );
+    category.examples = vec!["pixellab object category pine tree --to \"Nature/Trees\"", "pixellab object category pine --clear"];
+
     let mut footprint_new = footprint_param();
     footprint_new["description"] = json!("the tiles a new sprite covers, for depth order: w,d (default 1,1)");
     let mut create = command(
@@ -1023,6 +1116,7 @@ pub fn commands() -> Vec<Command> {
         still,
         resize,
         footprint,
+        category,
         create,
         set_map,
     ]

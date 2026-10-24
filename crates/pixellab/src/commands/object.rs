@@ -7,6 +7,7 @@ use serde_json::{json, Map, Value};
 use super::common::{join, obj, opt_num, opt_str, pad_end, str_of};
 use crate::context::{Ctx, DocKind};
 use crate::errors::{CommandError, Result};
+use crate::library::{category_from_param, category_of, category_within};
 use crate::registry::{Command, Params};
 use crate::render::{parse_play, render_object_image, ObjectImageOptions, MAX_SCALE};
 
@@ -20,6 +21,10 @@ fn summary(sources: &Sources, name: &str) -> (Map<String, Value>, Option<engine:
     let doc = sources.objects.get(name);
     let kind = if doc.and_then(|d| d.get("kind")).and_then(Value::as_str) == Some("block") { "block" } else { "sprite" };
     let mut base = obj(vec![("name", json!(name)), ("kind", json!(kind))]);
+    // The category, when it has one (spec R9): the names, outermost first.
+    if let Some(category) = doc.and_then(category_of) {
+        base.insert("category".into(), json!(category));
+    }
     if let Some(ext) = doc.and_then(|d| d.get("extends")).filter(|e| engine::engine::truthy(Some(e))) {
         base.insert("extends".into(), ext.clone());
     }
@@ -44,9 +49,19 @@ fn summary(sources: &Sources, name: &str) -> (Map<String, Value>, Option<engine:
 
 fn list_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let kind = opt_str(&params, "kind");
+    // Only this category and everything below it, without regard to case (spec R9).
+    let category = match params.get("category").filter(|v| !v.is_null()) {
+        Some(c) => Some(category_from_param(c).map_err(CommandError::usage)?),
+        None => None,
+    };
     let loaded = ctx.sources()?;
     let mut objects = Vec::new();
-    for name in loaded.sources.objects.keys() {
+    for (name, doc) in &loaded.sources.objects {
+        if let Some(prefix) = &category {
+            if !category_of(doc).is_some_and(|c| category_within(&c, prefix)) {
+                continue;
+            }
+        }
         let (s, _) = summary(&loaded.sources, name);
         if kind.is_none() || s.get("kind").and_then(Value::as_str) == kind {
             objects.push(Value::Object(s));
@@ -66,7 +81,8 @@ fn list_format(r: &Value, _: &Params) -> String {
                 None => str_of(o.get("description")),
             };
             let ext = o.get("extends").map(|e| format!("  (extends {})", str_of(Some(e)))).unwrap_or_default();
-            format!("{}  {}  {what}{ext}", pad_end(o["name"].as_str().unwrap_or(""), w), pad_end(o["kind"].as_str().unwrap_or(""), 6))
+            let cat = o.get("category").map(|c| format!("  [{}]", join(Some(c), " › "))).unwrap_or_default();
+            format!("{}  {}  {what}{ext}{cat}", pad_end(o["name"].as_str().unwrap_or(""), w), pad_end(o["kind"].as_str().unwrap_or(""), 6))
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -178,6 +194,9 @@ fn show_format(r: &Value, _: &Params) -> String {
         ),
         format!("anchor    {}", join(r.get("anchor"), ", ")),
     ];
+    if let Some(c) = r.get("category") {
+        lines.push(format!("category  {}", join(Some(c), " › ")));
+    }
     if let Some(fp) = r.get("footprint") {
         let n = fp[0].as_f64().unwrap_or(0.0) * fp[1].as_f64().unwrap_or(0.0);
         lines.push(format!("footprint {} tile{}", join(Some(fp), "×"), if n == 1.0 { "" } else { "s" }));
@@ -265,8 +284,18 @@ fn render_format(r: &Value, _: &Params) -> String {
 pub fn commands() -> Vec<Command> {
     let mut list = Command::new(
         "object.list",
-        "List every object with its kind, size, layers, frames and colors",
-        json!({ "type": "object", "properties": { "kind": { "type": "string", "enum": ["sprite", "block"], "description": "only objects of this kind" } } }),
+        "List every object with its kind, category, size, layers, frames and colors",
+        json!({
+            "type": "object",
+            "properties": {
+                "kind": { "type": "string", "enum": ["sprite", "block"], "description": "only objects of this kind" },
+                "category": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "only objects in this category and below it, without regard to case: names outermost first, or a path such as Nature/Trees"
+                }
+            }
+        }),
         false,
         list_run,
     );
@@ -274,7 +303,7 @@ pub fn commands() -> Vec<Command> {
 
     let mut show = Command::new(
         "object.show",
-        "Show an object's kind, size, anchor, footprint, layers, frames, colors and extends",
+        "Show an object's kind, category, size, anchor, footprint, layers, frames, colors and extends",
         json!({
             "type": "object",
             "properties": {

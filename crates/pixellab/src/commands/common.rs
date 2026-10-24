@@ -24,6 +24,10 @@ pub struct DocRef {
 
 /// Resolves a doc reference: scene:<name>, object:<name>, or a name (`resolveDoc`).
 pub fn resolve_doc(ctx: &mut Ctx, query: &str) -> Result<DocRef> {
+    // The palette is a doc too (object-libraries spec, D6): palette: or palette.json.
+    if query == "palette:" || query == "palette.json" {
+        return Ok(DocRef { kind: DocKind::Palette, name: String::new(), ref_: "palette:".into() });
+    }
     let found = match query.split_once(':') {
         Some((k @ ("scene" | "object"), name)) if !name.is_empty() => ctx.find(name, DocKind::parse(k))?,
         _ => ctx.find(query, None)?,

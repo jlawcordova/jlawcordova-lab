@@ -7,6 +7,15 @@ Two small `.pixellab` documents with scene layers, to try the app on and to test
 | `harbor.pixellab` | `harbor`, `harbor-flat` | An 8×8 island: 89 items in 16 layers up to three deep, the site's `{ group }` wrappers around every tile and object, two rocks in no layer, an animated boat that hops (the `hop` action), and a barrel on the dock that bobs (an ambient loop). `harbor-flat` is the same scene with no layers, and publishes the same SVG (apart from the scene name its generated class and keyframe names are scoped by). |
 | `town.pixellab` | `town` | A 16×16 island: 379 items in 59 layers four deep (district › street › house), with eight lamps in no layer. |
 
+Their objects have categories (Terrain, Nature › Trees, Buildings › Roofs, Harbor, Props, and so on; the harbor's barrel has none, so the Library shows an Others tab), and two files beside them show the new file kinds:
+
+| File | What it is |
+| --- | --- |
+| `coast.pixellib` | An object library: all 17 of the harbor's objects, with their categories and the colors they used, made by `pixellab library export`. |
+| `coast.pixelpal` | A palette file: the harbor's palette, made by `pixellab palette export`. |
+
+The town differs from the harbor in three ways that never show in its scene: it has an unplaced `rock` of its own, no `gold-4`, and a bluer `water-3`. So `pixellab library import examples/coast.pixellib --dry-run --document <copy of the town>` plans a rename (`rock-2`), a color to convert (`gold-4`) and a color that differs (`water-3`), and `palette import` of `coast.pixelpal` adds `gold-4` and asks about `water-3`. Importing either into the harbor changes nothing.
+
 The harbor's layers:
 
 ```text

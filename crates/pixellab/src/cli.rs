@@ -170,6 +170,12 @@ fn run(argv: &[String], io: &mut Io) -> Result<i32, Error> {
         ))
         .into());
     }
+    // A command with its own dryRun param (a library or palette import) takes --dry-run as that param.
+    let own_dry_run = command.params.get("properties").and_then(Value::as_object).is_some_and(|p| p.contains_key("dryRun"));
+    if dry_run && own_dry_run {
+        params.insert("dryRun".into(), Value::String("true".into()));
+    }
+    let dry_run = dry_run && !own_dry_run;
     if dry_run && (!command.mutates || command.writes_direct) {
         return Err(CommandError::usage(format!("--dry-run goes with an edit command, not {}", command_words(command.name))).into());
     }
@@ -182,7 +188,7 @@ fn run(argv: &[String], io: &mut Io) -> Result<i32, Error> {
     }
     // Params are checked before the site is read, so a usage error is always exit 2.
     let checked = check_params(&command.params, &Value::Object(params), true, Some(command.name))?;
-    if !command.needs_document {
+    if !command.needs_document || command.no_document_with.is_some_and(|k| checked.contains_key(k)) {
         // It makes a document, so there's none to open first (a Mac with no site checkout has no default).
         let mut ctx = Ctx::none();
         ctx.open =
@@ -194,7 +200,9 @@ fn run(argv: &[String], io: &mut Io) -> Result<i32, Error> {
             let text = command.format.map_or_else(|| stringify_pretty(&result), |f| f(&result, &checked));
             put(io.stdout, &format!("{text}\n"));
         }
-        return Ok(0);
+        // A failed check of a library (no document) exits 1, as a failed check of a document does.
+        let failed = command.no_document_with.is_some() && result.get("ok") == Some(&Value::Bool(false));
+        return Ok(i32::from(failed));
     }
     let document = open_document(&OpenOptions {
         doc: globals.document.clone(),

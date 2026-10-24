@@ -311,6 +311,7 @@ fn every_command_is_well_formed_and_has_a_group() {
         "history.list",
         "history.render",
         "history.show",
+        "library.info",
         "object.list",
         "object.pick",
         "object.render",
@@ -336,6 +337,7 @@ fn every_command_is_well_formed_and_has_a_group() {
         "object.action",
         "object.ambient",
         "object.animate",
+        "object.category",
         "object.erase",
         "object.fill",
         "object.frame.add",
@@ -380,6 +382,11 @@ fn every_command_is_well_formed_and_has_a_group() {
         "history.mark",
         "history.restore",
         "history.undo",
+        "library.category",
+        "library.export",
+        "library.import",
+        "palette.export",
+        "palette.import",
     ];
     let mut expected: Vec<&str> = read_only.iter().chain(mutating.iter()).copied().chain(["art.build"]).collect();
     expected.sort();
@@ -410,10 +417,22 @@ fn every_command_is_well_formed_and_has_a_group() {
     let writes: Vec<&str> = names.iter().copied().filter(|n| reg.get(n).unwrap().writes_direct).collect();
     assert_eq!(
         writes,
-        ["art.build", "document.copy", "document.migrate", "document.new", "history.mark", "history.restore", "history.undo"]
+        [
+            "art.build",
+            "document.copy",
+            "document.migrate",
+            "document.new",
+            "history.mark",
+            "history.restore",
+            "history.undo",
+            "library.category",
+            "library.export",
+            "library.import",
+            "palette.export"
+        ]
     );
     let groups: Vec<String> = reg.groups().into_iter().map(|(g, _)| g).collect();
-    assert_eq!(groups, ["activity", "art", "chat", "check", "doc", "document", "history", "object", "palette", "scene"]);
+    assert_eq!(groups, ["activity", "art", "chat", "check", "doc", "document", "history", "library", "object", "palette", "scene"]);
 }
 
 fn base(name: &'static str) -> Command {

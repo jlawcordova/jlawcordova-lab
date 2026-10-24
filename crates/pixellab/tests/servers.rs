@@ -513,9 +513,22 @@ fn serve_mcp_tools_list_the_commands_as_tools_with_input_schemas() {
         "history_list",
         "history_undo",
         "check",
+        // R28: every new command of the object libraries change is a tool.
+        "object_category",
+        "library_info",
+        "library_category",
+        "library_export",
+        "library_import",
+        "palette_export",
+        "palette_import",
     ] {
         assert!(names.contains(&name), "{name}");
     }
+    let import = tools.iter().find(|t| t["name"] == "library_import").unwrap();
+    assert_eq!(import["inputSchema"]["required"], json!(["from"]));
+    assert!(str_of(&import["description"]).contains("chat_ask"));
+    assert_eq!(import["annotations"]["readOnlyHint"], false);
+    assert_eq!(tools.iter().find(|t| t["name"] == "library_info").unwrap()["annotations"]["readOnlyHint"], true);
     for name in ["proposal_apply", "proposal_list", "art_build", "document_copy", "document_migrate"] {
         assert!(!names.contains(&name), "{name}");
     }
@@ -529,6 +542,55 @@ fn serve_mcp_tools_list_the_commands_as_tools_with_input_schemas() {
     assert_eq!(place["inputSchema"]["properties"]["at"]["items"], json!({ "type": "integer" }));
     assert!(str_of(&tools.iter().find(|t| t["name"] == "doc_save").unwrap()["description"]).contains("close its version"));
     assert!(str_of(&place["description"]).contains("The edit applies and saves when the call is done."));
+}
+
+#[test]
+fn r28_the_instructions_name_categories_libraries_palette_files_and_asking_the_owner() {
+    let mut m = mcp_fixture(false);
+    let init = initialize(&mut m.server, "test-agent", "9.9");
+    let text = str_of(&init["result"]["instructions"]).to_string();
+    for needle in
+        ["category", ".pixellib", ".pixelpal", "library_import", "palette_import", "dryRun", "chat_ask", "do not accept it on your own"]
+    {
+        assert!(text.contains(needle), "{needle}");
+    }
+}
+
+#[test]
+fn r28_an_agent_imports_a_library_over_mcp_and_a_refusal_carries_the_plan() {
+    let mut m = mcp_initialized();
+    let lib = temp_dir("pixellab-libs-");
+    let path = lib.join("odd.pixellib");
+    fs::create_dir_all(path.join("objects")).unwrap();
+    fs::write(
+        path.join("library.json"),
+        "{\n  \"format\": 1,\n  \"kind\": \"library\",\n  \"name\": \"odd\",\n  \"exportedFrom\": \"elsewhere\",\n  \"colors\": {\n    \"world\": {\n      \"rust-9\": \"#8B5A33\"\n    },\n    \"outfit\": {}\n  }\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        path.join("objects/pole.json"),
+        "{\n  \"category\": [\n    \"Props\"\n  ],\n  \"kind\": \"sprite\",\n  \"anchor\": [0, 0],\n  \"keys\": {\"a\": \"rust-9\"},\n  \"layers\": [{\"map\": [\"a\"]}]\n}\n",
+    )
+    .unwrap();
+    let p = path.to_str().unwrap();
+    let info = call(&mut m.server, "library_info", json!({ "library": p }));
+    assert_eq!(info["structuredContent"]["objects"][0]["category"], json!(["Props"]), "{info}");
+    let plan = call(&mut m.server, "library_import", json!({ "from": p, "dryRun": true }));
+    assert_eq!(plan["structuredContent"]["missing"][0]["nearest"]["name"], "soil-2", "{plan}");
+    let refused = call(&mut m.server, "library_import", json!({ "from": p }));
+    assert_eq!(refused["isError"], true);
+    assert_eq!(refused["structuredContent"]["error"]["code"], "missing_colors");
+    assert_eq!(refused["structuredContent"]["error"]["details"]["missing"][0]["name"], "rust-9");
+    assert!(!m.site.document.join("objects/pole.json").exists());
+    let done = call(&mut m.server, "library_import", json!({ "from": p, "convert": { "rust-9": "soil-2" } }));
+    assert_eq!(done["structuredContent"]["summary"], "Imported 1 object from odd.pixellib", "{done}");
+    let written: Value = serde_json::from_str(&fs::read_to_string(m.site.document.join("objects/pole.json")).unwrap()).unwrap();
+    assert_eq!((written["keys"]["a"].clone(), written["category"].clone()), (json!("soil-2"), json!(["Props"])));
+    // The agent sets a category in the document, and exports a palette.
+    let cat = call(&mut m.server, "object_category", json!({ "names": ["pebble"], "category": ["Nature", "Stones"] }));
+    assert_eq!(cat["structuredContent"]["changed"], true, "{cat}");
+    let pal = call(&mut m.server, "palette_export", json!({ "to": lib.join("sample.pixelpal").to_str().unwrap() }));
+    assert_eq!(pal["structuredContent"]["world"], 10, "{pal}");
 }
 
 #[test]

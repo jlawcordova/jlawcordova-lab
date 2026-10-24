@@ -47,11 +47,34 @@ function filesIn(/** @type {string} */ dir) {
 }
 
 describe('the example documents (R10, R29)', { skip }, () => {
+  test('R27: the examples have categories, and coast.pixellib and coast.pixelpal are the harbor exported', async () => {
+    const harbor = join(EXAMPLES, 'harbor.pixellab');
+    const objects = json(harbor, ['object', 'list']).objects;
+    assert.equal(objects.filter((/** @type {any} */ o) => !o.category).map((/** @type {any} */ o) => o.name).join(), 'barrel', 'only the barrel is left in Others');
+    assert.ok(json(join(EXAMPLES, 'town.pixellab'), ['object', 'list']).objects.every((/** @type {any} */ o) => o.category));
+    const lib = json(harbor, ['library', 'info', join(EXAMPLES, 'coast.pixellib')]);
+    assert.deepEqual([lib.name, lib.exportedFrom, lib.ok, lib.objects.length], ['coast', 'harbor', true, objects.length]);
+    assert.equal(json(harbor, ['check', '--library', join(EXAMPLES, 'coast.pixellib')]).ok, true);
+    const pal = JSON.parse(readFileSync(join(EXAMPLES, 'coast.pixelpal'), 'utf8'));
+    const own = JSON.parse(readFileSync(join(harbor, 'palette.json'), 'utf8'));
+    assert.deepEqual([pal.format, pal.kind, pal.world, pal.outfit], [1, 'palette', own.world, own.outfit]);
+    // Into the town: the harbor's rock is renamed, gold-4 must be converted, and water-3 differs.
+    const plan = json(join(EXAMPLES, 'town.pixellab'), ['library', 'import', join(EXAMPLES, 'coast.pixellib'), '--dry-run']);
+    assert.deepEqual(plan.renames, [{ from: 'rock', to: 'rock-2' }]);
+    assert.deepEqual(plan.missing.map((/** @type {any} */ m) => m.name), ['gold-4']);
+    assert.deepEqual(plan.differing.map((/** @type {any} */ d) => d.name), ['water-3']);
+    const palPlan = json(join(EXAMPLES, 'town.pixellab'), ['palette', 'import', join(EXAMPLES, 'coast.pixelpal'), '--dry-run']);
+    assert.deepEqual([palPlan.new.map((/** @type {any} */ c) => c.name), palPlan.differing.map((/** @type {any} */ c) => c.name)], [['gold-4'], ['water-3']]);
+    // Importing into the harbor itself changes nothing: every object is already there.
+    const same = json(harbor, ['library', 'import', join(EXAMPLES, 'coast.pixellib'), '--dry-run']);
+    assert.ok(same.objects.every((/** @type {any} */ o) => o.fate === 'same'));
+  });
+
   test('R10: examples/ is what scripts/make-examples.mjs writes (npm run examples)', async () => {
     const out = join(tmp, 'made');
     await writeExamples(out);
     const made = filesIn(out);
-    assert.deepEqual(filesIn(EXAMPLES).filter((p) => p.includes('.pixellab/')), made);
+    assert.deepEqual(filesIn(EXAMPLES).filter((p) => /\.(pixellab|pixellib)\/|\.pixelpal$/.test(p)), made);
     for (const file of made) assert.equal(readFileSync(join(EXAMPLES, file), 'utf8'), readFileSync(join(out, file), 'utf8'), `${file} is out of date: run npm run examples`);
   });
 

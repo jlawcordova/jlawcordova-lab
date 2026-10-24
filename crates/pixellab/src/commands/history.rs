@@ -27,6 +27,9 @@ fn doc_param() -> Value {
 
 /// A doc's kind and name from a file in the document (`scenes/x.json`).
 pub fn doc_of_file(file: &str) -> Option<(DocKind, String)> {
+    if file == engine::format::PALETTE_FILE {
+        return Some((DocKind::Palette, String::new()));
+    }
     let (dir, rest) = file.split_once('/')?;
     let name = rest.strip_suffix(".json")?.to_string();
     match dir {
@@ -198,7 +201,7 @@ fn render_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let v = the_version(session, &params)?;
     let n = v["number"].as_u64().unwrap_or(0);
     let file = file_of(session, opt_str(&params, "doc").unwrap_or(""))?;
-    let Some((kind, name)) = doc_of_file(&file) else {
+    let Some((kind, name)) = doc_of_file(&file).filter(|(k, _)| *k != DocKind::Palette) else {
         return Err(CommandError::usage(format!("{file} isn't a scene or an object")).into());
     };
     let Some(Some(text)) = session.history.text_at(n, &file) else {
@@ -246,12 +249,14 @@ fn render_format(r: &Value, _: &Params) -> String {
 // --------------------------------------------------------------- restore
 
 /// Puts each file to its text (None: removes it), saves, and records it all as one version by
-/// the requester. Returns the docs written and the files removed.
-fn put_files(
+/// the requester. Returns the docs written and the files removed. `once`: only the first file
+/// carries the label, so the version lists it once however many files it holds (an import).
+pub(crate) fn put_files(
     session: &mut Session,
     targets: Vec<(String, Option<String>)>,
     label: &str,
     force: bool,
+    once: bool,
 ) -> Result<(Vec<String>, Vec<String>)> {
     let author = requester(session);
     let who = std::mem::replace(&mut session.author, author);
@@ -259,8 +264,9 @@ fn put_files(
     let result = (|| -> Result<(Vec<String>, Vec<String>)> {
         let mut written = Vec::new();
         let mut removed = Vec::new();
-        for (file, text) in targets {
+        for (n, (file, text)) in targets.into_iter().enumerate() {
             let Some((kind, name)) = doc_of_file(&file) else { continue };
+            let label = if once && n > 0 { "" } else { label };
             match text {
                 Some(t) => {
                     let data = import_source(&t).map_err(|e| CommandError::new(format!("{file} doesn't load: {e}"), "load_error"))?;
@@ -268,6 +274,8 @@ fn put_files(
                     session.save(&ref_, force)?;
                     written.push(ref_);
                 }
+                // The palette is never deleted: a document always has one.
+                None if kind == DocKind::Palette => {}
                 None => {
                     session.delete_doc(kind, &name, label)?;
                     removed.push(file);
@@ -316,7 +324,7 @@ fn restore_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
         }
     }
     let label = format!("Restored to version {n}");
-    let (written, removed) = put_files(session, targets, &label, true)?;
+    let (written, removed) = put_files(session, targets, &label, true, false)?;
     let changed = !written.is_empty() || !removed.is_empty();
     let summary = if changed {
         format!("{label}: {} doc{} written, {} removed", written.len(), if written.len() == 1 { "" } else { "s" }, removed.len())
@@ -390,7 +398,7 @@ fn undo_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     }
     let first = v["edits"].as_array().and_then(|e| e.first()).map(|e| str_of(Some(e))).unwrap_or_default();
     let label = if first.is_empty() { format!("Undid version {n}") } else { format!("Undid version {n}: {first}") };
-    let (written, removed) = put_files(session, targets, &label, flag(&params, "force"))?;
+    let (written, removed) = put_files(session, targets, &label, flag(&params, "force"), false)?;
     let changed = !written.is_empty() || !removed.is_empty();
     Ok(json!({ "version": n, "changed": changed, "written": written, "removed": removed, "summary": label }))
 }

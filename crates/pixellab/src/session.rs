@@ -390,14 +390,19 @@ impl Session {
         let disk = self.disk()?;
         let mut objects: BTreeMap<String, Value> = disk.objects.clone();
         let mut scenes: BTreeMap<String, Value> = disk.scenes.clone();
+        let mut palette = disk.palette.clone().unwrap_or(Value::Null);
         for entry in self.entries.values() {
             match entry.kind {
                 DocKind::Object => objects.insert(entry.name.clone(), entry.doc.clone()),
                 DocKind::Scene => scenes.insert(entry.name.clone(), entry.doc.clone()),
-                DocKind::Palette => None,
+                // The palette is a doc too, since palette.import edits it (object-libraries spec, D6).
+                DocKind::Palette => {
+                    palette = entry.doc.clone();
+                    None
+                }
             };
         }
-        let sources = load_sources(disk.palette.clone().unwrap_or(Value::Null), objects, scenes);
+        let sources = load_sources(palette, objects, scenes);
         let loaded = Rc::new(Loaded { sources, load_errors: disk.load_errors.clone() });
         self.loaded = Some(loaded.clone());
         Ok(loaded)
@@ -1184,18 +1189,17 @@ impl Session {
         let problems_of = |doc: &Value| -> Vec<String> {
             let mut objects = loaded.sources.objects.clone();
             let mut scenes = BTreeMap::new();
+            let mut palette = loaded.sources.palette.clone();
             match entry.kind {
                 DocKind::Scene => {
                     scenes.insert(entry.name.clone(), doc.clone());
                 }
-                _ => {
+                DocKind::Palette => palette = doc.clone(),
+                DocKind::Object => {
                     objects.insert(entry.name.clone(), doc.clone());
                 }
             }
-            validate(&load_sources(loaded.sources.palette.clone(), objects, scenes))
-                .into_iter()
-                .filter(|p| p.starts_with(&prefix))
-                .collect()
+            validate(&load_sources(palette, objects, scenes)).into_iter().filter(|p| p.starts_with(&prefix)).collect()
         };
         let had: std::collections::HashSet<String> = others.iter().flat_map(problems_of).collect();
         Ok(problems_of(data).into_iter().filter(|p| !had.contains(p)).collect())
@@ -1435,7 +1439,13 @@ fn base_of(disk: &Disk) -> Base {
 
 /// The canonical text of a doc, or None if it isn't a record (`serialize`).
 pub fn serialize(doc: &Value) -> Option<String> {
-    doc.is_object().then(|| format::serialize(doc))
+    doc.is_object().then(|| if is_palette(doc) { format::serialize_palette(doc) } else { format::serialize(doc) })
+}
+
+/// Whether a doc is a palette: its two tiers, and no `kind` (an object has one).
+/// No scene has a `world` and an `outfit`.
+fn is_palette(doc: &Value) -> bool {
+    doc.get("kind").is_none() && doc.get("world").is_some_and(Value::is_object) && doc.get("outfit").is_some_and(Value::is_object)
 }
 
 /// A source text as the canonical format would write it, or None if it

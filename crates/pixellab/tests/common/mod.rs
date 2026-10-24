@@ -124,3 +124,20 @@ pub fn make_site() -> TempSite {
     write(&root, "src/styles/variables.css", VARIABLES_CSS);
     TempSite { base, root, home, document }
 }
+
+/// A `.pixellib` made in `dir` (as `<name>.pixellib`) by the program's own writer: the colors its
+/// objects recorded at export as (name, hex, tier), and the objects by name.
+pub fn make_library(dir: &Path, name: &str, colors: &[(&str, &str, &str)], objects: Vec<(&str, serde_json::Value)>) -> PathBuf {
+    let tier = |t: &str| colors.iter().filter(|(_, _, c)| *c == t).map(|(n, h, _)| (n.to_string(), h.to_string())).collect();
+    let lib = pixellab::library::Library {
+        name: name.to_string(),
+        exported_from: "test".to_string(),
+        world: tier("world"),
+        outfit: tier("outfit"),
+        objects: objects.into_iter().map(|(n, o)| (n.to_string(), o)).collect(),
+        load_errors: Vec::new(),
+    };
+    let path = dir.join(format!("{name}.pixellib"));
+    pixellab::library::write_library(&path, &lib, false).expect("write the library");
+    path
+}

@@ -232,7 +232,31 @@ fn count_items(items: &[Value]) -> usize {
         .sum()
 }
 
+/// `check --library`: a `.pixellib` against its own recorded colors (object-libraries spec, D3).
+fn library_run(path: &str) -> Result<Value> {
+    let path = super::library::expand(path);
+    let lib = crate::library::read_library(&path)?;
+    let problems = crate::library::library_problems(&lib);
+    let file = path.to_string_lossy().into_owned();
+    let checked = 1 + lib.objects.len();
+    let n = lib.objects.len();
+    Ok(Value::Object(obj(vec![
+        ("ok", json!(problems.is_empty())),
+        ("target", json!({ "kind": "library", "name": lib.name, "file": file })),
+        ("checked", json!(checked)),
+        ("problems", Value::Array(problems.iter().map(|p| Value::Object(entry(p))).collect())),
+        ("warnings", json!([])),
+        ("summary", json!(format!("{n} object{} from {}", if n == 1 { "" } else { "s" }, lib.exported_from))),
+    ])))
+}
+
 fn run(ctx: &mut Ctx, params: Params) -> Result<Value> {
+    if let Some(library) = opt_str(&params, "library").filter(|l| !l.is_empty()) {
+        if opt_str(&params, "name").is_some() {
+            return Err(crate::errors::CommandError::usage("check: give a name or --library, not both").into());
+        }
+        return library_run(library);
+    }
     let loaded = ctx.sources()?;
     let budgets = ctx.document()?.budgets.clone();
     let sources = &loaded.sources;
@@ -323,7 +347,8 @@ pub fn commands() -> Vec<Command> {
             "type": "object",
             "properties": {
                 "name": { "type": "string", "description": "an object or scene (or objects/<name>, scenes/<name>); every source when left out" },
-                "kind": { "type": "string", "enum": ["object", "scene"], "description": "which kind name is, when both exist" }
+                "kind": { "type": "string", "enum": ["object", "scene"], "description": "which kind name is, when both exist" },
+                "library": { "type": "string", "description": "check this .pixellib instead of the document: its objects against the colors it recorded, extends within it, categories" }
             }
         }),
         false,
@@ -337,10 +362,17 @@ pub fn commands() -> Vec<Command> {
         "out_of_order: a scene whose file lists its items out of depth order (it still publishes in depth order; scene.sort writes the file in order), with how many items would move. ",
         "copies: a moving item that takes several places among the others as it moves is drawn once for each place in the SVG, which adds to its size; the warning says how many. ",
         "cropped: a scene with a fixed viewBox paints pixels outside it, which the published SVG cuts off; the warning says how many (scene.frame --fit fits it to its content). ",
-        "empty: a scene with nothing in it and no viewBox, which publishes one tile around the origin."
+        "empty: a scene with nothing in it and no viewBox, which publishes one tile around the origin. ",
+        "With library, it checks an object library instead (no document needed): its objects against the colors it recorded at export, extends resolving inside it, and categories."
     ));
+    check.no_document_with = Some("library");
     check.args = vec!["name"];
-    check.examples = vec!["pixellab check", "pixellab check hero-island", "pixellab check objects/pine --json"];
+    check.examples = vec![
+        "pixellab check",
+        "pixellab check hero-island",
+        "pixellab check objects/pine --json",
+        "pixellab check --library ~/Art/explainer.pixellib",
+    ];
     check.format = Some(format);
     vec![check]
 }

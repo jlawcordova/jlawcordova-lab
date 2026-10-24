@@ -1,4 +1,7 @@
 {
+  "category": [
+    "Harbor"
+  ],
   "kind": "sprite",
   "anchor": [10, 11],
   "keys": {
