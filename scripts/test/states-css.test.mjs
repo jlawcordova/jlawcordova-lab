@@ -52,9 +52,19 @@ describe('the CSS states play with (R9 to R16, D6)', { skip }, () => {
     assert.ok(rule, 'both selectors in one rule');
     assert.match(rule, /\{animation:states--s1-walk-f1-l 600ms step-end infinite\}$/);
     // The start state needs no attribute: the plain rule has the lower specificity.
-    assert.ok(play.some((r) => r.startsWith('[data-pixellab="states"] .states--s1-f0{animation:states--s1-idle-f0-l 1000ms step-end infinite}')));
+    assert.ok(play.some((r) => r.startsWith('[data-pixellab="states"] .states--s1-f0{animation:states--s1--idle-f0-l 1000ms step-end infinite}')));
     // The item that starts in walk plays it with no attribute.
-    assert.ok(play.some((r) => r.startsWith('[data-pixellab="states"] .states--s2-f1{animation:states--s2-walk-f1-l 600ms step-end infinite}')));
+    assert.ok(play.some((r) => r.startsWith('[data-pixellab="states"] .states--s2-f1{animation:states--s2--walk-f1-l 600ms step-end infinite}')));
+  });
+
+  test('R11: with no attribute the start state plays under names of its own, so naming it or taking the name off restarts it', () => {
+    // <scene>--s<n>--<state>…: a state's name has no double hyphen, so no state's rules can have these names.
+    assert.ok(css.includes('@keyframes states--s1--idle-f0-l{'), 'the start state\'s own keyframes');
+    assert.ok(css.includes('@keyframes states--s1-idle-f0-l{'), 'beside the ones data-state="idle" plays');
+    // The plain rules say no end: <scene>--<state> fires for a state a page names (R12).
+    const plain = play.filter((r) => /^\[data-pixellab="states"\] \.states--s\d+(-f\d+)?\{/.test(r));
+    assert.ok(plain.length > 0);
+    assert.ok(plain.every((r) => !/states--[a-z-]+ \d+ms linear 1/.test(r)), plain.join('\n'));
   });
 
   test('R10: the state listed later in the object has its rules later, so it wins', () => {

@@ -403,7 +403,15 @@ impl Session {
             };
         }
         let sources = load_sources(palette, objects, scenes);
-        let loaded = Rc::new(Loaded { sources, load_errors: disk.load_errors.clone() });
+        // A working copy stands in for its file's text, so what that text wrote twice is gone (object-states spec, R7).
+        let copies: Vec<String> = self.entries.values().map(|e| format!("{}: ", doc_file(e.kind, &e.name))).collect();
+        let load_errors = disk
+            .load_errors
+            .iter()
+            .filter(|e| !copies.iter().any(|c| e.starts_with(c.as_str()) && !e[c.len()..].starts_with("cannot be loaded")))
+            .cloned()
+            .collect();
+        let loaded = Rc::new(Loaded { sources, load_errors });
         self.loaded = Some(loaded.clone());
         Ok(loaded)
     }

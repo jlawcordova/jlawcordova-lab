@@ -139,6 +139,16 @@ impl States {
 
 // ---------------------------------------------------------------- validation
 
+/// Why `name` can't name a state although it is a name, or None. A one-shot state ends with keyframes
+/// `<scene>--<name>` (R12), beside the classes and keyframes the compiler makes in that namespace:
+/// `mv-<id>…` for scene motion, `a<n>` and `am-<n>` for ambient loops, `s<n>…` for stated items.
+pub fn reserved(name: &str) -> Option<String> {
+    let first = name.split('-').next().unwrap_or("");
+    let numbered = |letter: char| first.strip_prefix(letter).is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+    (first == "mv" || first == "am" || numbered('a') || numbered('s'))
+        .then(|| format!("a name that starts {first} is one the compiler makes (mv-, am-, a<number>, s<number>)"))
+}
+
 /// Checks a sprite's `start` and `states` (R7). `frame_count` is how many frames the sprite has:
 /// what its frame-loop layers share, else 1. `add` gets each problem, with the file put in front.
 pub fn validate(o: &Map<String, Value>, frame_count: usize, add: &mut dyn FnMut(String)) {
@@ -161,11 +171,13 @@ pub fn validate(o: &Map<String, Value>, frame_count: usize, add: &mut dyn FnMut(
             _ => add(format!("start {} is not one of its states ({})", crate::engine::q(Some(start)), state_list(map))),
         },
     }
-    // Names are the object's keys, so one can't appear twice: a second would replace the first.
+    // A name written twice is the object's key once, the second replacing the first; `duplicate_states` finds it in the text.
     for name in keys(map) {
         let place = format!("states.{name}");
         if !is_name(name) {
             add(format!("{place}: names are lowercase words joined by hyphens"));
+        } else if let Some(why) = reserved(name) {
+            add(format!("{place}: {why}; name the state something else"));
         }
         let Some(s) = map[name].as_object() else {
             add(format!("{place}: must be {{ frames, ms, loop?, then?, move? }}"));
@@ -513,8 +525,23 @@ pub fn keys_states(track: &Value) -> bool {
 /// keeps the state's name and timing if the new object has a state of that name, and otherwise
 /// enters that object's start. The first key without a state leaves the item in the state it
 /// starts in, `own` for the object it is placed as.
+///
+/// A track with no `state` key isn't baked (R16, R17: a page's `data-state` still reaches its item),
+/// so each object it poses the item as plays the state it starts in from time 0, as an item with no
+/// track does: entered at 0 whatever the key's time.
 pub fn timeline(track: &Value, object: &str, own: Option<&str>, duration: f64, states_of: &dyn Fn(&str) -> Option<Rc<States>>) -> Vec<Seg> {
     let filled = crate::motion::filled_keys(track, object);
+    if !keys_states(track) {
+        return filled
+            .iter()
+            .enumerate()
+            .map(|(i, f)| {
+                let state = states_of(&f.pose).map(|s| s.first(own.filter(|_| f.pose == object)).name.clone());
+                let to = filled.get(i + 1).map_or(duration, |next| next.t);
+                Seg { from: f.t, to, pose: f.pose.clone(), state, entered: 0.0 }
+            })
+            .collect();
+    }
     let raw = track.get("keys").and_then(Value::as_array).cloned().unwrap_or_default();
     let mut out: Vec<Seg> = Vec::new();
     let mut name: Option<String> = None;
@@ -548,9 +575,19 @@ pub fn timeline(track: &Value, object: &str, own: Option<&str>, duration: f64, s
     out
 }
 
-/// A percentage of a loop, as the compiled CSS writes it: never later than the time it stands for.
+/// A percentage of a loop, as the compiled CSS writes it: never later than the time it stands for, and
+/// less than 1 ms earlier. That is 3 decimals up to a 100 s loop, and one more for each ten times longer.
 fn pct_floor(t: f64, d: f64) -> f64 {
-    (((t / d) * 100.0 * 1000.0 + 1e-6).floor() / 1000.0).clamp(0.0, 99.999)
+    let scale = 10f64.powi(pct_decimals(d));
+    (((t / d) * 100.0 * scale + 1e-6).floor() / scale).clamp(0.0, 100.0 - 1.0 / scale)
+}
+
+fn pct_decimals(d: f64) -> i32 {
+    if d > 100_000.0 {
+        3 + (d / 100_000.0).log10().ceil() as i32
+    } else {
+        3
+    }
 }
 
 fn pct_text(t: f64, d: f64) -> String {
@@ -656,7 +693,11 @@ fn end_ms(s: &State) -> f64 {
     }
 }
 
-fn state_animation(scope: &str, n: usize, states: &States, state: &State, count: usize) -> StateAnimation {
+/// `start` is the play of the state an item starts in with no attribute: its animations have names of
+/// their own (`<scope>--s<n>--<state>…`, which no state's name can make), so naming that state with
+/// `data-state` or taking the name off changes the names, and so restarts it (R11). It has no end
+/// event: `<scene>--<state>` fires for a state a page names (R12).
+fn state_animation(scope: &str, n: usize, states: &States, state: &State, count: usize, start: bool) -> StateAnimation {
     let r = run(states, &state.name);
     let from = r.settle.from();
     let all = changes(states, &r, None);
@@ -673,6 +714,7 @@ fn state_animation(scope: &str, n: usize, states: &States, state: &State, count:
         cycle.extend(all.iter().filter(|c| c.t > from).map(|c| Change { t: c.t - from, ..*c }));
     }
     let name = &state.name;
+    let base = if start { format!("{scope}--s{n}--{name}") } else { format!("{scope}--s{n}-{name}") };
     let ms = |v: f64| jsnum::to_string(v);
     let delay = if from > 0.0 { format!(" {}ms", ms(from)) } else { String::new() };
     let mut keyframes = Vec::new();
@@ -681,13 +723,13 @@ fn state_animation(scope: &str, n: usize, states: &States, state: &State, count:
         for (k, slot) in frames.iter_mut().enumerate() {
             let mut parts: Vec<String> = Vec::new();
             if from > 0.0 && (finite.iter().any(|c| c.frame == k) || (!looping && after.frame == k)) {
-                let id = format!("{scope}--s{n}-{name}-f{k}");
+                let id = format!("{base}-f{k}");
                 let stops: Vec<(f64, usize)> = finite.iter().map(|c| (c.t, c.frame)).collect();
                 keyframes.push(format!("@keyframes {id}{{{}}}", opacity_frames(&stops, k, from, Some(after.frame))));
                 parts.push(format!("{id} {}ms step-end 1 forwards", ms(from)));
             }
             if looping && cycle.iter().any(|c| c.frame == k) {
-                let id = format!("{scope}--s{n}-{name}-f{k}-l");
+                let id = format!("{base}-f{k}-l");
                 let stops: Vec<(f64, usize)> = cycle.iter().map(|c| (c.t, c.frame)).collect();
                 keyframes.push(format!("@keyframes {id}{{{}}}", opacity_frames(&stops, k, period, None)));
                 parts.push(format!("{id} {}ms step-end{delay} infinite", ms(period)));
@@ -699,18 +741,18 @@ fn state_animation(scope: &str, n: usize, states: &States, state: &State, count:
     }
     let mut element: Vec<String> = Vec::new();
     if from > 0.0 && (finite.iter().any(|c| c.moved != [0.0, 0.0]) || (!looping && after.moved != [0.0, 0.0])) {
-        let id = format!("{scope}--s{n}-{name}-m");
+        let id = format!("{base}-m");
         let stops: Vec<(f64, [f64; 2])> = finite.iter().map(|c| (c.t, c.moved)).collect();
         keyframes.push(format!("@keyframes {id}{{{}}}", transform_frames(&stops, from, Some(after.moved))));
         element.push(format!("{id} {}ms step-end 1 forwards", ms(from)));
     }
     if looping && cycle.iter().any(|c| c.moved != [0.0, 0.0]) {
-        let id = format!("{scope}--s{n}-{name}-ml");
+        let id = format!("{base}-ml");
         let stops: Vec<(f64, [f64; 2])> = cycle.iter().map(|c| (c.t, c.moved)).collect();
         keyframes.push(format!("@keyframes {id}{{{}}}", transform_frames(&stops, period, None)));
         element.push(format!("{id} {}ms step-end{delay} infinite", ms(period)));
     }
-    if state.plays_once() {
+    if state.plays_once() && !start {
         element.push(format!("{scope}--{name} {}ms linear 1", ms(end_ms(state))));
     }
     StateAnimation { keyframes, frames, element: Some(element.join(",")).filter(|e| !e.is_empty()), settle: after.frame }
@@ -788,7 +830,8 @@ pub fn css(scope: &str, items: &[Rc<ItemStates>]) -> Css {
             }
             continue;
         }
-        let animations: Vec<StateAnimation> = item.states.list.iter().map(|s| state_animation(scope, n, &item.states, s, count)).collect();
+        let animations: Vec<StateAnimation> =
+            item.states.list.iter().map(|s| state_animation(scope, n, &item.states, s, count, false)).collect();
         for (s, a) in item.states.list.iter().zip(&animations) {
             defs.extend(a.keyframes.iter().cloned());
             if s.plays_once() && !ended.contains(&s.name.as_str()) {
@@ -816,8 +859,9 @@ pub fn css(scope: &str, items: &[Rc<ItemStates>]) -> Css {
             }
         }
         // With no attribute, an item plays the state it starts in.
-        if let Some(index) = item.states.index_of(&item.start) {
-            let a = &animations[index];
+        if let Some(state) = item.states.get(&item.start) {
+            let a = &state_animation(scope, n, &item.states, state, count, true);
+            defs.extend(a.keyframes.iter().cloned());
             if count > 1 {
                 for (k, frame) in a.frames.iter().enumerate() {
                     if let Some(value) = frame {

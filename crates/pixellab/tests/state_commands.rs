@@ -160,6 +160,15 @@ fn d3_adding_a_state_is_refused_when_it_would_break_a_rule() {
     assert_eq!(add(&mut s, json!({ "name": "lamp", "state": "idle" })).0, "state_exists");
     assert_eq!(add(&mut s, json!({ "name": "lamp", "state": "Two Words" })).0, "usage");
     assert!(add(&mut s, json!({ "name": "lamp", "state": "clear" })).1.contains("--state clear"));
+    // A one-shot state's end is <scene>--<state>, beside the names the compiler makes (B1 of PR 60's review).
+    for name in ["mv-lamp", "am-1", "a2", "s1-glow"] {
+        let (code, message) = add(&mut s, json!({ "name": "lamp", "state": name }));
+        assert_eq!(code, "usage", "{name}");
+        assert!(message.contains("is one the compiler makes (mv-, am-, a<number>, s<number>)"), "{message}");
+    }
+    assert!(refused(call(&mut s, "object.state.set", json!({ "name": "lamp", "state": "flicker", "rename": "s3" })))
+        .1
+        .contains("the compiler makes"));
     assert_eq!(add(&mut s, json!({ "name": "lamp", "state": "x", "frames": [2] })).1, "there's no frame 2; the sprite has 2 (0 to 1)");
     assert_eq!(add(&mut s, json!({ "name": "lamp", "state": "x", "ms": 19 })).0, "usage");
     assert_eq!(add(&mut s, json!({ "name": "lamp", "state": "x", "then": "idle" })).0, "usage");
@@ -774,6 +783,23 @@ fn r8_check_warns_about_states_beside_layer_loops_and_r17_about_a_page_switch_th
         .unwrap()
         .iter()
         .all(|w| w["code"] != "scene_owns_state" && w["code"] != "states_and_loops"));
+}
+
+#[test]
+fn r7_a_state_written_twice_is_a_problem_until_saving_keeps_one() {
+    let fx = Fx::new();
+    let text = fs::read_to_string(fx.root.join("objects/lamp.json")).unwrap();
+    let twice = text.replacen("    \"flicker\"", "    \"idle\": { \"frames\": [1], \"ms\": 200 },\n    \"flicker\"", 1);
+    assert_ne!(twice, text);
+    fs::write(fx.root.join("objects/lamp.json"), twice).unwrap();
+    let mut s = fx.session();
+    let problem = "objects/lamp.json: states.idle: written twice; the last one counts, and saving keeps only it, so remove or rename one";
+    assert_eq!(problems(&mut s), [problem]);
+    assert_eq!(ok(&mut s, "check", json!({ "name": "lamp" }))["problems"][0]["text"], problem);
+    // An edit's working copy is the last one, so the problem goes with it.
+    ok(&mut s, "object.state.set", json!({ "name": "lamp", "state": "idle", "ms": 300 }));
+    assert_eq!(problems(&mut s), Vec::<String>::new());
+    assert_eq!(object(&mut s, "lamp")["states"]["idle"], json!({ "frames": [1], "ms": 300 }));
 }
 
 // ---------------------------------------------------------------- R34: all three doors

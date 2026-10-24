@@ -97,6 +97,9 @@ pub fn check_new_name(doc: &Value, name: &str) -> Result<()> {
             "{name} is a word the scene commands read (--state clear, --state start): name the state something else"
         )));
     }
+    if let Some(why) = engine::states::reserved(name) {
+        return Err(usage(format!("{name}: {why}; name the state something else")));
+    }
     if names_of(doc).iter().any(|n| n == name) {
         return Err(err(format!("there is already a state named {name}"), "state_exists"));
     }
@@ -751,6 +754,9 @@ pub fn make(object: &str, doc: &mut Value) -> Result<Made> {
         }
         if RESERVED.contains(&name.as_str()) {
             return Err(err(format!("an action is named {name}, a word the scene commands read; rename the action first"), "name_taken"));
+        }
+        if let Some(why) = engine::states::reserved(name) {
+            return Err(err(format!("an action is named {name}, which can't name a state ({why}); rename the action first"), "name_taken"));
         }
         let (frames, step_ms) =
             frames_for(action.get("duration").and_then(Value::as_f64).unwrap_or(f64::NAN), &format!("the action {name}"))?;

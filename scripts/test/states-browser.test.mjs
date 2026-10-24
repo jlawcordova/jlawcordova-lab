@@ -8,6 +8,7 @@
 // - a `then` hand-over, a hold, and the list rule;
 // - R9, R12: `animationend` with `<scene>--<state>` for a one-shot state, from data-state and data-play,
 //   and none from a looping one;
+// - R11: a state an item starts in restarts when a page names it, takes it off and names it again;
 // - R16: a track that keys states, frame for frame against `scene render --time`;
 // - R14: under reduced motion nothing plays or fires, and each item shows the frame it settles in.
 //
@@ -23,7 +24,7 @@ import { pathToFileURL } from 'node:url';
 
 import { chromium, firefox, webkit } from 'playwright';
 
-import { PROGRAM, compileFixture, json, tempArea } from './states-fixture.mjs';
+import { PROGRAM, compileFixture, compileWith, json, tempArea } from './states-fixture.mjs';
 
 const skip = existsSync(PROGRAM) ? false : `no program at ${PROGRAM}: run cargo build --release`;
 const ENGINES = { webkit, chromium, firefox };
@@ -36,6 +37,9 @@ after(() => area.remove());
 
 /** @type {string} */
 let url;
+/** The fixture with a walker that starts in dead (a hold), in a group of its own. */
+/** @type {string} */
+let opener;
 /** What `object state run walker <state>` says, by state. */
 /** @type {Record<string, any>} */
 const runs = {};
@@ -43,6 +47,9 @@ const runs = {};
 before(() => {
   if (skip) return;
   url = pathToFileURL(compileFixture(area.dir).path).href;
+  opener = pathToFileURL(
+    compileWith(area.dir, (scene) => scene.items.push({ group: { class: 'opener' }, items: [{ object: 'walker', state: 'dead', at: { tile: [4, 4, 0] } }] })),
+  ).href;
   for (const state of ['idle', 'walk', 'dead', 'hop', 'ping', 'pong']) runs[state] = json(area.dir, ['object', 'state', 'run', 'walker', state, '--horizon', '3000']);
   for (const state of ['idle', 'flicker']) runs[`lamp-${state}`] = json(area.dir, ['object', 'state', 'run', 'lamp', state, '--horizon', '3000']);
 });
@@ -140,7 +147,7 @@ for (const name of wanted) {
       const walk = before.filter((a) => a.name.startsWith('states--s1-walk-'));
       assert.ok(walk.length >= 3, `walk's animations are in: ${JSON.stringify(before)}`);
       assert.ok(walk.every((a) => a.at < 100), `they start from the beginning: ${JSON.stringify(walk)}`);
-      assert.ok(!before.some((a) => a.name.startsWith('states--s1-idle-')), 'and idle\'s are gone');
+      assert.ok(!before.some((a) => /^states--s1--?idle-/.test(a.name)), 'and idle\'s are gone');
       await matches('states--s1', 0, runs.walk, 1800, 'walker switched to walk');
       // The item whose object has no such state keeps playing what it was: the lamp has no walk.
       const lamp = await page.evaluate(() => { pl.seek(10); return pl.shown(pl.stated('states--s3')[0]); });
@@ -200,6 +207,36 @@ for (const name of wanted) {
       // A looping state fires nothing, and neither does a state that started in a looping one after its hand-over.
       assert.deepEqual(await fired('data-state', 'walk', 1300), []);
       assert.deepEqual(await fired('data-play', 'walk', 600), [], 'a looping state has no data-play');
+    });
+
+    test('R11, R12: a state an item starts in restarts when a page names it, takes the name off and names it again', async () => {
+      await page.goto(opener);
+      await page.evaluate(PAGE);
+      const group = '.opener';
+      // The walker that starts in dead plays it with no attribute, and that play says no end: no page asked for it.
+      await page.waitForTimeout(300);
+      assert.deepEqual(await page.evaluate(() => pl.ended), []);
+      const shown = () => page.evaluate((g) => pl.shown(document.querySelector(g).firstElementChild), group);
+      assert.deepEqual((await shown()).frames, [2], 'held on its last frame');
+      // Each time the page names it, it plays from its first frame and fires animationend as states--dead.
+      // How far into their runs the walker's animations are, just after the page names dead.
+      const play = () =>
+        page.evaluate((g) => {
+          const el = document.querySelector(g);
+          pl.ended.length = 0;
+          el.setAttribute('data-state', 'dead');
+          return el.getAnimations({ subtree: true }).map((a) => ({ name: a.animationName, at: a.currentTime }));
+        }, group);
+      for (const round of [1, 2]) {
+        const running = await play();
+        assert.ok(running.some((a) => a.name === 'states--dead'), `round ${round}: ${JSON.stringify(running)}`);
+        assert.ok(running.every((a) => a.at < 50), `round ${round}: from its first frame: ${JSON.stringify(running)}`);
+        await page.waitForTimeout(400);
+        assert.deepEqual(await page.evaluate(() => pl.ended.map((e) => e.name)), ['states--dead'], `round ${round}`);
+        assert.deepEqual((await shown()).frames, [2]);
+        // Off, with the style worked out in between, then on again.
+        await page.evaluate((g) => { const el = document.querySelector(g); el.removeAttribute('data-state'); getComputedStyle(el.firstElementChild).transform; }, group);
+      }
     });
 
     test('R16: a track that keys states plays frame for frame as scene render --time, at every 100 ms of the loop', async () => {

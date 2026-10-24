@@ -1078,8 +1078,8 @@ fn validate_scene_moves(sources: &Sources, scene: &Value, items: &[Value], add: 
         }
     }
     walk(sources, items, "items", &tracked, &mut note, add);
-    // A one-shot state ends with an animation named <scene>--<state> (R12), the name an action's keyframes have: one name is
-    // one thing in a scene.
+    // A one-shot state ends with an animation named <scene>--<state> (R12), the name an action's keyframes have, and a frame
+    // loop's: one name is one thing in a scene.
     let mut stated: Vec<String> = Vec::new();
     fn objects(list: &[Value], out: &mut Vec<String>) {
         for item in list {
@@ -1093,8 +1093,28 @@ fn validate_scene_moves(sources: &Sources, scene: &Value, items: &[Value], add: 
         }
     }
     objects(items, &mut stated);
-    for object in stated {
-        let Some(states) = resolve(sources, &object).ok().and_then(|r| r.states) else { continue };
+    // A track's poses are drawn too.
+    for key in scene.pointer("/motion/tracks").and_then(Value::as_array).into_iter().flatten().flat_map(|t| keys_of_track(t)) {
+        if let Some(pose) = key.get("pose").and_then(Value::as_str).filter(|p| !p.is_empty() && !stated.iter().any(|x| x == p)) {
+            stated.push(pose.to_string());
+        }
+    }
+    let resolved: Vec<Resolved> = stated.iter().filter_map(|o| resolve(sources, o).ok()).collect();
+    // The frame loops the scene plays (a sprite with states draws its frames as its states, not as a loop), with an object
+    // that plays each.
+    let mut loops: Vec<(String, String)> = Vec::new();
+    for r in resolved.iter().filter(|r| r.states.is_none()) {
+        let surface = r.block.as_ref().and_then(|b| b.surface.as_ref()).and_then(|s| sprite_layer("surface", s).ok());
+        for layer in r.layers.iter().chain(surface.as_ref()) {
+            if let SpriteLayer::Frames { loop_name, .. } = layer {
+                if !loops.iter().any(|(n, _)| n == loop_name) {
+                    loops.push((loop_name.clone(), r.name.clone()));
+                }
+            }
+        }
+    }
+    for r in &resolved {
+        let (object, Some(states)) = (&r.name, &r.states) else { continue };
         for state in states.list.iter().filter(|s| s.plays_once()) {
             if let Some((_, _, at)) = actions.iter().find(|(n, _, _)| *n == state.name) {
                 add(format!(
@@ -1102,8 +1122,18 @@ fn validate_scene_moves(sources: &Sources, scene: &Value, items: &[Value], add: 
                     state.name, state.name, state.name
                 ));
             }
+            if let Some((_, at)) = loops.iter().find(|(n, _)| *n == state.name) {
+                add(format!(
+                    "{object}'s state '{}' plays once and ends as <scene>--{}, which is also the frame loop '{}' that {at} plays; one name is one thing in a scene, so rename the state",
+                    state.name, state.name, state.name
+                ));
+            }
         }
     }
+}
+
+fn keys_of_track(track: &Value) -> &[Value] {
+    track.get("keys").and_then(Value::as_array).map_or(&[][..], |v| v.as_slice())
 }
 
 /// `^(.+)-z(\d+)$`.
