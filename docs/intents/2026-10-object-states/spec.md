@@ -13,6 +13,12 @@ The game-engine models it borrows from:
 - **Unreal's animation state machines and Sequencer.** Unreal has a state graph with an entry and a montage-like one-shot, and Sequencer has an animation track with a labeled section per clip.
 - **Aseprite's tags.** A named range of a sprite's frames, played forward at a frame rate.
 
+The prototype is two boards on the app's design canvas, "Pixel Lab App Prototype" (https://claude.ai/artifact/MQspJo7hemS5691bzs2Rbz), in the row "Object states":
+- **Object mode · states.** The states list, a dope sheet over the brazier's frames, the graph, Try chips, and Make States on the site's `character`.
+- **Scene mode · state lanes.** The animation pane with a lane under each track whose object has states. Here the hero island's crossing signal is 3 state keys instead of 18 pose keys.
+
+The canvas is private to the owner, so the link works for them only.
+
 What it leaves out on purpose: transitions on conditions or parameters (a page or a scene says which state to play, so nothing in the art decides), blending (pixel art steps), and curves (motion steps on the grid by design).
 
 ## Requirements
@@ -136,7 +142,7 @@ R18 to R25 carry the animation pane's spec (`animation-pane.md`, and its spec on
 - **R27. A state's dope sheet.**
   - The ruler is the state's own time, from 0 to its length.
   - A **Frames** row has one cell per frame step: the frame's thumbnail and number, the width of one frame length. Clicking a cell selects the step and shows that frame on the canvas, so painting edits that frame. Dragging a cell reorders the steps. + appends the frame shown, and ⌫ removes the selected step. A frame can appear more than once in a state.
-  - Below that, one **Move** row per map layer the state moves (and an "Add Move" menu for the others), with keys as in scene mode. Add, delete and drag work the same, snapped to the frame length, and so do the KEY values (Move X and Y).
+  - Below that, one **Move** row per map layer the state moves (and an "Add Move" menu for the others), with keys as in scene mode. Add, delete and drag work the same, and so do the KEY values (Move X and Y). Move keys snap to 10 ms, and to frame boundaries with ⇧: a converted action's keys sit at times like 44 ms, so snapping to the frame length alone would lose them.
   - The header has the state's name (rename in place), the frame length in ms, Loop or Once, and for Once, Hold or Then with a state picker. It also has the state's length.
 - **R28. The state graph.** A Graph toggle swaps the dope sheet for the state machine, laid out as Unity's Animator draws it:
   - an **Entry** node with an arrow to the start state;
@@ -160,7 +166,7 @@ R18 to R25 carry the animation pane's spec (`animation-pane.md`, and its spec on
 **Keyboard, menus, access**
 
 - **R31. The pane takes keys when focused,** with its focus ring visible:
-  - ← and → step the playhead (100 ms in a scene, one frame length in a state);
+  - ← and → step the playhead (100 ms in a scene; one frame length in a state with several steps, else 100 ms);
   - ⇧← and ⇧→ go to the previous or next key and select it;
   - K adds a key, ⌫ deletes the selected key or step, Space plays or pauses, and Esc deselects.
   - In object mode, ↑ and ↓ move through the states list, and ⌘G toggles the graph.
@@ -313,7 +319,7 @@ Undo and versions: every command above goes through `session.rs`. A rename that 
 - **Inspector.**
   - Scene mode: `KeyInspector.swift` (new) gets the KEY section with State, and `AnimationSection` with Animate and Remove Track. The selection section gets the item's State picker.
   - Object mode: `ObjectPanels.swift`'s ANIMATION section keeps painting frames (strip, onion skin, add and duplicate frame). Its loop-kind picker shows only for a sprite without states. It gains **Make States**, with the help text "Make states from this sprite's frames, ambient loop and actions" (R8).
-  - The KEY section serves a state's move keys too, with Time snapped to the frame length, and Move X and Y.
+  - The KEY section serves a state's move keys too: Time, snapped to 10 ms, and Move X and Y.
 - **Try chips.** In object mode, a row of chips floats above the floating bar, in `StageChrome` (`Theme.sidebar` surface, the playing chip in `Theme.selection`). It shows only while the pane shows states.
 - **Menus.** In `PixelLabCommands`, after Select None, a divider, then R31's items, titled and enabled by the mode.
 - **Copy.** Short labels as the app writes them today: "Plays once, then idle", "Holds its last frame", "Loops", "Start", "Make States", "Any state: the page or a scene key".
