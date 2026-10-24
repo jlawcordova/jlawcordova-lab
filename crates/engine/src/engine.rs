@@ -20,7 +20,7 @@ use crate::iso::{self, Pixel, TILE_H, TILE_W};
 use crate::motion;
 use crate::omap::{OMap, OSet};
 use crate::serialize::{entries, keys};
-use crate::states::{self, States};
+use crate::states::{self, ItemStates, Keyed, States};
 use crate::{jsnum, EngineError, Result};
 
 /// The palette's tiers, in the order the engine reads them.
@@ -1580,6 +1580,11 @@ pub struct Group {
     /// What the element this group draws plays (D6): renders at a time move
     /// it, and a compiled SVG plays it.
     pub moves: Option<Rc<Moves>>,
+    /// What a sprite with states plays (R6): this element draws each frame as a group, and a render
+    /// at a time shows the frame its state has and moves the whole sprite.
+    pub states: Option<Rc<ItemStates>>,
+    /// The frame of a sprite with states this group draws: it shows while that frame does.
+    pub state_frame: Option<usize>,
 }
 
 /// A group's child: paint, or a group.
@@ -1632,6 +1637,10 @@ struct Names {
     /// The elements with ambient loops or actions drawn so far, each once:
     /// element `n` (from 1) has the class `a<n>`.
     elements: Vec<Rc<Moves>>,
+    /// The sprites with states drawn so far, each play once: element `n` (from 1) has the class `s<n>`.
+    stated: Vec<Rc<ItemStates>>,
+    /// The scene's loop in ms, for the states its tracks key.
+    duration: f64,
 }
 
 impl Names {
@@ -1642,6 +1651,17 @@ impl Names {
         let n: ColorName = Rc::from(name);
         self.colors.insert(name.to_string(), n.clone());
         n
+    }
+
+    /// The number of a sprite's states element: the same for every item that plays the same.
+    fn stated_index(&mut self, item: &Rc<ItemStates>) -> usize {
+        match self.stated.iter().position(|s| s.same_play(item)) {
+            Some(i) => i + 1,
+            None => {
+                self.stated.push(item.clone());
+                self.stated.len()
+            }
+        }
     }
 
     /// The group an element with these moves draws into (`a<n>`, the same
@@ -1704,6 +1724,8 @@ fn frame_group(loop_name: &str, prefix: &str, i: usize, count: usize, layer: Lay
         children: vec![Child::Layer(layer)],
         generated: false,
         moves: None,
+        states: None,
+        state_frame: None,
     })
 }
 
@@ -1767,10 +1789,60 @@ fn draw_block(block: &Block, keys: &OMap<String, String>, cx: i32, cy: i32, grou
     Ok(())
 }
 
+/// What an item says about the states of the object it draws: the state it starts in (its own
+/// `state`), when it entered it, and what its scene track keys.
+#[derive(Clone, Default)]
+struct Play {
+    own: Option<String>,
+    since: f64,
+    keyed: Option<Rc<Keyed>>,
+}
+
+/// Draws a sprite with states: one element holding each frame as a group, which the states show
+/// and hide, and the map layers drawn in each (R2: a frame is the same frame on every layer).
+fn draw_stated(obj: &Resolved, states: &Rc<States>, play: &Play, ox: i32, oy: i32, group: &mut Group, names: &mut Names) -> Result<()> {
+    let count = states::frame_count(obj);
+    let start = states.first(play.own.as_deref()).name.clone();
+    let item = Rc::new(ItemStates { states: states.clone(), start, since: play.since, frames: count, keyed: play.keyed.clone() });
+    let n = names.stated_index(&item);
+    let mut element = Group { attrs: vec![("class".into(), format!("s{n}"))], generated: true, states: Some(item), ..Group::default() };
+    for k in 0..count {
+        let mut frame =
+            Group { attrs: vec![("class".into(), format!("s{n}-f{k}"))], generated: true, state_frame: Some(k), ..Group::default() };
+        let target = if count > 1 { &mut frame } else { &mut element };
+        for layer in &obj.layers {
+            match layer {
+                SpriteLayer::Frames { frames, .. } => {
+                    if let Some(map) = frames.get(k).or(frames.last()) {
+                        paint(open_layer(target), map, &obj.keys, (ox, oy), None, names);
+                    }
+                }
+                SpriteLayer::Map { class: Some(class), map } => {
+                    let mut out = Layer::default();
+                    paint(&mut out, map, &obj.keys, (ox, oy), None, names);
+                    let mut g = class_group(class.clone());
+                    g.children.push(Child::Layer(out));
+                    target.children.push(Child::Group(g));
+                }
+                SpriteLayer::Map { class: None, map } => paint(open_layer(target), map, &obj.keys, (ox, oy), None, names),
+            }
+        }
+        if count > 1 {
+            element.children.push(Child::Group(frame));
+        }
+    }
+    group.children.push(Child::Group(element));
+    Ok(())
+}
+
 /// Draws a resolved object with its map's top-left pixel at (ox, oy).
-fn draw(obj: &Resolved, ox: i32, oy: i32, group: &mut Group, names: &mut Names) -> Result<()> {
+fn draw(obj: &Resolved, ox: i32, oy: i32, group: &mut Group, names: &mut Names, play: &Play) -> Result<()> {
     if let Some(block) = &obj.block {
         return draw_block(block, &obj.keys, ox, oy, group, names);
+    }
+    // The states decide what plays: the layers' own loops and moves are left to them (R8).
+    if let Some(states) = &obj.states {
+        return draw_stated(obj, states, play, ox, oy, group, names);
     }
     for (li, layer) in obj.layers.iter().enumerate() {
         let moves = obj.layer_moves.get(li).cloned().flatten();
@@ -2287,7 +2359,7 @@ pub fn render_scene_with(sources: &Sources, name: &str, order: Order, scope: Opt
             with_copies(sources, &arranged, origin, &tracks, duration_of(scene), &mut copies)?
         }
     };
-    let mut names = Names::default();
+    let mut names = Names { duration: duration_of(scene), ..Names::default() };
     place_items(sources, &list, &mut root, origin, &tracks, &mut names)?;
     let ids = motion::items_by_id(scene.get("items").unwrap_or(&Value::Null));
     // A scene's own viewBox is used as it is; one without fits what its tree paints (scene-canvas spec R2, R4).
@@ -2299,7 +2371,8 @@ pub fn render_scene_with(sources: &Sources, name: &str, order: Order, scope: Opt
     if let Some(scope) = scope {
         let mut loops = Vec::new();
         frame_loops(&root, &mut loops);
-        let style = motion::scene_css(scope, if tracks.is_empty() { None } else { Some((motion, &ids, &copies)) }, &loops, &names.elements);
+        let motion = if tracks.is_empty() { None } else { Some((motion, &ids, &copies)) };
+        let style = motion::scene_css(scope, motion, &loops, &names.elements, &names.stated);
         return Ok(Rendered { view_box, root, style: Some(style).filter(|s| !s.is_empty()), scope: Some(scope.to_string()) });
     }
     if tracks.is_empty() {
@@ -2384,6 +2457,9 @@ fn group_offsets(g: &Group, by_class: &HashMap<String, Vec<[i32; 2]>>) -> Vec<[i
         if let Some(o) = g.attrs.iter().find(|(k, _)| k == "class").and_then(|(_, v)| by_class.get(v)) {
             offsets.extend(o);
         }
+    }
+    if let Some(item) = &g.states {
+        offsets.extend(item.moves());
     }
     if let Some(m) = &g.moves {
         offsets.push([0, 0]);
@@ -2527,6 +2603,21 @@ impl AtTime<'_> {
         placement(item, self.origin).map_or([f64::NAN, f64::NAN], |(p, _)| p)
     }
 
+    /// An item whose track keys a state is in the state of the moment, which it entered `since` ms before time 0
+    /// (counting the loops gone by), so a render at a time can place it (R15).
+    fn stated(&self, item: &Value, posed: &mut Value) {
+        let Some(track) = track_for(item, self.tracks).filter(|t| states::keys_states(t)) else { return };
+        let states_of = |n: &str| resolve(self.sources, n).ok().and_then(|r| r.states);
+        let own = item.get("state").and_then(Value::as_str);
+        let timeline = states::timeline(track, &object_of(item), own, self.duration, &states_of);
+        let t = ((self.time % self.duration) + self.duration) % self.duration;
+        let Some(seg) = timeline.iter().rev().find(|s| s.from <= t) else { return };
+        if let (Some(name), Value::Object(m)) = (&seg.state, posed) {
+            m.insert("state".into(), Value::String(name.clone()));
+            m.insert("since".into(), jsnum::num(seg.entered + (self.time - t)));
+        }
+    }
+
     fn list(&self, arranged: &Arranged, prefix: &[usize]) -> Result<Vec<Value>> {
         let parts: Vec<&Part> = arranged.parts.iter().collect();
         let units = runs_of(&parts);
@@ -2557,7 +2648,11 @@ impl AtTime<'_> {
                         v["items"] = Value::Array(self.list(inner, &path)?);
                         v
                     }
-                    None => motion::pose_items(std::slice::from_ref(&part.item), self.motion, self.time, &point_of).remove(0),
+                    None => {
+                        let mut posed = motion::pose_items(std::slice::from_ref(&part.item), self.motion, self.time, &point_of).remove(0);
+                        self.stated(&part.item, &mut posed);
+                        posed
+                    }
                 };
                 if let Value::Object(m) = &mut value {
                     m.insert("path".into(), Value::Array(path.iter().map(|&n| Value::from(n)).collect()));
@@ -2662,20 +2757,30 @@ fn place_item_art(
     let ([mut x, mut y], _) = placement(item, origin)?;
     let object = object_of(item);
     let class = item.get("class").filter(|c| truthy(Some(c))).map(|c| js_string(Some(c)));
-    let draw_into = |name: &str, parent: &mut Group, x: f64, y: f64, names: &mut Names| -> Result<()> {
+    // The state it starts in, and when it entered it (a render partway through a track says so).
+    let own = item.get("state").and_then(Value::as_str).map(str::to_string);
+    let since = item.get("since").and_then(Value::as_f64).unwrap_or(0.0);
+    let draw_into = |name: &str, parent: &mut Group, x: f64, y: f64, keyed: Option<Rc<Keyed>>, names: &mut Names| -> Result<()> {
         let obj = resolve(sources, name)?;
         let (ox, oy) = ((x - obj.anchor[0] as f64) as i32, (y - obj.anchor[1] as f64) as i32);
+        // The item's own state is its object's: a pose has its own start.
+        let play = Play { own: if name == object { own.clone() } else { None }, since, keyed };
         match &class {
             Some(c) => {
                 let mut target = class_group(c.clone());
-                draw(&obj, ox, oy, &mut target, names)?;
+                draw(&obj, ox, oy, &mut target, names, &play)?;
                 parent.children.push(Child::Group(target));
             }
-            None => draw(&obj, ox, oy, parent, names)?,
+            None => draw(&obj, ox, oy, parent, names, &play)?,
         }
         Ok(())
     };
-    let Some(track) = track_for(item, tracks) else { return draw_into(&object, group, x, y, names) };
+    let Some(track) = track_for(item, tracks) else { return draw_into(&object, group, x, y, None, names) };
+    // What the track makes each object it shows do: baked over the loop when its keys change a state (R16).
+    let keyed_for = |name: &str, names: &Names| -> Option<Rc<Keyed>> {
+        let states_of = |n: &str| resolve(sources, n).ok().and_then(|r| r.states);
+        states::schedule(track, &object, own.as_deref(), names.duration, name, &states_of).map(Rc::new)
+    };
     let id = js_string(item.get("id"));
     let rest = motion::filled_keys(track, &object).into_iter().next().ok_or_else(|| EngineError("a track has no keys".into()))?;
     x += rest.moved[0];
@@ -2684,7 +2789,8 @@ fn place_item_art(
         Group { attrs: vec![("class".into(), motion::motion_class(&id))], hidden: !rest.show, generated: true, ..Group::default() };
     let poses = motion::poses_of(track, &object);
     if poses.len() == 1 {
-        draw_into(&object, &mut moving, x, y, names)?;
+        let keyed = keyed_for(&object, names);
+        draw_into(&object, &mut moving, x, y, keyed, names)?;
     } else {
         for (k, pose) in poses.iter().enumerate() {
             let mut posed = Group {
@@ -2693,7 +2799,8 @@ fn place_item_art(
                 generated: true,
                 ..Group::default()
             };
-            draw_into(pose, &mut posed, x, y, names)?;
+            let keyed = keyed_for(pose, names);
+            draw_into(pose, &mut posed, x, y, keyed, names)?;
             moving.children.push(Child::Group(posed));
         }
     }
@@ -2704,10 +2811,17 @@ fn place_item_art(
 /// Renders one object on its own, with its anchor at (0, 0)
 /// (`renderObject`).
 pub fn render_object(sources: &Sources, name: &str) -> Result<Group> {
+    render_object_in(sources, name, None)
+}
+
+/// `render_object` with a sprite that has states in `state` (it starts in its own start when None),
+/// so a render at a time shows what it shows that long after entering it (R6).
+pub fn render_object_in(sources: &Sources, name: &str, state: Option<&str>) -> Result<Group> {
     let obj = resolve(sources, name)?;
     let mut root = Group::default();
     let mut names = Names::default();
-    draw(&obj, -obj.anchor[0] as i32, -obj.anchor[1] as i32, &mut root, &mut names)?;
+    let play = Play { own: state.map(str::to_string), ..Play::default() };
+    draw(&obj, -obj.anchor[0] as i32, -obj.anchor[1] as i32, &mut root, &mut names, &play)?;
     Ok(root)
 }
 
@@ -2729,7 +2843,7 @@ pub fn composite(root: &Group, options: CompositeOptions) -> OMap<Pixel, ColorNa
     fn is_variant(c: &Child) -> bool {
         matches!(c, Child::Group(g) if g.attrs.iter().any(|(k, _)| k == "data-class"))
     }
-    fn walk(group: &Group, options: &CompositeOptions, shift: Pixel, out: &mut OMap<Pixel, ColorName>) {
+    fn walk(group: &Group, options: &CompositeOptions, shift: Pixel, state_frame: Option<usize>, out: &mut OMap<Pixel, ColorName>) {
         for (i, child) in group.children.iter().enumerate() {
             match child {
                 Child::Layer(l) => {
@@ -2750,9 +2864,23 @@ pub fn composite(root: &Group, options: CompositeOptions) -> OMap<Pixel, ColorNa
                             continue;
                         }
                     }
+                    // A frame of a sprite with states shows while its state is on that frame (or on `frame`, with no time).
+                    if let Some(frame) = g.state_frame {
+                        if frame != state_frame.unwrap_or(options.frame) {
+                            continue;
+                        }
+                    }
                     if options.first_variant && is_variant(child) && i > 0 && is_variant(&group.children[i - 1]) {
                         continue;
                     }
+                    // A sprite with states at a time shows the frame its state has, moved as its state moves it (R6).
+                    let (shift, state_frame) = match (&g.states, options.time) {
+                        (Some(item), Some(t)) => {
+                            let pose = item.pose_at(t);
+                            ((shift.0 + pose.moved[0] as i32, shift.1 + pose.moved[1] as i32), Some(pose.frame))
+                        }
+                        _ => (shift, state_frame),
+                    };
                     // An element at a time stands where its ambient loop (or the action playing) has it.
                     let shift = match (&g.moves, options.time) {
                         (Some(m), Some(t)) => {
@@ -2761,13 +2889,13 @@ pub fn composite(root: &Group, options: CompositeOptions) -> OMap<Pixel, ColorNa
                         }
                         _ => shift,
                     };
-                    walk(g, options, shift, out);
+                    walk(g, options, shift, state_frame, out);
                 }
             }
         }
     }
     let mut out = OMap::new();
-    walk(root, &options, (0, 0), &mut out);
+    walk(root, &options, (0, 0), None, &mut out);
     out
 }
 

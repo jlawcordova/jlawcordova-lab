@@ -1,0 +1,14 @@
+{
+  "category": [
+    "Buildings",
+    "Walls"
+  ],
+  "kind": "block",
+  "size": [1, 1, 1],
+  "faces": {
+    "top": "path-1",
+    "left": "cream",
+    "right": "path-1",
+    "edge": "wood-4"
+  }
+}

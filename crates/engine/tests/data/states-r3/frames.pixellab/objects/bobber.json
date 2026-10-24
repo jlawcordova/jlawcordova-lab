@@ -1,0 +1,35 @@
+{
+  "kind": "sprite",
+  "anchor": [2, 3],
+  "keys": {
+    "a": "grass-4",
+    "b": "grass-2",
+    "c": "ink"
+  },
+  "layers": [
+    {
+      "map": [
+        "cbbc",
+        "baab",
+        "baab",
+        "cbbc"
+      ],
+      "ambient": {
+        "duration": 1000,
+        "keys": [
+          { "t": 0, "move": [0, 0] },
+          { "t": 500, "move": [0, -2] }
+        ]
+      },
+      "actions": {
+        "hop": {
+          "duration": 400,
+          "keys": [
+            { "t": 0, "move": [0, 0] },
+            { "t": 100, "move": [2, -2] }
+          ]
+        }
+      }
+    }
+  ]
+}

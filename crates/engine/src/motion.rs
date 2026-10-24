@@ -520,9 +520,12 @@ pub fn scene_css(
     motion: Option<(&Value, &OMap<String, Value>, &OMap<String, Vec<Copy>>)>,
     loops: &[FrameLoop],
     elements: &[std::rc::Rc<crate::ambient::Moves>],
+    stated: &[std::rc::Rc<crate::states::ItemStates>],
 ) -> String {
     let mut rules = motion.map(|(m, ids, copies)| motion_rules(m, ids, copies, Some(scope))).unwrap_or_default();
     rules.extend(crate::ambient::elements_css(scope, elements));
+    let states = crate::states::css(scope, stated);
+    rules.extend(states.rules);
     let generated = !rules.is_empty();
     for l in loops {
         rules.extend(frame_loop_rules(scope, l));
@@ -537,6 +540,8 @@ pub fn scene_css(
     }
     stop.extend(loops.iter().map(|l| format!("{at} .{}", l.name)));
     let mut reduced = format!("{}{{animation:none}}", stop.join(","));
+    // Each stated item shows the frame its state settles in (R14).
+    reduced.push_str(&states.reduced.concat());
     if !loops.is_empty() {
         let first: Vec<String> = loops.iter().map(|l| format!("{at} .{}.{}0", l.name, l.prefix)).collect();
         reduced.push_str(&format!("{}{{opacity:1}}", first.join(",")));

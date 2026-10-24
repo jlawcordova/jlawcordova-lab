@@ -1,0 +1,19 @@
+{
+  "kind": "sprite",
+  "anchor": [2, 3],
+  "keys": {
+    "a": "grass-4",
+    "b": "grass-2",
+    "c": "ink"
+  },
+  "layers": [
+    {
+      "map": [
+        ".bb.",
+        "baab",
+        "caac",
+        ".cc."
+      ]
+    }
+  ]
+}

@@ -1248,10 +1248,10 @@ read-only · MCP tool `object_pick`
 Render one object to a transparent PNG.
 
 ```
-pixellab object render <name> [--scale <n>] [--frame <n>] [--time <n>] [--play <text>] [--layers <n,…>] [--out <file.png>]
+pixellab object render <name> [--scale <n>] [--frame <n>] [--time <n>] [--state <text>] [--play <text>] [--layers <n,…>] [--out <file.png>]
 ```
 
-The anchor is at (0, 0). A sprite's viewBox is its whole map, so at scale 1 PNG pixel (x, y) is map column x, row y; a block's is the box around its pixels. Returns the same shape as scene.render, with one item. --time also places the layers' ambient loops, and --play <action>@<ms> (with --time) places the layers that have that action where it has them <ms> into it; with --time the viewBox grows to hold the moved layers (the map's box, plus what moved outside it), and viewBox says where. On the command line, --out <file.png> writes the PNG.
+The anchor is at (0, 0). A sprite's viewBox is its whole map, so at scale 1 PNG pixel (x, y) is map column x, row y; a block's is the box around its pixels. Returns the same shape as scene.render, with one item. A sprite with states shows the one it starts in --time ms after time 0, or --state's from its first frame, and the item says its state and frame. --time also places the layers' ambient loops, and --play <action>@<ms> (with --time) places the layers that have that action where it has them <ms> into it; with --time the viewBox grows to hold the moved layers (the map's box, plus what moved outside it), and viewBox says where. On the command line, --out <file.png> writes the PNG.
 
 read-only · MCP tool `object_render`
 
@@ -1260,7 +1260,8 @@ read-only · MCP tool `object_render`
 | `name` (positional) | string | required | object name (or objects/<name>) |
 | `--scale` | integer | default `1` | whole-pixel zoom of the PNG (1 to 16) |
 | `--frame` | integer | default `0` | the frame every loop shows (loops shorter than this show nothing) (at least 0) |
-| `--time` | integer |  | ms into the loops; overrides frame (at least 0) |
+| `--time` | integer |  | ms into the loops; overrides frame. With state, ms after entering it (at least 0) |
+| `--state` | string |  | a sprite's state: shows what it shows --time ms after entering it (0 by default), the frame it has and how far it has moved |
 | `--play` | string |  | an action and the ms into it, like hop@120: the elements that have it are placed where it has them then, instead of on their ambient loop |
 | `--layers` | list of integer |  | only these layers of a sprite, each at --frame or its last frame, as the lab's stage shows them (hidden layers, onion skin) |
 
