@@ -10,6 +10,8 @@ These docs are Markdown in the repo, next to what they describe, and are also pu
 2. [Contributing](contributing.md): intent → spec → plan, branches, the rules, and what a PR pastes.
 3. [Testing](testing.md): the Rust suites, the repo tooling's tests, the app's unit tests, the script hook, snapshots and the acceptance pass.
 
+For the two file kinds documents share objects and colors with, see [Libraries and palette files](libraries.md).
+
 ## The code
 
 - [The program](../crates/pixellab/README.md) (`crates/pixellab/`, with the engine in `crates/engine/`): building it, the module map, a command's anatomy, adding a command, sessions and undo, errors.
