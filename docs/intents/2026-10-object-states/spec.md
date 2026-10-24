@@ -27,7 +27,7 @@ What it leaves out on purpose: transitions on conditions or parameters (a page o
 
 - **R1. A sprite can have states.**
   - A state has a name, which follows the name rule (lowercase words joined by hyphens).
-  - A state has a list of frame steps, each one a frame of the sprite, and one frame length in ms for every step.
+  - A state has a list of frames, each one a frame of the sprite (one may appear more than once), and one frame length in ms for every frame it plays. The UI calls them frames too, and a place in the list a position.
   - A state either loops or plays once. A state that plays once either holds its last frame or hands over to another state (`then`).
   - A state may move any of the sprite's map layers, with keys `{ t, move }` over the state's length, stepping a whole pixel at a time, as actions do.
   - A sprite with states has a start state, which every placement plays unless something says otherwise.
@@ -48,7 +48,7 @@ What it leaves out on purpose: transitions on conditions or parameters (a page o
   - a state name that breaks the rule, or appears twice;
   - a `start` or a `then` that names no state of the sprite;
   - `then` on a looping state;
-  - a frame step outside the sprite's frames, or a state with no steps;
+  - a frame outside the sprite's frames, or a state with no frames;
   - a frame length that isn't a whole number from 20 to 10000 ms, or a state longer than 600000 ms;
   - a move on a layer that doesn't exist or isn't a map layer, or move keys that break the ambient key rules (first at 0, rising, within the state's length);
   - states on a block, or on a sprite that `extends` another;
@@ -141,10 +141,10 @@ R18 to R25 carry the animation pane's spec (`animation-pane.md`, and its spec on
   - A sprite without states shows its frame loop as one row named after the loop, marked "plays on its own", with **Make States** (R4, R8). A block shows "Blocks have no states".
 - **R27. A state's dope sheet.**
   - The ruler is the state's own time, from 0 to its length.
-  - A **Frames** row has one cell per frame step: the frame's thumbnail and number, the width of one frame length. Clicking a cell selects the step and shows that frame on the canvas, so painting edits that frame. Dragging a cell reorders the steps, and ⌫ removes the selected step. + opens **Add a step**, which lists every frame of the sprite and has **New Frame** (blank, after the frame shown) and **Duplicate Frame**; each adds the frame as a step and shows it on the canvas to paint. The onion skin toggle moves to the pane's footer. A frame can appear more than once in a state.
+  - A **Frames** row has one cell per position: the frame's thumbnail and number, the width of one frame length. Clicking a cell selects that position and shows its frame on the canvas, so painting edits that frame. Dragging a cell reorders the frames, and ⌫ removes the selected one. + opens **Add a frame**, which lists every frame of the sprite and has **New Frame** (blank, after the frame shown) and **Duplicate Frame**; each adds the frame to the state and shows it on the canvas to paint. The onion skin toggle moves to the pane's footer. A frame can appear more than once in a state.
   - Below that, one **Move** row per map layer the state moves (and an "Add Move" menu for the others), with keys as in scene mode. Add, delete and drag work the same, and so do the KEY values (Move X and Y). Move keys snap to 10 ms, and to frame boundaries with ⇧: a converted action's keys sit at times like 44 ms, so snapping to the frame length alone would lose them.
   - The header has the state's name (rename in place) and the frame length in ms. It also has how the state ends, as three icon buttons with tooltips (Loops, Plays once and holds, Plays once then another state) and, for Then, a state picker. The state's length shows in the inspector, not the header.
-- **R28. The state graph, and Details.** The pane's right side has three tabs, as icon buttons with tooltips: **Sheet** (the dope sheet), **Graph** and **Details**. Details holds what the inspector would otherwise show for the selected state: its name and start badge, how it ends and its length, Set as Start and Duplicate, its steps and moves, and how a page plays it (`data-state="…"`, and the end event's name for a one-shot). The object inspector keeps Layers and the key's values, with Checks pinned to the bottom of the panel. The Graph tab shows the state machine, laid out as Unity's Animator draws it:
+- **R28. The state graph, and Details.** The pane's right side has three tabs, as icon buttons with tooltips: **Sheet** (the dope sheet), **Graph** and **Details**. Details holds what the inspector would otherwise show for the selected state: its name and start badge, how it ends and its length, Set as Start and Duplicate, its frames and move, and how a page plays it (`data-state="…"`, and the end event's name for a one-shot). The object inspector keeps Layers and the key's values, with Checks pinned to the bottom of the panel. The Graph tab shows the state machine, laid out as Unity's Animator draws it:
   - an **Entry** node with an arrow to the start state;
   - a node per state, with the start state's node in the accent;
   - an arrow for each `then`, labeled "at end";
@@ -155,27 +155,27 @@ R18 to R25 carry the animation pane's spec (`animation-pane.md`, and its spec on
 - **R29. Trying states on the canvas.**
   - With the pane focused or the object on the canvas, Play plays the selected state from its first frame, following its run. The canvas shows each frame nearest-neighbor at the canvas's zoom, and the playhead moves on the state's ruler.
   - A row of **Try** chips over the canvas, one per state, switches the playing preview to that state at once, as a page's `data-state` would. That's the owner's check of R11, and the chips' order is the states list.
-  - Esc stops and shows the selected step's frame again.
+  - Esc stops and shows the selected position's frame again.
   - Under Reduce Motion, Play is off and the canvas shows where the state settles (R14). Stepping frames still works.
 - **R30. Frames and layers stay consistent.** Adding, duplicating, moving and deleting frames, and adding, moving and deleting layers, keep every state pointing at the same art:
-  - frame steps are renumbered when frames move;
+  - a state's frames are renumbered when the sprite's frames move;
   - a deleted frame leaves the states that used it;
-  - a state that would be left with no steps makes the delete refused, with the state's name;
+  - a state that would be left with no frames makes the delete refused, with the state's name;
   - a deleted layer's moves are dropped, and a moved layer's moves follow it.
 
 **Keyboard, menus, access**
 
 - **R31. The pane takes keys when focused,** with its focus ring visible:
-  - ← and → step the playhead (100 ms in a scene; one frame length in a state with several steps, else 100 ms);
+  - ← and → step the playhead (100 ms in a scene; one frame length in a state with several frames, else 100 ms);
   - ⇧← and ⇧→ go to the previous or next key and select it;
-  - K adds a key, ⌫ deletes the selected key or step, Space plays or pauses, and Esc deselects.
+  - K adds a key, ⌫ deletes the selected key or frame, Space plays or pauses, and Esc deselects.
   - In object mode, ↑ and ↓ move through the states list, and ⌘G toggles the graph.
   
   The Edit menu gets Add Key (⌥⌘K), Delete Key (⌥⌘⌫), Previous Key (⌥⌘←), Next Key (⌥⌘→), Animate Item or Remove Track, and in object mode New State (⌥⌘N) and Make States. Each is enabled when the pane's button is. The stage keeps its own keys.
 - **R32. Accessibility.**
-  - VoiceOver reads each key, for example "Key at 4.2 s: move 32, 16, hidden, pose crane-hook-drop, state drop". It reads each row ("Track cart, 5 keys, states rest, tip"), each state row ("hop, plays once then idle, 480 ms"), each frame step ("Step 3, frame 2"), each graph node and arrow ("hop leads to idle at end"), and the ruler's value.
+  - VoiceOver reads each key, for example "Key at 4.2 s: move 32, 16, hidden, pose crane-hook-drop, state drop". It reads each row ("Track cart, 5 keys, states rest, tip"), each state row ("hop, plays once then idle, 480 ms"), each position in the Frames row ("Position 3: frame 2"), each graph node and arrow ("hop leads to idle at end"), and the ruler's value.
   - The graph has a list equivalent: the states list carries the same facts, so nothing is graph-only.
-  - Keys, steps and nodes are at least 12 pt targets with a 6 pt hit margin.
+  - Keys, frame cells and nodes are at least 12 pt targets with a 6 pt hit margin.
   - Nothing in the pane animates by itself. Playback stays off under Reduce Motion, and everything else works.
 - **R33. The look.** Board 03's tokens and type, with one accent (the selected key, the start state and the selected node). The playhead and Play stay gold, and the pane is part of the timeline's surface (`Theme.sidebar`). Frame thumbnails and the canvas preview are drawn nearest-neighbor at integer zoom.
 
@@ -190,7 +190,7 @@ R18 to R25 carry the animation pane's spec (`animation-pane.md`, and its spec on
   - the read command for a state's run.
   
   Agents' edits apply as they make them, through the app, as every edit does since autosave, and each is one undo step and part of a version.
-- **R35. The script hook drives the pane:** actions and `expect`s for keys, tracks, the loop, state lanes, the states list, a state's steps and moves, the graph, Try and Play (D6). There are unit tests for the pane's pure logic (hitting a key, snapping, inherited values, laying out the graph, a run's sections), and acceptance scripts on temp copies (D6).
+- **R35. The script hook drives the pane:** actions and `expect`s for keys, tracks, the loop, state lanes, the states list, a state's frames and moves, the graph, Try and Play (D6). There are unit tests for the pane's pure logic (hitting a key, snapping, inherited values, laying out the graph, a run's sections), and acceptance scripts on temp copies (D6).
 - **R36. Docs:**
   - the site contract (`data-state`, the state end event, reduced motion and `data-play` for states);
   - the document format (states, item and key `state`);
@@ -207,7 +207,7 @@ R18 to R25 carry the animation pane's spec (`animation-pane.md`, and its spec on
 - **R37. A pose family can be made into one object with states.**
   - A pose family is a base object and the objects its items pose as, such as the hero island's `crane-hook`, `crane-hook-drop` and `crane-hook-low`.
   - One command, and **Make States from Poses** in the scene inspector for an item whose track has pose keys, turns the family into the base object's states.
-  - Each pose object's drawing becomes a frame of the base object, and each frame gets a state of its own: one step that loops. The base object's own drawing is the start state.
+  - Each pose object's drawing becomes a frame of the base object, and each frame gets a state of its own: one frame that loops. The base object's own drawing is the start state.
   - The command lines up every pose's map on the base's anchor, merges their color keys, and pads the maps to one box. It refuses, with the reason, when the merged sprite would break a rule: more than 12 colors, wider or taller than 64, or a pose that is itself a frame loop.
 - **R38. The scene keys follow.**
   - In every scene, each key on an item of the family that has a `pose` gets the matching `state` instead. A key that poses the item back as its base object gets the start state.
@@ -241,8 +241,8 @@ A sprite gains `start` and `states`, after `layers` in the canonical key order. 
 
 | Key | Meaning |
 |---|---|
-| `frames` | The frame steps: frame numbers of the sprite (R2), at least one, at most 256. |
-| `ms` | How long each step shows: a whole number from 20 to 10000. The state's length is `frames.length × ms`. |
+| `frames` | The frames it plays, in order: frame numbers of the sprite (R2), repeats allowed, at least one, at most 256. |
+| `ms` | How long each frame shows: a whole number from 20 to 10000. The state's length is `frames.length × ms`. |
 | `loop` | `false` plays once. It's left out when the state loops (the default). |
 | `then` | For `loop: false` only: the state that follows. Without it, a state that plays once holds its last frame. |
 | `moves` | `[{ layer, keys }]`: the index of a map layer, and ambient-style keys (`{ t, move }`, first at 0, rising, below the state's length). It's left out when no layer moves. A looping state's move steps back to its first key over the rest of the loop, as an ambient loop's does. A one-shot state holds its last key. |
@@ -257,8 +257,8 @@ A sprite gains `start` and `states`, after `layers` in the canonical key order. 
 
 A new module, beside `ambient.rs`, with one source of truth for timing:
 
-- **`States`**, parsed once per sprite (as `ambient::moves_of` is): the states in order, each with its steps, `ms`, end (`Loop`, `Hold` or `Then(name)`) and per-layer `ambient::Key` lists.
-- **`run(states, state) -> Run`**, the run of R6. It follows `then` from `state` into a list of **segments**: `{ state, from_ms, steps }`. The list ends in a **settle**: either `Loop { from_ms, period }` for a looping state or a chain that comes back on itself (the period is the whole cycle), or `Hold { from_ms, frame }`. A `then` chain visits each state at most once before it settles, so a run is at most 32 segments.
+- **`States`**, parsed once per sprite (as `ambient::moves_of` is): the states in order, each with its frames, `ms`, end (`Loop`, `Hold` or `Then(name)`) and per-layer `ambient::Key` lists.
+- **`run(states, state) -> Run`**, the run of R6. It follows `then` from `state` into a list of **segments**: `{ state, from_ms, frames }`. The list ends in a **settle**: either `Loop { from_ms, period }` for a looping state or a chain that comes back on itself (the period is the whole cycle), or `Hold { from_ms, frame }`. A `then` chain visits each state at most once before it settles, so a run is at most 32 segments.
 - **`at(run, t) -> Pose`**: the frame number, and each layer's move, `t` ms after entering. A layer's move inside a segment uses `ambient::move_at`'s stepping, so a state moves exactly as an action does today.
 - **`changes(run, horizon) -> Vec<Change>`**: every time the frame or a move changes, up to the settle plus one period. The app plays from this list, and the CSS is built from it.
 - **CSS (R10–R14),** added to `motion::scene_css`. For an item whose object has states:
@@ -286,7 +286,7 @@ New commands, registered in `registry.rs` under `crates/pixellab/src/commands/ob
 | `object state delete <object> <name>` | Refused while a `then`, `start`, or a scene item or key names it, with the list. Deleting the last state removes `states` and `start`, and the frame loops play on their own again. |
 | `object state duplicate <object> <name> [--as <new>]` | Copies a state just after it. |
 | `object state move <object> <name> --by ±n` | Reorders the list (R10's "later wins", and the pane's order). |
-| `object state step add\|delete\|move <object> <state> [--frame k] [--at i] [--by ±1]` | Edits a state's frame steps (R27). |
+| `object state frame add\|delete\|move <object> <state> [--frame k] [--at i] [--by ±1]` | Edits the frames a state plays (R27). |
 | `object state key set\|delete\|move <object> <state> --layer L --time t [--move x,y] [--to t]` | The state's moves, mirroring `scene key`. `set` with no `--move` pins the layer where it is. |
 | `object states make <object>` | Turns the layers' `ambient` and `actions` into states, and takes them off the layers (R8). |
 | `object state run <object> <state> [--horizon ms]` | Read. Returns the run: `{ segments, settle, changes: [{ t, frame, moves: { "<layer>": [x, y] } }] }`. |
@@ -296,7 +296,7 @@ Changes to existing commands:
 - `scene set` gains `--state <name>` and `--state start` (to clear it).
 - `scene track add` on an item without an id gives it one: the object's name, made unique in the scene, returned as `id`.
 - `object render` gains `--state <name> --time <ms>`, and `scene render` places states at `--time`. Both report each item's `state` and `frame` in `items`.
-- `object frame add|delete|duplicate|move` and `object layer add|delete|move|duplicate` keep states consistent (R30), and their results add `states` when steps or moves changed.
+- `object frame add|delete|duplicate|move` and `object layer add|delete|move|duplicate` keep states consistent (R30), and their results add `states` when a state's frames or moves changed.
 - `object show` and `object list` report states: their names, the start state and each one's length.
 - `check` gives R7's problems, R8's warning and R17's warning.
 - `scene show --doc` already returns `motion`. `scene items` adds an item's `state`.
@@ -313,7 +313,7 @@ Undo and versions: every command above goes through `session.rs`. A rename that 
   
   New: `stateSections(for track) -> [StateSection]` (`{ from, to, state, handovers }`) for the lane. It's built from the track's keys and each object's run, which the model fetches once per object with `object.state.run` and caches by the object's version.
 - **`StatesModel`** (new, `Model/StatesModel.swift`), owned by `ObjectEditor` in object mode:
-  - the states (from `object.show`), the selected state and step, the selected move key, `graphShown` and the cached runs;
+  - the states (from `object.show`), the selected state and position, the selected move key, `graphShown` and the cached runs;
   - edit methods that call D3's commands;
   - `play()`, `stop()` and `try(state)`, which walk the run's `changes` on a timer and set the canvas's frame and layer offsets.
   
@@ -344,10 +344,10 @@ Undo and versions: every command above goes through `session.rs`. A rename that 
 - **Script hook actions** (`ScriptRunner.swift`):
   - from `animation-pane.md`: `key add|delete|next|prev`, `key select <ms> [alt]|none`, `key move <ms> <to>`, `keyset time|move|show|pose …`, `track add|remove`, `loop <ms>` and `panekey <spec>`;
   - new for scenes: `keyset state <name>|clear`, `itemstate <name>|start` and `lane select <ms>`;
-  - new for object mode: `state add|delete|duplicate|select|rename|start <name>`, `state ms <n>`, `state end loop|hold|then <name>`, `state move <name> <±n>`, `step add <frame>|delete|select <i>|move <i> <to>`, `statekey add|delete|select <ms>|move <ms> <to>` with `--layer`, `states make`, `graph on|off`, `graph link <from> <to>`, `try <name>`, `stateplay` and `statestop`.
+  - new for object mode: `state add|delete|duplicate|select|rename|start <name>`, `state ms <n>`, `state end loop|hold|then <name>`, `state move <name> <±n>`, `stateframe add <frame>|delete|select <i>|move <i> <to>`, `statekey add|delete|select <ms>|move <ms> <to>` with `--layer`, `states make`, `graph on|off`, `graph link <from> <to>`, `try <name>`, `stateplay` and `statestop`.
 - **`expect`s:**
   - from `animation-pane.md`: `expect key|keys|keymove|keyshow|keypose|loop|tracks|pane`;
-  - new: `expect keystate <name>|inherits`, `expect lane <item> <name@ms,…>`, `expect itemstate <name>`, `expect states <names>`, `expect start <name>`, `expect state <name> <frames>@<ms> loop|hold|then:<name>`, `expect steps <frames>`, `expect statekeys <layer> <ms,…>`, `expect graph <from>-><to>,…`, `expect trying <name>`, `expect preview frame <k> move <layer> <x,y>`.
+  - new: `expect keystate <name>|inherits`, `expect lane <item> <name@ms,…>`, `expect itemstate <name>`, `expect states <names>`, `expect start <name>`, `expect state <name> <frames>@<ms> loop|hold|then:<name>`, `expect stateframes <frames>`, `expect statekeys <layer> <ms,…>`, `expect graph <from>-><to>,…`, `expect trying <name>`, `expect preview frame <k> move <layer> <x,y>`.
 - **Unit tests** in Rust:
   - `states::run`, `at` and `changes`, for loops, holds, chains, cycles and moves;
   - the CSS for each kind, with fixtures in `fixtures/`;
@@ -389,7 +389,7 @@ Undo and versions: every command above goes through `session.rs`. A rename that 
 - **`docs/document-format.md`**: a "States" section under Sprites, `state` on items and keys, and the canonical order.
 - **README**: the tour's timeline paragraph becomes the pane, plus a States paragraph and the shortcuts. `CLAUDE.md`, `docs/testing.md` and `app/README.md` name the new actions, views and models. `docs/cli.md` is regenerated.
 - **Examples**: `scripts/make-examples.mjs` gives the harbor's `lamp` two states: a steady `idle` and a one-shot `flicker` that hands back to `idle`. It gives the harbor's `boat` a rocking `idle` made from an ambient loop by `object states make`, and a scene key in the town that switches a lamp to `flicker` once a loop. `npm run examples` rewrites both.
-- **The record** gets a follow-up: an item's states detached from its object (out of scope), and per-step frame lengths if the owner asks.
+- **The record** gets a follow-up: an item's states detached from its object (out of scope), and a length per frame if the owner asks.
 
 ### D8. Poses become states (R37–R40)
 
@@ -413,7 +413,7 @@ Undo and versions: every command above goes through `session.rs`. A rename that 
 4. **A page's `data-state` against a scene's state keys.** R17 gives the scene the item, which keeps a scene's animation the same every time (the intent's constraint for video). The alternative, letting the page override a scene-keyed item while the attribute is set, is possible in CSS (later selectors win). It would make a page-driven scene differ from its video. The spec chooses the scene. The `check` warning in R17 can only guess which groups a page targets (any group with a `data-*` attribute that holds a state-keyed item), so it may be noisy. The plan can drop it if so. **Settled (owner, 2026-10-24):** the scene owns its keyed items, and the warning stays unless the plan finds it too noisy.
 5. **Bytes.** A state that switches frames draws each frame once per placement, as frame loops do today. The rules for each state cost about 150 to 400 bytes, and a baked scene state track costs about 30 bytes per change over the loop. A forest of 40 pines with three states each would add roughly 40 frame groups per extra frame. The engine's budgets catch a scene that grows past them, and `art sizes` shows the cost. An alternative that shares one set of frames per object across its placements (`<use>`) is smaller but changes the output's structure for every sprite. It isn't proposed here. **Settled (owner, 2026-10-24):** accepted. Frames are drawn per placement, with no `<use>`.
 6. **Frames are per sprite, with frame-loop layers in lockstep (R2).** Today a sprite could, in principle, carry two frame-loop layers of different lengths (none of the site's 21 animated objects does). With states, such a sprite has to even them out before it gets states, and `check` says which layer. This is the Aseprite model (a frame is a column across all layers) and keeps the pane simple. **Settled (owner, 2026-10-24):** frame-loop layers move in lockstep.
-7. **Uniform frame length per state.** Aseprite and Unity allow a different length per frame. This spec gives a state one `ms`, and a held frame is the same frame repeated in the steps. Per-step lengths could come later without breaking the format (`ms` as a list). **Settled (owner, 2026-10-24):** one frame length per state for now.
+7. **Uniform frame length per state.** Aseprite and Unity allow a different length per frame. This spec gives a state one `ms`, and a held frame is the same frame repeated in the list. A length per frame could come later without breaking the format (`ms` as a list). **Settled (owner, 2026-10-24):** one frame length per state for now.
 8. **No conditions on transitions.** Unity and Unreal transitions test parameters. Here only `then` (at end) is stored, and anything else is the page's or the scene's job. The graph's Any state note makes this visible. If the owner wants transitions on events in the art itself (for example "on hover, go to wave" without page script), that's a site contract addition for later. **Settled (owner, 2026-10-24):** only `then`. Event transitions in the art are for later.
 9. **Clicking a key moves the playhead** (Rive's way), with ⌥-click to select only (Unity's way). The animation pane's spec chose to move it, and the intent left it open. This spec keeps that and adds ⌥-click. **Settled (owner, 2026-10-24):** clicking a key moves the playhead, and ⌥-click only selects.
 
