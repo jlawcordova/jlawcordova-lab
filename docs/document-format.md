@@ -73,7 +73,7 @@ Any other key is a problem.
 
 ## Objects
 
-An object is a **sprite** (`"kind": "sprite"`) or a **block** (`"kind": "block"`). Either may have `notes`, a list of strings.
+An object is a **sprite** (`"kind": "sprite"`) or a **block** (`"kind": "block"`). Either may have `notes`, a list of strings, and a `category`, a list of names from the outermost in (`["Nature", "Trees"]`): each 1 to 32 letters, digits, spaces, `&`, `'` and `-`, compared without regard to case, with `All` and `Others` not allowed as the outermost. A category only sorts the object in the app's Library; it never changes a render or a published SVG. Objects can be shared between documents as a `.pixellib` and colors as a `.pixelpal` ([Libraries and palette files](libraries.md)).
 
 ### Sprites
 
