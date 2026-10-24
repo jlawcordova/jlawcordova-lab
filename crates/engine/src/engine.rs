@@ -204,7 +204,7 @@ pub fn is_class_list(s: &str) -> bool {
 }
 
 /// `^#[0-9A-F]{6}$`.
-fn is_hex(s: &str) -> bool {
+pub fn is_hex(s: &str) -> bool {
     s.len() == 7 && s.starts_with('#') && s[1..].chars().all(|c| c.is_ascii_digit() || ('A'..='F').contains(&c))
 }
 

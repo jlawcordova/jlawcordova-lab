@@ -57,7 +57,9 @@ pub fn ordered(map: &Map<String, Value>) -> Map<String, Value> {
 }
 
 /// The palette: notes first (R7), the two tiers, then the notes on colors.
-pub const PALETTE: &[&str] = &["notes", "world", "outfit", "colorNotes"];
+/// A `.pixelpal` file puts its `format` and `kind` before all of them
+/// (object-libraries spec, R19); a document's palette has neither.
+pub const PALETTE: &[&str] = &["format", "kind", "notes", "world", "outfit", "colorNotes"];
 /// A sprite object.
 pub const SPRITE: &[&str] = &["notes", "category", "kind", "extends", "anchor", "footprint", "keys", "rows", "layers"];
 /// A block object.

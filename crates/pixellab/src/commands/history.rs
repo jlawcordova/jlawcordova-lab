@@ -27,6 +27,9 @@ fn doc_param() -> Value {
 
 /// A doc's kind and name from a file in the document (`scenes/x.json`).
 pub fn doc_of_file(file: &str) -> Option<(DocKind, String)> {
+    if file == engine::format::PALETTE_FILE {
+        return Some((DocKind::Palette, String::new()));
+    }
     let (dir, rest) = file.split_once('/')?;
     let name = rest.strip_suffix(".json")?.to_string();
     match dir {
@@ -198,7 +201,7 @@ fn render_run(ctx: &mut Ctx, params: Params) -> Result<Value> {
     let v = the_version(session, &params)?;
     let n = v["number"].as_u64().unwrap_or(0);
     let file = file_of(session, opt_str(&params, "doc").unwrap_or(""))?;
-    let Some((kind, name)) = doc_of_file(&file) else {
+    let Some((kind, name)) = doc_of_file(&file).filter(|(k, _)| *k != DocKind::Palette) else {
         return Err(CommandError::usage(format!("{file} isn't a scene or an object")).into());
     };
     let Some(Some(text)) = session.history.text_at(n, &file) else {
@@ -247,7 +250,7 @@ fn render_format(r: &Value, _: &Params) -> String {
 
 /// Puts each file to its text (None: removes it), saves, and records it all as one version by
 /// the requester. Returns the docs written and the files removed.
-fn put_files(
+pub(crate) fn put_files(
     session: &mut Session,
     targets: Vec<(String, Option<String>)>,
     label: &str,
@@ -268,6 +271,8 @@ fn put_files(
                     session.save(&ref_, force)?;
                     written.push(ref_);
                 }
+                // The palette is never deleted: a document always has one.
+                None if kind == DocKind::Palette => {}
                 None => {
                     session.delete_doc(kind, &name, label)?;
                     removed.push(file);
