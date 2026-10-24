@@ -143,7 +143,7 @@ R18 to R25 carry the animation pane's spec (`animation-pane.md`, and its spec on
   - The ruler is the state's own time, from 0 to its length.
   - A **Frames** row has one cell per frame step: the frame's thumbnail and number, the width of one frame length. Clicking a cell selects the step and shows that frame on the canvas, so painting edits that frame. Dragging a cell reorders the steps. + appends the frame shown, and ⌫ removes the selected step. A frame can appear more than once in a state.
   - Below that, one **Move** row per map layer the state moves (and an "Add Move" menu for the others), with keys as in scene mode. Add, delete and drag work the same, and so do the KEY values (Move X and Y). Move keys snap to 10 ms, and to frame boundaries with ⇧: a converted action's keys sit at times like 44 ms, so snapping to the frame length alone would lose them.
-  - The header has the state's name (rename in place), the frame length in ms, Loop or Once, and for Once, Hold or Then with a state picker. It also has the state's length.
+  - The header has the state's name (rename in place) and the frame length in ms. It also has how the state ends, as three icon buttons with tooltips (Loops, Plays once and holds, Plays once then another state) and, for Then, a state picker. The state's length shows in the inspector, not the header.
 - **R28. The state graph.** A Graph toggle swaps the dope sheet for the state machine, laid out as Unity's Animator draws it:
   - an **Entry** node with an arrow to the start state;
   - a node per state, with the start state's node in the accent;
