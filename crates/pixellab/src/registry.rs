@@ -44,6 +44,8 @@ pub struct Command {
     pub writes_direct: bool,
     /// Runs without an open document (`document: false`).
     pub needs_document: bool,
+    /// A param that, when given, means the command needs no document (`check --library`).
+    pub no_document_with: Option<&'static str>,
 }
 
 impl Command {
@@ -71,6 +73,7 @@ impl Command {
             session: false,
             writes_direct: false,
             needs_document: true,
+            no_document_with: None,
         }
     }
 }
@@ -190,6 +193,8 @@ pub fn registry() -> Registry {
     list.extend(commands::object::commands());
     list.extend(commands::object_edit::commands());
     list.extend(commands::check::commands());
+    list.extend(commands::library::commands());
+    list.extend(commands::palette::commands());
     list.extend(commands::art::commands());
     list.extend(commands::doc::commands());
     list.extend(commands::history::commands());

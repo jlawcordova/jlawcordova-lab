@@ -665,8 +665,10 @@ fn a_tier(tier: &str) -> String {
 /// in their keys, and their categories kept.
 pub fn imported_objects(plan: &ImportPlan, lib: &Library, convert: &BTreeMap<String, String>) -> Vec<(String, Value)> {
     let names = plan.names();
-    plan.copied()
+    // Bases first, so each object is saved after the one it extends.
+    bases_first(&lib.objects)
         .into_iter()
+        .filter_map(|name| plan.copied().into_iter().find(|o| o.name == name))
         .map(|o| {
             let mut object = lib.objects[&o.name].clone();
             if let Some(to) = object.get("extends").and_then(Value::as_str).and_then(|b| names.get(b)) {

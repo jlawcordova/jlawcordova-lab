@@ -43,6 +43,10 @@
 | [`history restore`](#historyrestore) | Put the document (or one doc) back as it was after a version | writes files |
 | [`history show`](#historyshow) | Show a version: its edits and a diff of each file it changed | read |
 | [`history undo`](#historyundo) | Take back just what one version changed, keeping everything since | writes files |
+| [`library category`](#librarycategory) | Set or clear the category of objects in a .pixellib, in place | writes files |
+| [`library export`](#libraryexport) | Export the document's objects to a new .pixellib | writes files |
+| [`library import`](#libraryimport) | Import the objects of a .pixellib into the document, by copying | writes files |
+| [`library info`](#libraryinfo) | Show an object library: its objects, their categories and the colors they used | read |
 | [`object action`](#objectaction) | Add, change or delete an action of a sprite map layer | edit |
 | [`object ambient`](#objectambient) | Set or clear a sprite map layer's ambient loop | edit |
 | [`object animate`](#objectanimate) | Turn a still layer into one of the site's frame loops, or switch a loop's kind | edit |
@@ -67,7 +71,9 @@
 | [`object resize`](#objectresize) | Pad or crop a sprite's maps to a width and height (at the right and bottom) | edit |
 | [`object show`](#objectshow) | Show an object's kind, category, size, anchor, footprint, layers, frames, colors and extends | read |
 | [`object still`](#objectstill) | Turn a frame loop back into a still layer, keeping one frame | edit |
+| [`palette export`](#paletteexport) | Export the document's palette to a new .pixelpal file | writes files |
 | [`palette get`](#paletteget) | List the palette: every color name, hex and tier | read |
+| [`palette import`](#paletteimport) | Add the colors of a .pixelpal file the document doesn't have | edit |
 | [`scene action`](#sceneaction) | Add, change or delete a scene item's action: a one-shot move the page plays by name | edit |
 | [`scene ambient`](#sceneambient) | Set or clear a scene item's ambient loop: a move that repeats on its own | edit |
 | [`scene drop`](#scenedrop) | Drop an item onto whatever it stands over: down to the top of the block under it, or the ground | edit |
@@ -352,10 +358,10 @@ pixellab chat context harbor --items 45.0,46.0 --layers boats
 Validate the sources with the engine, all of them or one doc.
 
 ```
-pixellab check [name] [--kind <object|scene>]
+pixellab check [name] [--kind <object|scene>] [--library <text>]
 ```
 
-Problems are the engine's "<file>: <where>: <rule>" lines. With a name, only the problems in that doc and the files it uses (palette.json, the objects it places or extends) are listed. On the command line, the exit code is 1 when there are problems. Warnings don't fail the check, and each has a code. off_grid: a scene's key-to-key moves (the loop back to the first key included) whose steps aren't 1 px straight, 1:1 or 2:1, so the item jumps instead of walking the grid; scene.motion.path makes on-grid keys. out_of_order: a scene whose file lists its items out of depth order (it still publishes in depth order; scene.sort writes the file in order), with how many items would move. copies: a moving item that takes several places among the others as it moves is drawn once for each place in the SVG, which adds to its size; the warning says how many. cropped: a scene with a fixed viewBox paints pixels outside it, which the published SVG cuts off; the warning says how many (scene.frame --fit fits it to its content). empty: a scene with nothing in it and no viewBox, which publishes one tile around the origin.
+Problems are the engine's "<file>: <where>: <rule>" lines. With a name, only the problems in that doc and the files it uses (palette.json, the objects it places or extends) are listed. On the command line, the exit code is 1 when there are problems. Warnings don't fail the check, and each has a code. off_grid: a scene's key-to-key moves (the loop back to the first key included) whose steps aren't 1 px straight, 1:1 or 2:1, so the item jumps instead of walking the grid; scene.motion.path makes on-grid keys. out_of_order: a scene whose file lists its items out of depth order (it still publishes in depth order; scene.sort writes the file in order), with how many items would move. copies: a moving item that takes several places among the others as it moves is drawn once for each place in the SVG, which adds to its size; the warning says how many. cropped: a scene with a fixed viewBox paints pixels outside it, which the published SVG cuts off; the warning says how many (scene.frame --fit fits it to its content). empty: a scene with nothing in it and no viewBox, which publishes one tile around the origin. With library, it checks an object library instead (no document needed): its objects against the colors it recorded at export, extends resolving inside it, and categories.
 
 read-only · MCP tool `check`
 
@@ -363,11 +369,13 @@ read-only · MCP tool `check`
 | --- | --- | --- | --- |
 | `name` (positional) | string |  | an object or scene (or objects/<name>, scenes/<name>); every source when left out |
 | `--kind` | `object` \| `scene` |  | which kind name is, when both exist |
+| `--library` | string |  | check this .pixellib instead of the document: its objects against the colors it recorded, extends within it, categories |
 
 ```sh
 pixellab check
 pixellab check hero-island
 pixellab check objects/pine --json
+pixellab check --library ~/Art/explainer.pixellib
 ```
 
 ### doc
@@ -729,6 +737,101 @@ edits docs · writes files directly · MCP tool `history_undo`
 | --- | --- | --- | --- |
 | `version` (positional) | integer | required | the version's number (history.list) (at least 0) |
 | `--force` | boolean | default `false` | save even when the result has problems |
+
+### library
+
+#### library.category
+
+Set or clear the category of objects in a .pixellib, in place.
+
+```
+pixellab library category <library> <names…> [--category <text>] [--to <text>] [--clear]
+```
+
+Writes the library's object files in place, canonical, while holding a lock on the folder. A library has no undo and no history: it is a file, and this is the only way to edit one (no painting, adding or removing objects). The rules for a category are object.category's.
+
+edits docs · writes files directly · MCP tool `library_category`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `library` (positional) | string | required | the .pixellib folder |
+| `names` (positional) | list of string | required | the objects |
+| `--category` | any |  | the category as names, outermost first, or null to clear it |
+| `--to` | string |  | the category as a path: Nature/Trees or Nature › Trees |
+| `--clear` | boolean | default `false` | remove the category |
+
+```sh
+pixellab library category ~/Art/explainer.pixellib cat cat-white --to "Animals/Cats"
+```
+
+#### library.export
+
+Export the document's objects to a new .pixellib.
+
+```
+pixellab library export <to> [--objects <text,…>] [--category <text,…>] [--replace]
+```
+
+Copies all of the document's objects, the objects of one category and everything below it, or a named list into a package of the same object files, with a record of the palette colors they use (never read as a palette). Every object that a chosen one extends comes too, marked base: true in the result, so the library stands on its own. Writes a temp folder beside the target and renames it into place; refuses an existing library (exists) unless replace. The document doesn't change.
+
+edits docs · writes files directly · MCP tool `library_export`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `to` (positional) | string | required | the new library (.pixellib is added when missing) |
+| `--objects` | list of string |  | only these objects |
+| `--category` | list of string |  | only the objects in this category and below it: names outermost first, or a path such as Nature/Trees |
+| `--replace` | boolean | default `false` | replace a library that is already there |
+
+```sh
+pixellab library export ~/Art/everything.pixellib
+pixellab library export ~/Art/trees.pixellib --category Nature/Trees
+pixellab library export ~/Art/some.pixellib --objects pine,tree
+```
+
+#### library.import
+
+Import the objects of a .pixellib into the document, by copying.
+
+```
+pixellab library import <from> [--accept-differences] [--convert <json>] [--dry-run]
+```
+
+Copies the library's objects, with their categories, into the document; nothing links it to the library afterwards, and the same library can be imported again. An imported object whose name is taken gets the first free suffix (pine-2) and every extends in the import follows; the document's own objects are never renamed or changed. One that equals the document's same-named object, apart from its category, isn't copied (fate same). A library's character that differs from the document's isn't copied: its figures extend the document's character, which counts as a difference. The plan (dryRun returns it): objects with their fate (new, renamed, same, character), renames, differing colors, the character swap, and missing colors with each one's tier and the document's nearest color of that tier. Refusals, each carrying the plan in its details: differs (colors that differ from the library's record, or the character swap) unless acceptDifferences; missing_colors unless convert names a color for every missing one; wrong_tier when a conversion crosses tiers (an outfit color converts only to an outfit color); invalid when the library or the result doesn't pass check. An agent that hits differs or missing_colors asks the owner with chat_ask before accepting or converting. The import never changes the palette, the existing objects or the scenes. It is one version in the history (Imported 12 objects from explainer.pixellib), whose number is in the result, and one undo step: history_undo takes it back.
+
+edits docs · writes files directly · MCP tool `library_import`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `from` (positional) | string | required | the .pixellib folder |
+| `--accept-differences` | boolean | default `false` | import although colors differ from the library's record, or its character differs |
+| `--convert` | object |  | for each color the document lacks, the document's color of the same tier to use instead: {"wood-5": "wood-3"} |
+| `--dry-run` | boolean | default `false` | return the plan and change nothing |
+
+```sh
+pixellab library import ~/Art/explainer.pixellib --dry-run
+pixellab library import ~/Art/explainer.pixellib --accept-differences --convert '{"wood-5":"wood-3"}'
+```
+
+#### library.info
+
+Show an object library: its objects, their categories and the colors they used.
+
+```
+pixellab library info <library>
+```
+
+Lists each object (name, kind, extends, category), the distinct categories with how many objects each holds, the colors recorded at export (never a palette) and the problems check --library finds. Needs no document.
+
+read-only · MCP tool `library_info`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `library` (positional) | string | required | the .pixellib folder |
+
+```sh
+pixellab library info ~/Art/explainer.pixellib
+```
 
 ### object
 
@@ -1204,6 +1307,27 @@ edits docs · MCP tool `object_still`
 
 ### palette
 
+#### palette.export
+
+Export the document's palette to a new .pixelpal file.
+
+```
+pixellab palette export <to> [--replace]
+```
+
+Writes the whole palette (world and outfit tiers, names, values and color notes) as one JSON file, with a format and kind line naming it a palette. Refuses an existing file (exists) unless replace. The document doesn't change.
+
+edits docs · writes files directly · MCP tool `palette_export`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `to` (positional) | string | required | the new palette file (.pixelpal is added when missing) |
+| `--replace` | boolean | default `false` | replace a file that is already there |
+
+```sh
+pixellab palette export ~/Art/coast.pixelpal
+```
+
 #### palette.get
 
 List the palette: every color name, hex and tier.
@@ -1215,6 +1339,31 @@ pixellab palette get
 World colors are for every object; outfit colors only for objects that extend character.
 
 read-only · MCP tool `palette_get`
+
+#### palette.import
+
+Add the colors of a .pixelpal file the document doesn't have.
+
+```
+pixellab palette import <from> [--keep <text,…>] [--use-theirs <text,…>] [--only <text,…>] [--dry-run]
+```
+
+Adds each color the document doesn't have, by name, to its tier at the end of it, with the file's note for it. It never removes a color; a color with the same name and value is left alone. A name the document has with another value is listed as differing, and the import refuses (palette_differs) until each is in keep or useTheirs; a name that is in the other tier in the file is listed in otherTier and stays as the document has it. When adding would pass a tier's cap (32 world colors, 16 outfit colors) nothing is added: it refuses (palette_full) saying how many colors are over, and only narrows the import to a chosen list. dryRun returns the plan. One edit, one undo step and one version (Imported 4 colors from coast.pixelpal). An agent that hits palette_differs asks the owner with chat_ask before choosing.
+
+edits docs · MCP tool `palette_import`
+
+| param | type | | description |
+| --- | --- | --- | --- |
+| `from` (positional) | string | required | the .pixelpal file |
+| `--keep` | list of string |  | colors that differ: keep the document's value |
+| `--use-theirs` | list of string |  | colors that differ: take the file's value (changes how every object using it looks) |
+| `--only` | list of string |  | add only these new colors |
+| `--dry-run` | boolean | default `false` | return the plan and change nothing |
+
+```sh
+pixellab palette import ~/Art/coast.pixelpal --dry-run
+pixellab palette import ~/Art/coast.pixelpal --keep wood-3
+```
 
 ### scene
 
